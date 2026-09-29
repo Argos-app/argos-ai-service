@@ -29,22 +29,21 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
-# ─────────────────────────────────────────────
-# Java / Maven / Gradle
-# ─────────────────────────────────────────────
-target/
-*.class
-*.jar
-*.war
-*.ear
-*.nar
-hs_err_pid*
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+.coverage
+coverage.xml
+htmlcov/
+reports/
+*.egg-info/
 
-.gradle/
-gradle-app.setting
-!gradle-wrapper.jar
-!gradle-wrapper.properties
-build/
+
 
 # ─────────────────────────────────────────────
 # VS Code

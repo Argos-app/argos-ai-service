@@ -24,14 +24,6 @@
       }
     },
     {
-      "files": ["*.java"],
-      "options": {
-        "parser": "java",
-        "tabWidth": 4,
-        "printWidth": 120
-      }
-    },
-    {
       "files": ["*.json", "*.jsonc"],
       "options": {
         "useTabs": false,
