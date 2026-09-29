@@ -13,21 +13,23 @@ outros repositórios.
 Os agentes são acionados conforme a solicitação; não executam todos a cada
 mensagem. O sistema principal usa FastAPI, LangGraph e LangChain.
 
-| Agente           | Função                                                                                                                                 |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Fazenda          | Consulta aplicações, lotes, bovinos em exceção e carências. Sempre consulta o MCP de dados para responder.                             |
-| Doutor           | Consulta informações documentadas sobre medicamentos no MCP de dados. Apresenta fontes e limites; não substitui avaliação veterinária. |
-| Analista         | Solicita cálculos e previsões ao MCP de predição e explica resultados, premissas e limitações.                                         |
-| Secretário       | Organiza dados da fazenda e solicita geração e envio de relatórios ao MCP de e-mail.                                                   |
-| Informações      | Responde questões gerais e encaminha perguntas documentais ou legais especializadas ao A2A.                                            |
-| Orquestrador     | Consolida os resultados, identifica lacunas e solicita complementações dentro dos limites do fluxo.                                    |
-| Juiz             | Verifica se as afirmações têm apoio nas fontes e sinaliza inconsistências ou necessidade de revisão.                                   |
-| Documental — A2A | Consulta termos, condições e FAQs nos PDFs atuais indexados no Qdrant.                                                                 |
-| Legal — A2A      | Responde com base nas fontes legais disponíveis, indicando jurisdição, datas e limitações.                                             |
+| Agente                  | Função                                                                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Fazenda                 | Consulta aplicações, lotes, bovinos em exceção e carências. Sempre consulta o MCP de dados para responder.                             |
+| Doutor                  | Consulta informações documentadas sobre medicamentos no MCP de dados. Apresenta fontes e limites; não substitui avaliação veterinária. |
+| Analista                | Solicita cálculos e previsões ao MCP de predição e explica resultados, premissas e limitações.                                         |
+| Secretário              | Organiza dados da fazenda e solicita geração e envio de relatórios ao MCP de e-mail.                                                   |
+| Informações             | Responde questões gerais e encaminha perguntas documentais ou legais especializadas ao A2A.                                            |
+| Orquestrador            | Consolida os resultados, identifica lacunas e solicita complementações dentro dos limites do fluxo.                                    |
+| Juiz                    | Verifica se as afirmações têm apoio nas fontes e sinaliza inconsistências ou necessidade de revisão.                                   |
+| Formatador de perguntas | Transforma informações faltantes em perguntas de esclarecimento, em texto ou com opções para o aplicativo.                             |
+| Documental — A2A        | Consulta termos, condições e FAQs nos PDFs atuais indexados no Qdrant.                                                                 |
+| Legal — A2A             | Responde com base nas fontes legais disponíveis, indicando jurisdição, datas e limitações.                                             |
 
 Autenticação, anonimização por regex, validações, cálculos, renderização e envio
-não são agentes com LLM. O roteador seleciona especialistas; o formatador produz
-perguntas em texto ou com opções para o aplicativo.
+não são agentes com LLM. O Roteador seleciona especialistas; o **agente
+Formatador de perguntas** produz perguntas em texto ou com opções para o
+aplicativo e permite retomar a sessão após a resposta do usuário.
 
 ## MCPs
 
@@ -94,7 +96,7 @@ flowchart TD
     Guard -->|Não ou falha| Safe[Finalização segura sem ferramentas de negócio]
     Guard -->|Sim| Route[Roteador]
     Route --> Missing{Faltam informações?}
-    Missing -->|Sim| Question[Formatar pergunta e salvar estado]
+    Missing -->|Sim| Question[Agente Formatador de perguntas]
     Question --> Wait[Aguardar resposta do usuário]
     Wait --> Auth
     Missing -->|Não| Specialists[Executar especialistas necessários]
@@ -122,4 +124,5 @@ flowchart TD
 Tarefas independentes podem executar em paralelo. O fluxo limita chamadas,
 iterações, tempo e custo. A resposta a uma pergunta retoma a sessão após nova
 validação de acesso; falhas não são apresentadas como dados ou operações
-bem-sucedidas.
+bem-sucedidas. Ao atingir um limite, o controle determinístico encerra a
+execução com conteúdo já validado ou uma mensagem segura.
