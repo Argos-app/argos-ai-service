@@ -1,6 +1,5 @@
-from langgraph.graph import MessagesState
-
 from app.agent_schemas.results import JudgeResult, SpecialistResult
+from langgraph.graph import MessagesState
 
 
 class AgentState(MessagesState):

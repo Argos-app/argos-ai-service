@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 
+
 class SourceReference(BaseModel):
     title: str
     reference: str
