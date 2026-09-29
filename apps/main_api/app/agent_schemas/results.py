@@ -9,7 +9,7 @@ class SourceReference(BaseModel):
 
 class SpecialistResult(BaseModel):
     agent: str
-    status: str  
+    status: str
     answer: str = ""
     sources: list[SourceReference] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
@@ -17,6 +17,6 @@ class SpecialistResult(BaseModel):
 
 
 class JudgeResult(BaseModel):
-    decision: str  
+    decision: str
     reason: str
     unsupported_claims: list[str] = Field(default_factory=list)
