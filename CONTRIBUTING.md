@@ -71,6 +71,12 @@ pip-audit -r requirements-dev.txt
 npm run format:check
 ```
 
+Com a `.venv` ativada, execute os testes Python:
+
+```bash
+python -m pytest -q -p no:cacheprovider
+```
+
 Para corrigir formatação Python:
 
 ```bash
