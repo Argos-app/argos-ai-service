@@ -1,0 +1,1 @@
+"""Dependências agrupadas por responsabilidade."""
