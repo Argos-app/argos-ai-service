@@ -1,20 +1,21 @@
-from app.agents.mock_tools import (
+from langchain.agents import create_agent
+
+from apps.main_api.app.agents.mock_tools import (
     MOCK_ANALYST_TOOLS,
     MOCK_DOCTOR_TOOLS,
     MOCK_FARM_TOOLS,
     MOCK_INFORMATION_TOOLS,
     MOCK_SECRETARY_TOOLS,
 )
-from app.llms import llm_especialista, llm_rapido
-from app.prompts.router import ROUTER_SYSTEM_PROMPT
-from app.prompts.specialists import (
+from apps.main_api.app.llms import llm_especialista, llm_rapido
+from apps.main_api.app.prompts.router import ROUTER_SYSTEM_PROMPT
+from apps.main_api.app.prompts.specialists import (
     ANALYST_SYSTEM_PROMPT,
     DOCTOR_SYSTEM_PROMPT,
     FARM_SYSTEM_PROMPT,
     INFORMATION_SYSTEM_PROMPT,
     SECRETARY_SYSTEM_PROMPT,
 )
-from langchain.agents import create_agent
 
 router_app = create_agent(
     model=llm_rapido,
