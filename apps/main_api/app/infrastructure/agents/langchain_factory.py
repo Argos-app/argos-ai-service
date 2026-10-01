@@ -6,16 +6,49 @@ from typing import Any
 
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
 from app.ports.agent import Agent, AgentId
-from langchain.agents import create_agent
 from pydantic import BaseModel, ValidationError
 
 
 class AgentFactoryConfigurationError(RuntimeError):
-    """Dependência necessária para montar um agente ausente ou inconsistente."""
+    """Configuração ausente ou incompatível com o Registry."""
 
 
 class AgentResponseError(RuntimeError):
-    """O agente não retornou uma saída compatível com o schema registrado."""
+    """O agente não retornou uma saída compatível com seu schema."""
+
+
+def validate_agent_configuration(
+    registry: AgentRegistry,
+    models: Mapping[ModelPolicyId, Any],
+    agent_id: AgentId,
+    prompt: str,
+    tools: list[Any],
+    output_schema: type[BaseModel],
+) -> None:
+    """Confere a configuração concreta usada no create_agent."""
+    definition = registry.get(agent_id)
+
+    if models.get(definition.model_policy) is None:
+        raise AgentFactoryConfigurationError(
+            f"Modelo não configurado para a política {definition.model_policy.value}"
+        )
+
+    if (definition.prompt_key, definition.prompt_version) != (agent_id.value, "1"):
+        raise AgentFactoryConfigurationError(
+            f"Referência de prompt incompatível para {agent_id.value}"
+        )
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise AgentFactoryConfigurationError(f"Prompt não configurado para {agent_id.value}")
+
+    actual_tool_names = tuple(getattr(tool, "name", None) for tool in tools)
+    if actual_tool_names != definition.tool_names:
+        raise AgentFactoryConfigurationError(
+            f"Ferramentas de {agent_id.value} não correspondem ao Registry"
+        )
+
+    if output_schema is not definition.output_schema:
+        raise AgentFactoryConfigurationError(f"Schema de saída incompatível para {agent_id.value}")
 
 
 class _LangChainAgent(Agent[Any, BaseModel]):
@@ -24,8 +57,15 @@ class _LangChainAgent(Agent[Any, BaseModel]):
         self._input_schema = definition.input_schema
         self._output_schema = definition.output_schema
 
-    async def run(self, input: Any) -> BaseModel:
+    async def run(
+        self,
+        input: Any,
+        *,
+        context: Mapping[str, str] | None = None,
+    ) -> BaseModel:
         validated_input = self._input_schema.model_validate(input)
+        config = {"configurable": dict(context)} if context is not None else None
+
         result = await self._runnable.ainvoke(
             {
                 "messages": [
@@ -34,7 +74,8 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                         "content": validated_input.model_dump_json(),
                     }
                 ]
-            }
+            },
+            config=config,
         )
         if not isinstance(result, Mapping):
             raise AgentResponseError("LangChain retornou um estado inválido")
@@ -48,59 +89,22 @@ class _LangChainAgent(Agent[Any, BaseModel]):
 
 
 class LangChainAgentFactory:
-    """Resolve definições do Registry e monta agentes sem estado de sessão."""
+    """Guarda os agentes criados e os entrega pelo ID registrado."""
 
     def __init__(
         self,
         registry: AgentRegistry,
-        models: Mapping[ModelPolicyId, Any],
-        prompts: Mapping[tuple[str, str], str],
-        tools: Mapping[str, Any],
+        runnables: Mapping[AgentId, Any],
     ) -> None:
         self._registry = registry
-        self._models = MappingProxyType(dict(models))
-        self._prompts = MappingProxyType(dict(prompts))
-        self._tools = MappingProxyType(dict(tools))
+        self._runnables = MappingProxyType(dict(runnables))
 
     def create(self, agent_id: AgentId) -> Agent[Any, Any]:
         definition = self._registry.get(agent_id)
-        model = self._models.get(definition.model_policy)
-        if model is None:
+        runnable = self._runnables.get(definition.agent_id)
+        if runnable is None:
             raise AgentFactoryConfigurationError(
-                f"Modelo não configurado para a política {definition.model_policy.value}"
+                f"Agente não configurado: {definition.agent_id.value}"
             )
-
-        prompt_ref = (definition.prompt_key, definition.prompt_version)
-        prompt = self._prompts.get(prompt_ref)
-        if not isinstance(prompt, str) or not prompt.strip():
-            raise AgentFactoryConfigurationError(
-                f"Prompt não configurado: {definition.prompt_key}@{definition.prompt_version}"
-            )
-
-        missing_tools = set(definition.tool_names) - self._tools.keys()
-        if missing_tools:
-            names = ", ".join(sorted(missing_tools))
-            raise AgentFactoryConfigurationError(f"Ferramentas não configuradas: {names}")
-
-        tools = [self._tools[name] for name in definition.tool_names]
-        for name, tool in zip(definition.tool_names, tools, strict=True):
-            actual_name = getattr(tool, "name", None)
-            if actual_name != name:
-                raise AgentFactoryConfigurationError(
-                    f"Ferramenta registrada como {name!r}, mas implementação declara "
-                    f"{actual_name!r}"
-                )
-
-        try:
-            runnable = create_agent(
-                model=model,
-                tools=tools,
-                system_prompt=prompt,
-                response_format=definition.output_schema,
-            )
-        except Exception as exc:
-            raise AgentFactoryConfigurationError(
-                f"Não foi possível montar o agente {definition.agent_id.value}"
-            ) from exc
 
         return _LangChainAgent(runnable, definition)
