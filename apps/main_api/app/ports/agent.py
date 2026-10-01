@@ -1,5 +1,6 @@
 """Contratos estáveis para identificar e executar agentes."""
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Protocol, TypeVar
 
@@ -25,4 +26,9 @@ OutputT = TypeVar("OutputT", covariant=True)
 class Agent(Protocol[InputT, OutputT]):
     """Interface assíncrona para executar um agente tipado."""
 
-    async def run(self, input: InputT) -> OutputT: ...
+    async def run(
+        self,
+        input: InputT,
+        *,
+        context: Mapping[str, str] | None = None,
+    ) -> OutputT: ...
