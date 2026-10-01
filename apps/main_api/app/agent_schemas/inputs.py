@@ -1,0 +1,65 @@
+"""Schemas tipados usados como entradas dos agentes."""
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class _AgentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+
+class PseudonymizedInput(_AgentInput):
+    """Mensagem já pseudonimizada que pode seguir para o fluxo de agentes."""
+
+    message: str = Field(min_length=1)
+
+
+class RouterInput(_AgentInput):
+    """Informação mínima para o roteador decompor e encaminhar uma solicitação."""
+
+    message: str = Field(min_length=1)
+
+
+class SpecialistInput(_AgentInput):
+    """Tarefa sanitizada encaminhada pelo roteador a um agente especialista."""
+
+    task_id: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    brief_sanitized: str = Field(min_length=1)
+    context_refs: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
+    required_evidence: tuple[str, ...] = ()
+
+
+class QuestionOption(_AgentInput):
+    """Opção já autorizada pelo fluxo para uma pergunta de escolha."""
+
+    option_id: str = Field(min_length=1, max_length=128)
+    label: str = Field(min_length=1)
+
+
+class QuestionFormattingRequest(_AgentInput):
+    """Intenção e estrutura aprovada que o formatador deve converter em pergunta."""
+
+    reason_code: str = Field(min_length=1)
+    input_type: Literal["free_text", "single_choice", "confirmation"]
+    question_goal: str = Field(min_length=1)
+    options: tuple[QuestionOption, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_options(self) -> QuestionFormattingRequest:
+        if self.input_type == "single_choice" and not self.options:
+            raise ValueError("single_choice exige pelo menos uma opção")
+        if self.input_type != "single_choice" and self.options:
+            raise ValueError("opções só são permitidas para single_choice")
+        option_ids = [option.option_id for option in self.options]
+        if len(option_ids) != len(set(option_ids)):
+            raise ValueError("option_id deve ser único dentro da pergunta")
+        return self
+
+
+class QuestionFormatterInput(_AgentInput):
+    """Entrada do agente que redige a pergunta para apresentação ao usuário."""
+
+    request: QuestionFormattingRequest
