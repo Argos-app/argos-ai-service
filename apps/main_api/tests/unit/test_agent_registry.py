@@ -25,16 +25,15 @@ def test_default_registry_contains_routable_agents_and_question_formatter() -> N
             AgentId.ANALYST,
             AgentId.SECRETARY,
             AgentId.INFORMATION,
+            AgentId.ORCHESTRATOR,
+            AgentId.JUDGE,
             AgentId.QUESTION_FORMATTER,
         }
     )
     assert DEFAULT_AGENT_REGISTRY.get(AgentId.QUESTION_FORMATTER).tool_names == ()
 
 
-def test_registry_rejects_known_ids_without_definitions() -> None:
-    with pytest.raises(AgentNotRegisteredError):
-        DEFAULT_AGENT_REGISTRY.get(AgentId.JUDGE)
-
+def test_registry_rejects_unknown_ids() -> None:
     with pytest.raises(AgentNotRegisteredError):
         DEFAULT_AGENT_REGISTRY.get("made_up_agent")
 

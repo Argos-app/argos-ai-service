@@ -1,5 +1,3 @@
-"""Catálogo validado das definições de agentes do serviço principal."""
-
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -11,9 +9,15 @@ from app.agent_schemas.inputs import (
     SpecialistInput,
 )
 from app.agent_schemas.results import (
+    JudgeResult,
     QuestionFormatterResult,
     RoutePlan,
     SpecialistResult,
+)
+from app.agent_schemas.synthesis import (
+    JudgeInput,
+    OrchestratorInput,
+    OrchestratorResult,
 )
 from app.ports.agent import AgentId
 from pydantic import BaseModel
@@ -28,6 +32,8 @@ class ModelPolicyId(StrEnum):
     ANALYST = "analyst"
     SECRETARY = "secretary"
     INFORMATION = "information"
+    ORCHESTRATOR = "orchestrator"
+    JUDGE = "judge"
     QUESTION_FORMATTER = "question_formatter"
 
 
@@ -55,6 +61,8 @@ _EXPECTED_SCHEMAS: dict[AgentId, tuple[type[BaseModel], type[BaseModel]]] = {
     AgentId.ANALYST: (SpecialistInput, SpecialistResult),
     AgentId.SECRETARY: (SpecialistInput, SpecialistResult),
     AgentId.INFORMATION: (SpecialistInput, SpecialistResult),
+    AgentId.ORCHESTRATOR: (OrchestratorInput, OrchestratorResult),
+    AgentId.JUDGE: (JudgeInput, JudgeResult),
     AgentId.QUESTION_FORMATTER: (QuestionFormatterInput, QuestionFormatterResult),
 }
 
@@ -65,6 +73,8 @@ _ALLOWED_TOOLS: dict[AgentId, frozenset[str]] = {
     AgentId.ANALYST: frozenset({"mock_calcular_previsao"}),
     AgentId.SECRETARY: frozenset({"mock_consultar_fazenda", "mock_preparar_relatorio"}),
     AgentId.INFORMATION: frozenset({"mock_consultar_documental"}),
+    AgentId.ORCHESTRATOR: frozenset(),
+    AgentId.JUDGE: frozenset(),
     AgentId.QUESTION_FORMATTER: frozenset(),
 }
 
@@ -75,6 +85,8 @@ _EXPECTED_MODEL_POLICIES: dict[AgentId, ModelPolicyId] = {
     AgentId.ANALYST: ModelPolicyId.ANALYST,
     AgentId.SECRETARY: ModelPolicyId.SECRETARY,
     AgentId.INFORMATION: ModelPolicyId.INFORMATION,
+    AgentId.ORCHESTRATOR: ModelPolicyId.ORCHESTRATOR,
+    AgentId.JUDGE: ModelPolicyId.JUDGE,
     AgentId.QUESTION_FORMATTER: ModelPolicyId.QUESTION_FORMATTER,
 }
 
@@ -209,6 +221,24 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             output_schema=SpecialistResult,
             tool_names=("mock_consultar_documental",),
             model_policy=ModelPolicyId.INFORMATION,
+        ),
+        AgentDefinition(
+            agent_id=AgentId.ORCHESTRATOR,
+            prompt_key="orchestrator",
+            prompt_version="1",
+            input_schema=OrchestratorInput,
+            output_schema=OrchestratorResult,
+            tool_names=(),
+            model_policy=ModelPolicyId.ORCHESTRATOR,
+        ),
+        AgentDefinition(
+            agent_id=AgentId.JUDGE,
+            prompt_key="judge",
+            prompt_version="1",
+            input_schema=JudgeInput,
+            output_schema=JudgeResult,
+            tool_names=(),
+            model_policy=ModelPolicyId.JUDGE,
         ),
         AgentDefinition(
             agent_id=AgentId.QUESTION_FORMATTER,
