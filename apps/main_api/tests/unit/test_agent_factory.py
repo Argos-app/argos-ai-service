@@ -10,8 +10,10 @@ from pydantic import ValidationError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.agent_schemas.inputs import SpecialistInput
-from app.agent_schemas.results import QuestionFormatterResult, SpecialistResult
+from app.agent_schemas.results import JudgeResult, QuestionFormatterResult, SpecialistResult
+from app.agent_schemas.synthesis import OrchestratorResult
 from app.agents import specialists
+from app.agents.mock_tools import mock_consultar_fazenda
 from app.agents.registry import ModelPolicyId
 from app.agents.specialists import build_agent_factory
 from app.infrastructure.agents import langchain_factory
@@ -53,7 +55,7 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
     monkeypatch.setattr(specialists, "create_agent", fake_create_agent)
     factory = build_agent_factory(_models())
 
-    assert len(calls) == 7
+    assert len(calls) == 9
     farm_call = next(
         call
         for call in calls
@@ -61,6 +63,8 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
     )
     assert farm_call["system_prompt"]
     assert farm_call["response_format"] is SpecialistResult
+    assert any(call["response_format"] is OrchestratorResult for call in calls)
+    assert any(call["response_format"] is JudgeResult for call in calls)
 
     agent = factory.create(AgentId.FARM)
     result = await agent.run(
@@ -134,3 +138,33 @@ async def test_agent_passes_context_to_runnable(monkeypatch) -> None:
             "session_id": "session-demo",
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_farm_agent_adapter_can_call_mock_tool_with_farm_context(monkeypatch) -> None:
+    class ToolCallingFakeRunnable:
+        async def ainvoke(
+            self,
+            state: dict[str, Any],
+            config: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            assert state["messages"]
+            answer = mock_consultar_fazenda.invoke({"consulta": "aplicações"}, config=config)
+            return {
+                "structured_response": SpecialistResult(
+                    agent="farm", status="success", answer=answer
+                )
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: ToolCallingFakeRunnable())
+    agent = build_agent_factory(_models()).create(AgentId.FARM)
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="task-1", goal="Consultar aplicações", brief_sanitized="Consultar registros"
+        ),
+        context={"farm_id": "farm-demo"},
+    )
+
+    assert "SIMULAÇÃO" in result.answer
+    assert "mock://farm-demo/aplicacoes/1" in result.answer

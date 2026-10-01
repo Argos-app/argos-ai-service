@@ -1,13 +1,13 @@
-"""Criação explícita dos agentes do serviço."""
-
 from collections.abc import Mapping
 from typing import Any
 
 from app.agent_schemas.results import (
+    JudgeResult,
     QuestionFormatterResult,
     RoutePlan,
     SpecialistResult,
 )
+from app.agent_schemas.synthesis import OrchestratorResult
 from app.agents.mock_tools import (
     MOCK_ANALYST_TOOLS,
     MOCK_DOCTOR_TOOLS,
@@ -21,6 +21,8 @@ from app.infrastructure.agents.langchain_factory import (
     validate_agent_configuration,
 )
 from app.ports.agent import AgentId
+from app.prompts.judge import JUDGE_SYSTEM_PROMPT
+from app.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from app.prompts.question_formatter import QUESTION_FORMATTER_SYSTEM_PROMPT
 from app.prompts.router import ROUTER_SYSTEM_PROMPT
 from app.prompts.specialists import (
@@ -46,6 +48,8 @@ def build_agent_factory(
         (AgentId.ANALYST, ANALYST_SYSTEM_PROMPT, MOCK_ANALYST_TOOLS, SpecialistResult),
         (AgentId.SECRETARY, SECRETARY_SYSTEM_PROMPT, MOCK_SECRETARY_TOOLS, SpecialistResult),
         (AgentId.INFORMATION, INFORMATION_SYSTEM_PROMPT, MOCK_INFORMATION_TOOLS, SpecialistResult),
+        (AgentId.ORCHESTRATOR, ORCHESTRATOR_SYSTEM_PROMPT, [], OrchestratorResult),
+        (AgentId.JUDGE, JUDGE_SYSTEM_PROMPT, [], JudgeResult),
         (
             AgentId.QUESTION_FORMATTER,
             QUESTION_FORMATTER_SYSTEM_PROMPT,
@@ -106,6 +110,20 @@ def build_agent_factory(
         response_format=SpecialistResult,
     )
 
+    orchestrator_app = create_agent(
+        model=models[ModelPolicyId.ORCHESTRATOR],
+        tools=[],
+        system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
+        response_format=OrchestratorResult,
+    )
+
+    judge_app = create_agent(
+        model=models[ModelPolicyId.JUDGE],
+        tools=[],
+        system_prompt=JUDGE_SYSTEM_PROMPT,
+        response_format=JudgeResult,
+    )
+
     question_formatter_app = create_agent(
         model=models[ModelPolicyId.QUESTION_FORMATTER],
         tools=[],
@@ -122,6 +140,8 @@ def build_agent_factory(
             AgentId.ANALYST: analyst_app,
             AgentId.SECRETARY: secretary_app,
             AgentId.INFORMATION: information_app,
+            AgentId.ORCHESTRATOR: orchestrator_app,
+            AgentId.JUDGE: judge_app,
             AgentId.QUESTION_FORMATTER: question_formatter_app,
         },
     )

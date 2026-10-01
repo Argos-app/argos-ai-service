@@ -21,6 +21,14 @@ class RouterInput(_AgentInput):
     message: str = Field(min_length=1)
 
 
+class DependencyResult(_AgentInput):
+    """Resultado anterior disponibilizado a uma tarefa dependente."""
+
+    task_id: str = Field(min_length=1)
+    answer: str
+    source_references: tuple[str, ...] = ()
+
+
 class SpecialistInput(_AgentInput):
     """Tarefa sanitizada encaminhada pelo roteador a um agente especialista."""
 
@@ -30,6 +38,7 @@ class SpecialistInput(_AgentInput):
     context_refs: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
     required_evidence: tuple[str, ...] = ()
+    dependency_results: tuple[DependencyResult, ...] = ()
 
 
 class QuestionOption(_AgentInput):

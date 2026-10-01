@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from app.agent_schemas.inputs import QuestionFormattingRequest
 from app.ports.agent import AgentId
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _AgentOutput(BaseModel):
@@ -62,6 +62,12 @@ class JudgeResult(_AgentOutput):
     decision: JudgeDecision
     reason: str = Field(min_length=1)
     unsupported_claims: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_approval(self) -> JudgeResult:
+        if self.decision == JudgeDecision.APPROVED and self.unsupported_claims:
+            raise ValueError("approved não pode conter afirmações sem fonte")
+        return self
 
 
 class RouteTask(_AgentOutput):
