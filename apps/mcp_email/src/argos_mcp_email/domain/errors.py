@@ -29,3 +29,11 @@ class InvalidDispatchTransitionError(DomainError):
 
 class IdempotencyConflictError(DomainError):
     code = "idempotency_conflict"
+
+
+class SourceVerificationError(DomainError):
+    code = "source_verification_failed"
+
+
+class RecipientDirectoryError(DomainError):
+    code = "recipient_directory_failed"
