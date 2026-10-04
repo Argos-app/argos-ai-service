@@ -3,9 +3,9 @@
 from collections.abc import Mapping
 from typing import Any
 
-from argos_mcp_email.application import PrepareReport
+from argos_mcp_email.application import GetReportStatus, PrepareReport, SendReport
 from argos_mcp_email.settings import Settings
-from packages.contracts import PrepareReportRequest
+from packages.contracts import PrepareReportRequest, ReportStatusRequest, SendReportRequest
 
 
 class ServiceAuthenticationError(Exception):
@@ -26,8 +26,16 @@ class ServiceAuthenticator:
 class McpEmailServer:
     """Facade autenticada usada pelo transporte MCP."""
 
-    def __init__(self, prepare_report: PrepareReport, settings: Settings) -> None:
+    def __init__(
+        self,
+        prepare_report: PrepareReport,
+        settings: Settings,
+        send_report: SendReport | None = None,
+        get_report_status: GetReportStatus | None = None,
+    ) -> None:
         self._prepare_report = prepare_report
+        self._send_report = send_report
+        self._get_report_status = get_report_status
         self._authenticator = ServiceAuthenticator(settings.internal_service_token)
 
     async def prepare_report_tool(
@@ -39,6 +47,24 @@ class McpEmailServer:
         self._authenticator.verify(authorization)
         request = PrepareReportRequest.model_validate(payload)
         return (await self._prepare_report.execute(request)).model_dump(mode="json")
+
+    async def send_report_tool(
+        self, payload: Mapping[str, Any], *, authorization: str | None
+    ) -> dict[str, Any]:
+        self._authenticator.verify(authorization)
+        if self._send_report is None:
+            raise RuntimeError("tool de envio não configurada")
+        request = SendReportRequest.model_validate(payload)
+        return (await self._send_report.execute(request)).model_dump(mode="json")
+
+    async def get_report_status_tool(
+        self, payload: Mapping[str, Any], *, authorization: str | None
+    ) -> dict[str, Any]:
+        self._authenticator.verify(authorization)
+        if self._get_report_status is None:
+            raise RuntimeError("tool de consulta de estado não configurada")
+        request = ReportStatusRequest.model_validate(payload)
+        return (await self._get_report_status.execute(request)).model_dump(mode="json")
 
 
 def create_mcp_server(service: McpEmailServer) -> Any:
@@ -56,5 +82,17 @@ def create_mcp_server(service: McpEmailServer) -> Any:
         """Valida e prepara um relatório para os destinatários informados."""
 
         return await service.prepare_report_tool(payload, authorization=authorization)
+
+    @mcp.tool()
+    async def send_report(payload: dict[str, Any], authorization: str) -> dict[str, Any]:
+        """Envia um relatório previamente preparado."""
+
+        return await service.send_report_tool(payload, authorization=authorization)
+
+    @mcp.tool()
+    async def get_report_status(payload: dict[str, Any], authorization: str) -> dict[str, Any]:
+        """Consulta o estado de uma operação de envio."""
+
+        return await service.get_report_status_tool(payload, authorization=authorization)
 
     return mcp

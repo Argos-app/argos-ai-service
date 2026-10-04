@@ -8,7 +8,7 @@ from argos_mcp_email.adapters.recipients import RelationalRecipientDirectory
 from argos_mcp_email.adapters.rendering import TemplateReportRenderer
 from argos_mcp_email.adapters.source_verification import SignedPayloadVerifier
 from argos_mcp_email.adapters.storage import MongoReportRepository
-from argos_mcp_email.application import PrepareReport, SendReport
+from argos_mcp_email.application import GetReportStatus, PrepareReport, SendReport
 from argos_mcp_email.settings import Settings
 
 
@@ -57,3 +57,7 @@ def build_send_report(
         mail_provider=provider,
         sender=settings.no_reply_address,
     )
+
+
+def build_get_report_status(*, dispatch_repository: Any) -> GetReportStatus:
+    return GetReportStatus(dispatch_repository=dispatch_repository)
