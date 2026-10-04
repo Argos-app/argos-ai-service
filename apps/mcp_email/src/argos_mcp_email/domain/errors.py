@@ -11,6 +11,10 @@ class ReportNotFoundError(DomainError):
     code = "report_not_found"
 
 
+class ReportAlreadyExistsError(DomainError):
+    code = "report_already_exists"
+
+
 class ReportExpiredError(DomainError):
     code = "report_expired"
 
