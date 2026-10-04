@@ -7,6 +7,9 @@ from argos_mcp_email.domain.models import DispatchRecord, DispatchState
 
 
 class DispatchRepository(Protocol):
+    async def ensure_indexes(self) -> None:
+        """Garante unicidade da chave de idempotência no armazenamento."""
+
     async def find_by_idempotency_key(self, key: str) -> DispatchRecord | None:
         """Busca operação existente para uma chave de idempotência."""
 
