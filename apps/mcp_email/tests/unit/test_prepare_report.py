@@ -44,6 +44,7 @@ def source() -> LotReportEnvelope:
         ),
         principal_user_id=REQUESTER,
         authorized_property_ids=(uuid4(),),
+        valid_until=datetime(2026, 10, 10, tzinfo=UTC),
         payload_hash="sha256:lot-report",
         signature="signature",
         signature_key_id="mcp-data-key-1",

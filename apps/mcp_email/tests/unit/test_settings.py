@@ -9,3 +9,16 @@ def test_settings_reads_no_reply_and_smtp(monkeypatch):
 
     assert settings.no_reply_address == "no-reply@argos.com"
     assert settings.smtp_host == "smtp.example.com"
+
+
+def test_settings_reads_trusted_signature_keys(monkeypatch):
+    monkeypatch.setenv(
+        "MCP_EMAIL_TRUSTED_SIGNATURE_KEYS",
+        '{"mcp-data-key-1":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="}',
+    )
+
+    settings = Settings.from_env()
+
+    assert settings.trusted_signature_keys == (
+        ("mcp-data-key-1", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="),
+    )
