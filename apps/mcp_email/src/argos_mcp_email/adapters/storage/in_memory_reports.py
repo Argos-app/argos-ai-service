@@ -7,8 +7,7 @@ técnico persistente do MCP ainda não foi escolhido.
 import asyncio
 from uuid import UUID
 
-from argos_mcp_email.domain.errors import ReportAlreadyExistsError
-from argos_mcp_email.domain.models import PreparedReportRecord
+from argos_mcp_email.domain import PreparedReportRecord, ReportAlreadyExistsError
 
 
 class InMemoryReportRepository:

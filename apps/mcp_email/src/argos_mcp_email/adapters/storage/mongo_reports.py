@@ -4,8 +4,12 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from argos_mcp_email.domain.errors import ReportAlreadyExistsError
-from argos_mcp_email.domain.models import PreparedReportRecord, ReportState, ResolvedRecipient
+from argos_mcp_email.domain import (
+    PreparedReportRecord,
+    ReportAlreadyExistsError,
+    ReportState,
+    ResolvedRecipient,
+)
 
 
 class MongoCollection(Protocol):

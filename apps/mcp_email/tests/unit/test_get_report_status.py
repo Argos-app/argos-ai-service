@@ -3,8 +3,12 @@ from uuid import uuid4
 
 import pytest
 from argos_mcp_email.application import GetReportStatus
-from argos_mcp_email.domain.errors import ReportNotFoundError, ReportOwnershipError
-from argos_mcp_email.domain.models import DispatchRecord, DispatchState
+from argos_mcp_email.domain import (
+    DispatchRecord,
+    DispatchState,
+    ReportNotFoundError,
+    ReportOwnershipError,
+)
 
 from packages.contracts import DispatchStatus, ReportStatusRequest
 

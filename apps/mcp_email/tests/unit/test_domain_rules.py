@@ -2,15 +2,13 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from argos_mcp_email.domain.errors import (
-    IdempotencyConflictError,
-    InvalidDispatchTransitionError,
-    ReportExpiredError,
-)
-from argos_mcp_email.domain.models import (
+from argos_mcp_email.domain import (
     DispatchRecord,
     DispatchState,
+    IdempotencyConflictError,
+    InvalidDispatchTransitionError,
     PreparedReportRecord,
+    ReportExpiredError,
     ResolvedRecipient,
 )
 from argos_mcp_email.domain.rules import (

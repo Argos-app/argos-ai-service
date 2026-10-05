@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from argos_mcp_email.domain.models import PreparedReportRecord, ResolvedRecipient
+from argos_mcp_email.domain import PreparedReportRecord, ResolvedRecipient
 from argos_mcp_email.ports.recipient_directory import RecipientDirectory
 from argos_mcp_email.ports.report_renderer import ReportRenderer
 from argos_mcp_email.ports.report_repository import ReportRepository

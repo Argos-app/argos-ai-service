@@ -3,7 +3,7 @@
 from typing import Protocol
 from uuid import UUID
 
-from argos_mcp_email.domain.models import DispatchRecord, DispatchState
+from argos_mcp_email.domain import DispatchRecord, DispatchState
 
 
 class DispatchRepository(Protocol):

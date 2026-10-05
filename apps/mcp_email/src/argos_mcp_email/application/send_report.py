@@ -4,8 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from argos_mcp_email.domain.errors import ReportNotFoundError
-from argos_mcp_email.domain.models import DispatchState
+from argos_mcp_email.domain import DispatchState, ReportNotFoundError
 from argos_mcp_email.domain.rules import (
     ensure_dispatch_transition,
     ensure_idempotency_consistency,

@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from hashlib import sha256
 
-from argos_mcp_email.domain.errors import SourceVerificationError
+from argos_mcp_email.domain import SourceVerificationError
 from packages.contracts import LotReportEnvelope
 
 SignatureChecker = Callable[[bytes, str, str], bool]

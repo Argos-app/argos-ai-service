@@ -1,6 +1,6 @@
 """Caso de uso para consultar o estado de uma operação de envio."""
 
-from argos_mcp_email.domain.errors import ReportNotFoundError, ReportOwnershipError
+from argos_mcp_email.domain import ReportNotFoundError, ReportOwnershipError
 from argos_mcp_email.ports.dispatch_repository import DispatchRepository
 from packages.contracts import ReportStatusRequest, ReportStatusResult
 

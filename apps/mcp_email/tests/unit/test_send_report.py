@@ -4,11 +4,11 @@ from uuid import uuid4
 
 import pytest
 from argos_mcp_email.application import SendReport
-from argos_mcp_email.domain.errors import ReportNotFoundError
-from argos_mcp_email.domain.models import (
+from argos_mcp_email.domain import (
     DispatchRecord,
     DispatchState,
     PreparedReportRecord,
+    ReportNotFoundError,
     ResolvedRecipient,
 )
 from argos_mcp_email.ports.mail_provider import ProviderSendResult

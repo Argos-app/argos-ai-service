@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
-from argos_mcp_email.domain.errors import RecipientDirectoryError
+from argos_mcp_email.domain import RecipientDirectoryError
 from packages.contracts import (
     RecipientRef,
     RecipientResolution,

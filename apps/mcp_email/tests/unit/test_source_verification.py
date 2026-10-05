@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from argos_mcp_email.adapters.source_verification import SignedPayloadVerifier
-from argos_mcp_email.domain.errors import SourceVerificationError
+from argos_mcp_email.domain import SourceVerificationError
 
 from packages.contracts import LotReportData, LotReportEnvelope, LotReportIdentity
 

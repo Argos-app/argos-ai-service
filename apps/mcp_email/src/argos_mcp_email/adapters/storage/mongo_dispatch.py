@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from argos_mcp_email.domain.models import DispatchRecord, DispatchState
+from argos_mcp_email.domain import DispatchRecord, DispatchState
 
 
 class DispatchCollection(Protocol):

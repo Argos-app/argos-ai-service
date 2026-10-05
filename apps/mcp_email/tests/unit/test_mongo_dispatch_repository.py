@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 from argos_mcp_email.adapters.storage import MongoDispatchRepository
-from argos_mcp_email.domain.models import DispatchState
+from argos_mcp_email.domain import DispatchState
 
 
 class DuplicateError(Exception):

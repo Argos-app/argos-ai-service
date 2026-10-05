@@ -3,8 +3,11 @@ from uuid import uuid4
 
 import pytest
 from argos_mcp_email.adapters.storage import InMemoryReportRepository
-from argos_mcp_email.domain.errors import ReportAlreadyExistsError
-from argos_mcp_email.domain.models import PreparedReportRecord, ResolvedRecipient
+from argos_mcp_email.domain import (
+    PreparedReportRecord,
+    ReportAlreadyExistsError,
+    ResolvedRecipient,
+)
 
 
 def report() -> PreparedReportRecord:
