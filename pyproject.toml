@@ -15,4 +15,5 @@ select = ["E", "F", "I", "B", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "apps"]
 python_files = ["test_*.py", "*_test.py"]
+pythonpath = [".", "apps/mcp_email/src"]
 addopts = "-ra"
