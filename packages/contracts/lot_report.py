@@ -97,12 +97,18 @@ class LotReportData(_Contract):
 
 
 class LotReportEnvelope(_Contract):
-    """Envelope de saída do MCP de dados, antes da assinatura de procedência."""
+    """Envelope assinado de saída do MCP de dados.
+
+    ``valid_until`` delimita a validade da autorização para o uso do payload.
+    Ele é parte do conteúdo assinado junto com o relatório, o solicitante e o
+    escopo de propriedades.
+    """
 
     report: LotReportData
     principal_user_id: UUID
     authorized_property_ids: tuple[UUID, ...] = Field(min_length=1)
     source_service: Literal["mcp_data"] = "mcp_data"
+    valid_until: datetime
     payload_hash: str = Field(min_length=1)
     signature: str = Field(min_length=1)
     signature_key_id: str = Field(min_length=1)

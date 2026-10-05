@@ -7,7 +7,10 @@ from typing import Any
 from argos_mcp_email.adapters.provider import SmtpMailProvider
 from argos_mcp_email.adapters.recipients import RelationalRecipientDirectory
 from argos_mcp_email.adapters.rendering import TemplateReportRenderer
-from argos_mcp_email.adapters.source_verification import SignedPayloadVerifier
+from argos_mcp_email.adapters.source_verification import (
+    SignedPayloadVerifier,
+    TrustedEd25519KeyVerifier,
+)
 from argos_mcp_email.adapters.storage import MongoDispatchRepository, MongoReportRepository
 from argos_mcp_email.application import GetReportStatus, PrepareReport, SendReport
 from argos_mcp_email.infrastructure import AsyncpgSqlExecutor
@@ -81,7 +84,7 @@ def build_get_report_status(*, dispatch_repository: Any) -> GetReportStatus:
 
 async def create_runtime(
     *,
-    signature_checker: Callable[[bytes, str, str], bool],
+    signature_checker: Callable[[bytes, str, str], bool] | None = None,
     settings: Settings | None = None,
 ) -> ServiceRuntime:
     """Abre Mongo/SQL, inicializa índices e compõe o servidor MCP."""
@@ -91,6 +94,13 @@ async def create_runtime(
         raise ValueError("MCP_EMAIL_MONGO_URI é obrigatório para iniciar o serviço")
     if not configured.sql_dsn:
         raise ValueError("MCP_EMAIL_SQL_DSN é obrigatório para iniciar o serviço")
+    checker = signature_checker or TrustedEd25519KeyVerifier(
+        dict(configured.trusted_signature_keys)
+    )
+    if signature_checker is None and not configured.trusted_signature_keys:
+        raise ValueError(
+            "MCP_EMAIL_TRUSTED_SIGNATURE_KEYS é obrigatório para iniciar o serviço"
+        )
 
     try:
         import asyncpg
@@ -115,7 +125,7 @@ async def create_runtime(
     prepare_report = build_prepare_report(
         mongo_collection=report_collection,
         sql_executor=AsyncpgSqlExecutor(sql_pool),
-        signature_checker=signature_checker,
+        signature_checker=checker,
         settings=configured,
     )
     send_report = build_send_report(
@@ -138,7 +148,7 @@ async def create_runtime(
 
 async def run_server(
     *,
-    signature_checker: Callable[[bytes, str, str], bool],
+    signature_checker: Callable[[bytes, str, str], bool] | None = None,
     settings: Settings | None = None,
 ) -> None:
     """Executa o transporte stdio do servidor MCP e fecha os recursos."""
