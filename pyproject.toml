@@ -17,3 +17,4 @@ testpaths = ["tests", "apps"]
 python_files = ["test_*.py", "*_test.py"]
 pythonpath = [".", "apps/mcp_email/src"]
 addopts = "-ra"
+markers = ["integration: exige os serviços descartáveis do compose de integração"]

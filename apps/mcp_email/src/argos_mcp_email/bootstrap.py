@@ -114,7 +114,7 @@ async def create_runtime(
             "instale as dependências motor, asyncpg e mcp para iniciar o serviço"
         ) from exc
 
-    mongo_client = AsyncIOMotorClient(configured.mongo_uri)
+    mongo_client = AsyncIOMotorClient(configured.mongo_uri, tz_aware=True)
     try:
         sql_pool = await asyncpg.create_pool(configured.sql_dsn)
     except Exception:
@@ -155,7 +155,7 @@ async def run_server(
     signature_checker: Callable[[bytes, str, str], bool] | None = None,
     settings: Settings | None = None,
 ) -> None:
-    """Executa o transporte stdio do servidor MCP e fecha os recursos."""
+    """Executa o transporte Streamable HTTP do MCP e fecha os recursos."""
 
     runtime = await create_runtime(
         signature_checker=signature_checker,
