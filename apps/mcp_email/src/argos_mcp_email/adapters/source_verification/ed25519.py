@@ -17,8 +17,7 @@ class TrustedEd25519KeyVerifier:
 
     def __init__(self, trusted_keys: Mapping[str, bytes | str]) -> None:
         self._keys = {
-            key_id: self._load_key(public_key)
-            for key_id, public_key in trusted_keys.items()
+            key_id: self._load_key(public_key) for key_id, public_key in trusted_keys.items()
         }
 
     def __call__(self, payload: bytes, signature: str, key_id: str) -> bool:
@@ -27,7 +26,7 @@ class TrustedEd25519KeyVerifier:
             return False
         try:
             public_key.verify(self._decode(signature), payload)
-        except (InvalidSignature, ValueError, binascii.Error):
+        except InvalidSignature, ValueError, binascii.Error:
             return False
         return True
 

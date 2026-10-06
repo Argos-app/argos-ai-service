@@ -4,9 +4,15 @@ Sistema de IA do Argos, plataforma de gerenciamento de aplicações de
 medicamentos em bovinos. O backend chama este serviço em nome do usuário; o
 aplicativo Kotlin apresenta respostas e perguntas de esclarecimento.
 
-Este README descreve a **arquitetura planejada**. As pastas e os fluxos abaixo
-não representam funcionalidades já implementadas. Backend e mobile ficam em
-outros repositórios.
+Este README distingue o código atual das integrações planejadas. Backend e
+mobile ficam em outros repositórios.
+
+O principal já tem contratos HTTP, grafo de agentes, Factory e Registry, mas usa
+tools simuladas e ainda não conecta autenticação real nem armazenamento de
+sessões. O MCP de e-mail já implementa preparação, envio e consulta de estado,
+com testes isolados pelo SDK MCP real, Mongo, PostgreSQL e SMTP de teste.
+`apps/mcp_data` ainda não tem implementação; seu papel futuro está descrito
+abaixo. A integração completa principal → dados → e-mail permanece planejada.
 
 ## Agentes
 
@@ -18,7 +24,7 @@ mensagem. O sistema principal usa FastAPI, LangGraph e LangChain.
 | Fazenda                 | Consulta aplicações, lotes, bovinos em exceção e carências. Sempre consulta o MCP de dados para responder.                             |
 | Doutor                  | Consulta informações documentadas sobre medicamentos no MCP de dados. Apresenta fontes e limites; não substitui avaliação veterinária. |
 | Analista                | Solicita cálculos e previsões ao MCP de predição e explica resultados, premissas e limitações.                                         |
-| Secretário              | Organiza dados da fazenda e solicita geração e envio de relatórios ao MCP de e-mail.                                                   |
+| Secretário              | Recebe referências dos dados autorizados de Fazenda pelo executor e solicita preparação, envio e consulta ao MCP de e-mail.            |
 | Informações             | Responde questões gerais e encaminha perguntas documentais ou legais especializadas ao A2A.                                            |
 | Orquestrador            | Consolida os resultados, identifica lacunas e solicita complementações dentro dos limites do fluxo.                                    |
 | Juiz                    | Verifica se as afirmações têm apoio nas fontes e sinaliza inconsistências ou necessidade de revisão.                                   |
@@ -36,11 +42,33 @@ aplicativo e permite retomar a sessão após a resposta do usuário.
 MCP é o protocolo usado para disponibilizar ferramentas aos agentes. Cada MCP é
 uma aplicação separada e valida o acesso aos dados solicitados.
 
-| MCP      | Função                                                                                                                                                                                                                                                 |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Dados    | Consulta PostgreSQL e documentos de medicamentos e histórico no MongoDB. Oferece ferramentas de domínio com filtros, paginação e escopo de fazenda; não aceita SQL arbitrário do agente.                                                               |
-| E-mail   | Recebe dados estruturados, consulta obrigatoriamente o documento correspondente no MongoDB, preenche um template e envia o relatório a destinatários cadastrados. Registra status e evita envios duplicados; pede esclarecimento quando houver dúvida. |
-| Predição | Prepara históricos e executa cálculos ou inferência de modelos. O treinamento ocorre offline. Inicialmente usa dataloads sintéticos, identificando os resultados como simulação; não inventa previsões quando falta modelo ou histórico.               |
+| MCP                                | Função                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dados — planejado                  | Resolve propriedades, rebanhos e lotes autorizados usando a modelagem relacional; consulta documentos de histórico e medicamentos no Mongo. Para relatório, entrega uma projeção de um lote em `LotReportEnvelope`, assinada e vinculada ao solicitante, escopo e validade. Não aceita SQL ou pipelines arbitrários do agente. |
+| E-mail — implementado isoladamente | Verifica o envelope recebido, resolve destinatários cadastrados no PostgreSQL, renderiza o relatório e envia pelo no-reply configurado. Guarda preparações e operações no Mongo; não relê o documento Mongo de negócio.                                                                                                        |
+| Predição — planejado               | Prepara históricos e executa cálculos ou inferência de modelos. O treinamento ocorre offline. Inicialmente usa dataloads sintéticos, identificando os resultados como simulação; não inventa previsões quando falta modelo ou histórico.                                                                                       |
+
+### Fluxo planejado de relatório de lote
+
+O Roteador cria uma tarefa Fazenda e outra Secretário dependente. Fazenda obtém
+`LotReportEnvelope` pelo MCP de dados; o executor preserva o envelope assinado e
+passa sua referência ao Secretário. O principal monta as chamadas ao MCP de
+e-mail usando os contratos de `packages/contracts`.
+
+O MCP de dados resolve o lote somente nas propriedades autorizadas e obtém sua
+projeção Mongo. Código de lote é único por rebanho, e nome de rebanho por
+propriedade; correspondências ambíguas exigem esclarecimento. O contrato atual
+aceita um lote. O MCP de e-mail resolve nomes/e-mails no cadastro e recebe o
+envelope sem consultar novamente o documento de negócio.
+
+O principal preserva os destinatários em contexto protegido antes da sanitização
+e valida a intenção antes do envio. Pedido explícito inequívoco pode seguir sem
+segunda confirmação; preparar não autoriza enviar.
+
+O MCP de e-mail expõe `prepare_report`, `send_report` e `get_report_status` por
+Streamable HTTP em `/mcp`. As tools recebem `payload`; o Bearer interno fica no
+transporte. Recuperações reusam o mesmo `report_id` e chave de idempotência.
+`accepted` indica aceite pelo provedor, sem comprovar entrega ou leitura.
 
 ## A2A
 
@@ -77,9 +105,10 @@ argos-ai-service/
 └── .github/workflows/    # CI no GitHub Actions
 ```
 
-Cada aplicação terá Dockerfile, configuração e execução local próprios, além de
-deploy independente no futuro. O Compose da raiz executará o conjunto. Pacotes
-compartilhados serão instalados dentro de cada imagem.
+Cada aplicação terá configuração, dependências e execução próprias, com deploy
+independente. Os contratos compartilhados precisam acompanhar o artefato de cada
+serviço que os consome; o processo não depende do código de outro serviço
+montado em runtime. O Compose integrado da raiz ainda é planejado.
 
 No principal, a organização separa API, domínio, orquestração, agentes e
 infraestrutura. **Protocol + Factory + Registry** padroniza a criação dos
@@ -88,10 +117,14 @@ a Factory os instancia com suas dependências.
 
 ## Grafo de agentes
 
+O desenho abaixo representa o fluxo previsto para as integrações. O executor
+atual ordena e executa tarefas sequencialmente; a passagem protegida de
+artefatos de relatório ainda será implementada.
+
 ```mermaid
 flowchart TD
     Input[Mensagem do backend] --> Auth[Validar identidade, fazendas e sessão]
-    Auth --> Privacy[Anonimizar e minimizar dados]
+    Auth --> Privacy[Preservar parâmetros protegidos e minimizar dados]
     Privacy --> Guard{Guardrail aprova?}
     Guard -->|Não ou falha| Safe[Finalização segura sem ferramentas de negócio]
     Guard -->|Sim| Route[Roteador]
@@ -108,6 +141,8 @@ flowchart TD
     Secretary --> Email[MCP de e-mail]
     Analyst --> Prediction[MCP de predição]
     Info --> A2A[A2A: Documental / Legal quando necessário]
+    Data -->|Origem do relatório de lote| Artifact[Executor guarda origem assinada do relatório]
+    Artifact -->|Referência da tarefa Fazenda| Secretary
     Data --> Merge[Orquestrador consolida resultados]
     Email --> Merge
     Prediction --> Merge
@@ -117,12 +152,14 @@ flowchart TD
     Judge --> Decision{Resultado}
     Decision -->|Atendido| Answer[Resposta com fontes e limitações]
     Decision -->|Falta esclarecimento| Question
-    Decision -->|Revisar dentro dos limites| Specialists
+    Decision -->|Revisar texto dentro dos limites| Merge
     Decision -->|Limite ou evidência insuficiente| Partial[Resposta parcial ou abstenção]
 ```
 
-Tarefas independentes podem executar em paralelo. O fluxo limita chamadas,
-iterações, tempo e custo. A resposta a uma pergunta retoma a sessão após nova
-validação de acesso; falhas não são apresentadas como dados ou operações
+Paralelismo de tarefas independentes e limites gerais de tempo/custo são
+evoluções planejadas. O grafo atual limita a cinco tarefas e uma revisão do
+Juiz. O Juiz revisa a resposta ao chat; a autorização determinística de envio
+deve preceder a chamada ao MCP. A resposta a uma pergunta retoma a sessão após
+nova validação de acesso; falhas não são apresentadas como dados ou operações
 bem-sucedidas. Ao atingir um limite, o controle determinístico encerra a
 execução com conteúdo já validado ou uma mensagem segura.
