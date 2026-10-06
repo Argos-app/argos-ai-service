@@ -98,9 +98,13 @@ async def create_runtime(
         dict(configured.trusted_signature_keys)
     )
     if signature_checker is None and not configured.trusted_signature_keys:
-        raise ValueError(
-            "MCP_EMAIL_TRUSTED_SIGNATURE_KEYS é obrigatório para iniciar o serviço"
-        )
+        raise ValueError("MCP_EMAIL_TRUSTED_SIGNATURE_KEYS é obrigatório para iniciar o serviço")
+    if not configured.internal_service_token:
+        raise ValueError("MCP_EMAIL_INTERNAL_SERVICE_TOKEN é obrigatório para iniciar o serviço")
+    if not configured.mcp_auth_issuer_url:
+        raise ValueError("MCP_EMAIL_AUTH_ISSUER_URL é obrigatório para iniciar o serviço")
+    if not configured.mcp_resource_server_url:
+        raise ValueError("MCP_EMAIL_RESOURCE_SERVER_URL é obrigatório para iniciar o serviço")
 
     try:
         import asyncpg
@@ -142,7 +146,7 @@ async def create_runtime(
     return ServiceRuntime(
         mongo_client=mongo_client,
         sql_pool=sql_pool,
-        server=create_mcp_server(service),
+        server=create_mcp_server(service, configured),
     )
 
 
@@ -158,6 +162,6 @@ async def run_server(
         settings=settings,
     )
     try:
-        await runtime.server.run_stdio_async()
+        await runtime.server.run_streamable_http_async()
     finally:
         await runtime.close()
