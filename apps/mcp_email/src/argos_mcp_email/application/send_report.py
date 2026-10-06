@@ -64,6 +64,9 @@ class SendReport:
         )
         if operation.state != DispatchState.PENDING:
             return self._to_result(operation)
+        if not await self._dispatches.claim_for_send(operation.operation_id):
+            current = await self._dispatches.find_by_idempotency_key(request.idempotency_key)
+            return self._to_result(current or operation)
 
         recipients = tuple(_recipient_ref(recipient) for recipient in report.recipients)
         try:

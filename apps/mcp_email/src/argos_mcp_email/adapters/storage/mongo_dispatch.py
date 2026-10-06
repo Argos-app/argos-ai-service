@@ -69,6 +69,30 @@ class MongoDispatchRepository:
             return existing
         return self._from_document(document)
 
+    async def claim_for_send(self, operation_id: UUID) -> bool:
+        """Só uma chamada consegue marcar a operação pendente para envio.
+
+        A marca é permanente: se o processo cair após reivindicá-la, a
+        operação permanece ``pending`` para reconciliação manual. Repetir o
+        envio automaticamente poderia duplicar uma mensagem já aceita pelo
+        provedor antes da queda.
+        """
+
+        result = await self._collection.update_one(
+            {
+                "_id": str(operation_id),
+                "state": DispatchState.PENDING.value,
+                "send_claimed": {"$ne": True},
+            },
+            {
+                "$set": {
+                    "send_claimed": True,
+                    "updated_at": datetime.now(UTC),
+                }
+            },
+        )
+        return result.matched_count == 1
+
     async def update_state(
         self,
         operation_id: UUID,

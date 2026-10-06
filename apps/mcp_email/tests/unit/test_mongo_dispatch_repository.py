@@ -38,7 +38,20 @@ class FakeCollection:
         )
 
     async def update_one(self, query, update):
-        self.documents[query["_id"]].update(update["$set"])
+        document = self.documents.get(query["_id"])
+        if document is None:
+            return UpdateResult(0)
+        if "state" in query and document.get("state") != query["state"]:
+            return UpdateResult(0)
+        if query.get("send_claimed") == {"$ne": True} and document.get("send_claimed") is True:
+            return UpdateResult(0)
+        document.update(update["$set"])
+        return UpdateResult(1)
+
+
+class UpdateResult:
+    def __init__(self, matched_count):
+        self.matched_count = matched_count
 
 
 @pytest.mark.asyncio
@@ -83,3 +96,21 @@ async def test_updates_dispatch_state():
     result = await repository.update_state(operation_id, DispatchState.UNKNOWN)
 
     assert result.state == DispatchState.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_only_one_call_can_claim_pending_dispatch():
+    collection = FakeCollection()
+    repository = MongoDispatchRepository(collection)
+    operation = await repository.create_pending(
+        operation_id=uuid4(),
+        report_id=uuid4(),
+        requested_by=uuid4(),
+        idempotency_key="send-claim",
+    )
+
+    first_claim = await repository.claim_for_send(operation.operation_id)
+    second_claim = await repository.claim_for_send(operation.operation_id)
+
+    assert first_claim is True
+    assert second_claim is False

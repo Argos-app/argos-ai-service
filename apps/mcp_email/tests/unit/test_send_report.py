@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -29,6 +30,7 @@ class FakeDispatchRepository:
         self.existing = existing
         self.created = []
         self.updated = []
+        self.send_claimed = False
 
     async def find_by_idempotency_key(self, key):
         return self.existing if self.existing and self.existing.idempotency_key == key else None
@@ -48,6 +50,12 @@ class FakeDispatchRepository:
         self.created.append(record)
         self.existing = record
         return record
+
+    async def claim_for_send(self, operation_id):
+        if self.send_claimed:
+            return False
+        self.send_claimed = True
+        return True
 
     async def update_state(self, operation_id, state, *, provider_message_id=None, error_code=None):
         current = self.created[-1]
@@ -77,6 +85,21 @@ class FakeProvider:
         if self.error:
             raise self.error
         return self.result
+
+
+class ConcurrentFakeDispatchRepository(FakeDispatchRepository):
+    def __init__(self):
+        super().__init__()
+        self.initial_reads = 0
+        self.both_initial_reads = asyncio.Event()
+
+    async def find_by_idempotency_key(self, key):
+        if self.existing is None:
+            self.initial_reads += 1
+            if self.initial_reads == 2:
+                self.both_initial_reads.set()
+            await self.both_initial_reads.wait()
+        return await super().find_by_idempotency_key(key)
 
 
 REQUESTER = uuid4()
@@ -149,3 +172,22 @@ async def test_missing_report_is_rejected_before_provider_call():
             SendReportRequest(report_id=uuid4(), requested_by=REQUESTER, idempotency_key="send-3")
         )
     assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_only_call_provider_once():
+    report = prepared_report()
+    dispatch = ConcurrentFakeDispatchRepository()
+    provider = FakeProvider(ProviderSendResult(accepted=True, provider_message_id="provider-1"))
+    request = SendReportRequest(
+        report_id=report.report_id,
+        requested_by=REQUESTER,
+        idempotency_key="send-concurrent",
+    )
+    sender = use_case(report, dispatch, provider)
+
+    first, second = await asyncio.gather(sender.execute(request), sender.execute(request))
+
+    assert len(provider.calls) == 1
+    assert first.status == second.status == DispatchStatus.ACCEPTED
+    assert first.operation_id == second.operation_id

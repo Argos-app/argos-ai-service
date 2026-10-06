@@ -23,6 +23,9 @@ class DispatchRepository(Protocol):
     ) -> DispatchRecord:
         """Cria atomicamente uma operação pendente."""
 
+    async def claim_for_send(self, operation_id: UUID) -> bool:
+        """Adquire atomicamente o direito de chamar o provedor uma única vez."""
+
     async def update_state(
         self,
         operation_id: UUID,
