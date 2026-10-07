@@ -13,6 +13,8 @@ def complete_settings(**overrides: object) -> Settings:
         "internal_service_token": "internal-test-token",
         "mcp_auth_issuer_url": "https://issuer.example.test",
         "mcp_resource_server_url": "https://data.example.test/mcp",
+        "delegation_issuer": "argos-main-service",
+        "trusted_delegation_keys": (("test-key", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),),
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
