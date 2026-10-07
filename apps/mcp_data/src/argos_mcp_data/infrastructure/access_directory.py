@@ -26,7 +26,7 @@ class PostgresAccessDirectory:
                        AND up.property_id = p.id
                        AND up.active = TRUE
                        AND up.link_date <= CURRENT_DATE
-                       AND up.unlink_date IS NULL
+                       AND (up.unlink_date IS NULL OR up.unlink_date >= CURRENT_DATE)
                  )
              )
             WHERE u.id = $1
