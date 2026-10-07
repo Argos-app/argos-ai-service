@@ -3,6 +3,10 @@
 import hmac
 from typing import Any
 
+from argos_mcp_data.adapters.delegation import (
+    DelegationContextMiddleware,
+    DelegationTokenVerifier,
+)
 from argos_mcp_data.settings import Settings
 
 
@@ -54,3 +58,9 @@ def create_mcp_server(settings: Settings) -> Any:
             settings.mcp_resource_server_url,
         ),
     )
+
+
+def create_http_app(server: Any, delegation_verifier: DelegationTokenVerifier) -> Any:
+    """Combina o app MCP do SDK com o middleware de delegação por requisição."""
+
+    return DelegationContextMiddleware(server.streamable_http_app(), delegation_verifier)
