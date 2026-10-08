@@ -23,16 +23,27 @@ from argos_mcp_data.domain.cattle import (
     Page,
     PropertyRecord,
 )
+from argos_mcp_data.domain.cattle_documents import (
+    CattleDocumentsPage,
+    ListCattleDocumentsRequest,
+)
 from argos_mcp_data.domain.errors import AccessDeniedError
+from argos_mcp_data.ports.cattle_document_repository import CattleDocumentReadRepository
 from argos_mcp_data.ports.cattle_repository import CattleReadRepository
 
 
 class CattleQueryService:
     """Autoriza cada leitura detalhada antes de delegá-la ao repositório."""
 
-    def __init__(self, access_policy: AccessPolicy, repository: CattleReadRepository) -> None:
+    def __init__(
+        self,
+        access_policy: AccessPolicy,
+        repository: CattleReadRepository,
+        document_repository: CattleDocumentReadRepository,
+    ) -> None:
         self._access_policy = access_policy
         self._repository = repository
+        self._document_repository = document_repository
 
     async def _authorized_scope(
         self,
@@ -92,3 +103,10 @@ class CattleQueryService:
     ) -> Page[AnimalLotHistoryRecord]:
         scope = await self._authorized_scope(context, request.property_ids)
         return await self._repository.list_animal_lot_history(scope, request)
+
+    async def list_cattle_documents(
+        self, context: AccessContext, request: ListCattleDocumentsRequest
+    ) -> CattleDocumentsPage:
+        """Autoriza a consulta e retorna documentos Mongo do escopo efetivo."""
+        scope = await self._authorized_scope(context, request.property_ids)
+        return await self._document_repository.list_documents(scope, request)

@@ -19,6 +19,7 @@ from argos_mcp_data.domain.cattle import (
     ListOccurrencesRequest,
     ListPropertiesRequest,
 )
+from argos_mcp_data.domain.cattle_documents import ListCattleDocumentsRequest
 from argos_mcp_data.settings import Settings
 
 
@@ -73,7 +74,7 @@ def create_mcp_server(settings: Settings) -> Any:
 
 
 def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
-    """Registra as consultas SQL detalhadas disponíveis ao agente Fazenda."""
+    """Registra consultas SQL e Mongo detalhadas disponíveis ao agente Fazenda."""
 
     @server.tool()
     async def list_properties(payload: ListPropertiesRequest) -> dict[str, Any]:
@@ -125,6 +126,12 @@ def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
     ) -> dict[str, Any]:
         """Lista o histórico de entrada e saída dos animais em lotes."""
         result = await service.list_animal_lot_history(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_cattle_documents(payload: ListCattleDocumentsRequest) -> dict[str, Any]:
+        """Lista documentos Mongo de histórico bovino das propriedades autorizadas."""
+        result = await service.list_cattle_documents(get_access_context(), payload)
         return result.model_dump(mode="json")
 
 

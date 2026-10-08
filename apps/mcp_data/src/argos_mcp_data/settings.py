@@ -10,6 +10,8 @@ class Settings:
     sql_dsn: str | None = None
     mongo_uri: str | None = None
     mongo_database: str | None = None
+    mongo_cattle_collection: str | None = None
+    mongo_relational_id_format: str | None = None
     internal_service_token: str | None = None
     mcp_auth_issuer_url: str | None = None
     mcp_resource_server_url: str | None = None
@@ -44,6 +46,8 @@ class Settings:
             sql_dsn=os.getenv("MCP_DATA_SQL_DSN"),
             mongo_uri=os.getenv("MCP_DATA_MONGO_URI"),
             mongo_database=os.getenv("MCP_DATA_MONGO_DATABASE"),
+            mongo_cattle_collection=os.getenv("MCP_DATA_MONGO_CATTLE_COLLECTION"),
+            mongo_relational_id_format=os.getenv("MCP_DATA_MONGO_RELATIONAL_ID_FORMAT"),
             internal_service_token=os.getenv("MCP_DATA_INTERNAL_SERVICE_TOKEN"),
             mcp_auth_issuer_url=os.getenv("MCP_DATA_AUTH_ISSUER_URL"),
             mcp_resource_server_url=os.getenv("MCP_DATA_RESOURCE_SERVER_URL"),
@@ -60,6 +64,8 @@ class Settings:
             "MCP_DATA_SQL_DSN": self.sql_dsn,
             "MCP_DATA_MONGO_URI": self.mongo_uri,
             "MCP_DATA_MONGO_DATABASE": self.mongo_database,
+            "MCP_DATA_MONGO_CATTLE_COLLECTION": self.mongo_cattle_collection,
+            "MCP_DATA_MONGO_RELATIONAL_ID_FORMAT": self.mongo_relational_id_format,
             "MCP_DATA_INTERNAL_SERVICE_TOKEN": self.internal_service_token,
             "MCP_DATA_AUTH_ISSUER_URL": self.mcp_auth_issuer_url,
             "MCP_DATA_RESOURCE_SERVER_URL": self.mcp_resource_server_url,
@@ -70,6 +76,10 @@ class Settings:
             missing.append("MCP_DATA_TRUSTED_DELEGATION_KEYS")
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
+        if self.mongo_relational_id_format not in {"string", "uuid_standard"}:
+            raise ValueError(
+                "MCP_DATA_MONGO_RELATIONAL_ID_FORMAT deve ser 'string' ou 'uuid_standard'"
+            )
         if not 1 <= self.delegation_max_ttl_seconds <= 300:
             raise ValueError("MCP_DATA_DELEGATION_MAX_TTL deve estar entre 1 e 300 segundos")
         if not 0 <= self.delegation_clock_skew_seconds <= 60:
