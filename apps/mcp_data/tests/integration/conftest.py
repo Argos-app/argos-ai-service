@@ -112,6 +112,8 @@ class McpDataHarness:
             MCP_DATA_MONGO_DATABASE=self.database_name,
             MCP_DATA_MONGO_CATTLE_COLLECTION="bois",
             MCP_DATA_MONGO_RELATIONAL_ID_FORMAT="string",
+            MCP_DATA_MONGO_MEDICINE_COLLECTION="medicamentos",
+            MCP_DATA_MONGO_MEDICINE_ID_FORMAT="string",
             MCP_DATA_INTERNAL_SERVICE_TOKEN=self.service_token,
             MCP_DATA_AUTH_ISSUER_URL=f"http://127.0.0.1:{self.port}/test-issuer",
             MCP_DATA_RESOURCE_SERVER_URL=self.url,

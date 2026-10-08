@@ -1,6 +1,6 @@
 # Integração do MCP de dados
 
-Os testes desta pasta sobem o serviço MCP real e chamam as nove ferramentas pelo
+Os testes desta pasta sobem o serviço MCP real e registram onze ferramentas pelo
 SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09 do commit
 remoto `origin/develop` `2f24af7abd25ab4afda7cb1561f02973db0b19d5`, criam dados
 sintéticos, inserem documentos de histórico bovino sintéticos em uma coleção
@@ -29,7 +29,9 @@ reservadas são `54329` (PostgreSQL) e `27029` (MongoDB). Não aponte essa suít
 para bancos compartilhados ou de produção: ela cria e remove bancos com prefixo
 `mcp_data_it_`.
 
-No runtime de teste, a coleção Mongo é `bois` e `relational_property_id` é
-armazenado como texto (`string`). Esses valores são específicos dos fixtures; em
-outros ambientes, configure `MCP_DATA_MONGO_CATTLE_COLLECTION` e
-`MCP_DATA_MONGO_RELATIONAL_ID_FORMAT` de acordo com a coleção implantada.
+No runtime de teste, as coleções configuradas são `bois` e `medicamentos`; os
+UUIDs relacionais são configurados como texto (`string`). Esses valores são
+específicos do ambiente descartável; em outros ambientes, configure
+`MCP_DATA_MONGO_CATTLE_COLLECTION`, `MCP_DATA_MONGO_RELATIONAL_ID_FORMAT`,
+`MCP_DATA_MONGO_MEDICINE_COLLECTION` e `MCP_DATA_MONGO_MEDICINE_ID_FORMAT` de
+acordo com as coleções implantadas.

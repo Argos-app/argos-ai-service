@@ -17,6 +17,8 @@ def complete_settings(**overrides: object) -> Settings:
         "mongo_database": "argos",
         "mongo_cattle_collection": "bois",
         "mongo_relational_id_format": "string",
+        "mongo_medicine_collection": "medicamentos",
+        "mongo_medicine_id_format": "string",
         "internal_service_token": "internal-test-token",
         "mcp_auth_issuer_url": "https://issuer.example.test",
         "mcp_resource_server_url": "https://data.example.test/mcp",

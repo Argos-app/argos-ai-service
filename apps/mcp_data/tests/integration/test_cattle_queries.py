@@ -35,6 +35,8 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
             "list_occurrences",
             "list_animal_lot_history",
             "list_cattle_documents",
+            "list_medicines",
+            "list_medicine_documents",
         }
         assert {tool.name for tool in tools} == expected_tools
         for tool in tools:
