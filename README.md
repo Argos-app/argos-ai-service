@@ -70,8 +70,8 @@ Streamable HTTP em `/mcp`. As tools recebem `payload`; o Bearer interno fica no
 transporte. Recuperações reusam o mesmo `report_id` e chave de idempotência.
 `accepted` indica aceite pelo provedor, sem comprovar entrega ou leitura.
 `partial` indica que o provedor recusou um ou mais destinatários. A operação não
-deve ser reenviada automaticamente, pois outros destinatários podem já ter recebido
-o e-mail.
+deve ser reenviada automaticamente, pois outros destinatários podem já ter
+recebido o e-mail.
 
 ## A2A
 
