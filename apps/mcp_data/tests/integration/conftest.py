@@ -206,6 +206,8 @@ async def mcp_data_harness():
         finally:
             await sql.close()
 
+        await _insert_mongo_documents(mongo[database_name], fixture_ids)
+
         harness = McpDataHarness(database_name, Ed25519PrivateKey.generate(), fixture_ids)
         await harness.start()
         yield harness
@@ -218,6 +220,28 @@ async def mcp_data_harness():
             await admin.execute(f'DROP DATABASE "{database_name}" WITH (FORCE)')
         finally:
             await admin.close()
+
+
+async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> None:
+    """Insere documentos sintéticos independentes das linhas relacionais."""
+    now = datetime.now(UTC)
+    await database["bois"].insert_many(
+        [
+            {
+                "_id": f"historico-{key}",
+                "relational_property_id": str(fixture_ids[property_key]),
+                "herd": {"herd_id": str(uuid4()), "herd_name": f"Rebanho Mongo {key}"},
+                "lots": [],
+                "report_created_at": now,
+                "last_updated_at": now,
+            }
+            for key, property_key in (
+                ("autorizado-a", "property_a"),
+                ("autorizado-b", "property_b"),
+                ("externo", "property_external"),
+            )
+        ]
+    )
 
 
 async def _insert_synthetic_data(sql) -> dict[str, object]:

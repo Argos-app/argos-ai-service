@@ -1,4 +1,4 @@
-"""Valida as ferramentas detalhadas contra o schema e dados descartáveis reais."""
+"""Valida ferramentas SQL e Mongo contra dados sintéticos descartáveis."""
 
 import json
 import os
@@ -34,6 +34,7 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
             "list_application_animals",
             "list_occurrences",
             "list_animal_lot_history",
+            "list_cattle_documents",
         }
         assert {tool.name for tool in tools} == expected_tools
         for tool in tools:
@@ -81,6 +82,50 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
         )
         assert len(lots["items"]) == 2
         assert {item["property_id"] for item in lots["items"]} == property_ids
+
+
+async def test_cattle_documents_are_paginated_and_scoped_by_authorized_properties(
+    mcp_data_harness,
+):
+    harness = mcp_data_harness
+    async with harness.client() as session:
+        page = _result_json(
+            await session.call_tool("list_cattle_documents", {"payload": {"page_size": 1}})
+        )
+        assert len(page["items"]) == 1
+        assert page["has_more"] is True
+        assert page["next_offset"] == 1
+        assert page["items"][0]["relational_property_id"] in {
+            str(harness.fixture_ids["property_a"]),
+            str(harness.fixture_ids["property_b"]),
+        }
+
+        all_authorized = _result_json(
+            await session.call_tool("list_cattle_documents", {"payload": {"page_size": 10}})
+        )
+        assert {item["id"] for item in all_authorized["items"]} == {
+            "historico-autorizado-a",
+            "historico-autorizado-b",
+        }
+
+        selected_property = _result_json(
+            await session.call_tool(
+                "list_cattle_documents",
+                {
+                    "payload": {
+                        "property_ids": [str(harness.fixture_ids["property_a"])],
+                        "page_size": 10,
+                    }
+                },
+            )
+        )
+        assert [item["id"] for item in selected_property["items"]] == ["historico-autorizado-a"]
+
+        external_selection = await session.call_tool(
+            "list_cattle_documents",
+            {"payload": {"property_ids": [str(harness.fixture_ids["property_external"])]}},
+        )
+        assert external_selection.isError
 
 
 async def test_exception_animals_and_applications_exclude_external_and_cross_property_rows(
