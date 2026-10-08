@@ -3,6 +3,10 @@
 from argos_mcp_data.infrastructure.access_directory import PostgresAccessDirectory
 from argos_mcp_data.infrastructure.cattle_document_repository import MongoCattleDocumentRepository
 from argos_mcp_data.infrastructure.cattle_repository import PostgresCattleRepository
+from argos_mcp_data.infrastructure.medicine_document_repository import (
+    MongoMedicineDocumentRepository,
+)
+from argos_mcp_data.infrastructure.medicine_repository import PostgresMedicineRepository
 from argos_mcp_data.infrastructure.mongo import ReadOnlyMongoReader
 from argos_mcp_data.infrastructure.sql import AsyncpgSqlReader
 
@@ -12,4 +16,6 @@ __all__ = [
     "PostgresCattleRepository",
     "MongoCattleDocumentRepository",
     "ReadOnlyMongoReader",
+    "MongoMedicineDocumentRepository",
+    "PostgresMedicineRepository",
 ]

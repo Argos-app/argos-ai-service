@@ -4,15 +4,22 @@ from dataclasses import dataclass
 from typing import Any
 
 from argos_mcp_data.adapters.delegation import DelegationTokenVerifier
-from argos_mcp_data.application import AccessPolicy, CattleQueryService
+from argos_mcp_data.application import AccessPolicy, CattleQueryService, MedicineQueryService
 from argos_mcp_data.infrastructure import (
     AsyncpgSqlReader,
     MongoCattleDocumentRepository,
+    MongoMedicineDocumentRepository,
     PostgresAccessDirectory,
     PostgresCattleRepository,
+    PostgresMedicineRepository,
     ReadOnlyMongoReader,
 )
-from argos_mcp_data.server import create_http_app, create_mcp_server, register_cattle_tools
+from argos_mcp_data.server import (
+    create_http_app,
+    create_mcp_server,
+    register_cattle_tools,
+    register_medicine_tools,
+)
 from argos_mcp_data.settings import Settings
 
 
@@ -50,7 +57,9 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             "instale as dependências asyncpg, motor e mcp para iniciar o serviço"
         ) from exc
 
-    mongo_client = AsyncIOMotorClient(configured.mongo_uri, tz_aware=True)
+    mongo_client = AsyncIOMotorClient(
+        configured.mongo_uri, tz_aware=True, uuidRepresentation="standard"
+    )
     sql_pool = None
     try:
         database = mongo_client[configured.mongo_database]
@@ -84,6 +93,16 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             document_repository,
         )
         register_cattle_tools(server, cattle_queries)
+        medicine_queries = MedicineQueryService(
+            access_policy,
+            PostgresMedicineRepository(sql_reader),
+            MongoMedicineDocumentRepository(
+                mongo_reader,
+                configured.mongo_medicine_collection,
+                configured.mongo_medicine_id_format,
+            ),
+        )
+        register_medicine_tools(server, medicine_queries)
     except Exception:
         await sql_pool.close()
         mongo_client.close()

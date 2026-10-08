@@ -9,6 +9,7 @@ from argos_mcp_data.adapters.delegation import (
     get_access_context,
 )
 from argos_mcp_data.application.cattle_queries import CattleQueryService
+from argos_mcp_data.application.medicine_queries import MedicineQueryService
 from argos_mcp_data.domain.cattle import (
     ListAnimalLotHistoryRequest,
     ListApplicationAnimalsRequest,
@@ -20,6 +21,7 @@ from argos_mcp_data.domain.cattle import (
     ListPropertiesRequest,
 )
 from argos_mcp_data.domain.cattle_documents import ListCattleDocumentsRequest
+from argos_mcp_data.domain.medicine import ListMedicineDocumentsRequest, ListMedicinesRequest
 from argos_mcp_data.settings import Settings
 
 
@@ -132,6 +134,24 @@ def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
     async def list_cattle_documents(payload: ListCattleDocumentsRequest) -> dict[str, Any]:
         """Lista documentos Mongo de histórico bovino das propriedades autorizadas."""
         result = await service.list_cattle_documents(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+
+def register_medicine_tools(server: Any, service: MedicineQueryService) -> None:
+    """Registra consultas globais do catálogo destinadas ao agente Doutor."""
+
+    @server.tool()
+    async def list_medicines(payload: ListMedicinesRequest) -> dict[str, Any]:
+        """Lista cadastro, indicação, dose e carência do catálogo SQL de medicamentos."""
+        result = await service.list_medicines(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_medicine_documents(
+        payload: ListMedicineDocumentsRequest,
+    ) -> dict[str, Any]:
+        """Lista documentos Mongo de bula e detalhes de medicamentos."""
+        result = await service.list_medicine_documents(get_access_context(), payload)
         return result.model_dump(mode="json")
 
 
