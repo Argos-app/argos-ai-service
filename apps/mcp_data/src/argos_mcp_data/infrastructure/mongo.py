@@ -25,8 +25,15 @@ class ReadOnlyMongoReader:
         *,
         projection: Mapping[str, int] | None = None,
         limit: int,
+        skip: int = 0,
+        sort: Sequence[tuple[str, int]] = (),
     ) -> Sequence[Mapping[str, Any]]:
         if not 1 <= limit <= 1000:
             raise ValueError("limit deve estar entre 1 e 1000")
-        cursor = self._database[collection].find(filter, projection).limit(limit)
+        if skip < 0:
+            raise ValueError("skip não pode ser negativo")
+        cursor = self._database[collection].find(filter, projection)
+        if sort:
+            cursor = cursor.sort(list(sort))
+        cursor = cursor.skip(skip).limit(limit)
         return tuple(await cursor.to_list(length=limit))

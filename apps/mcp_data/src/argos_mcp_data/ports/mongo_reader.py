@@ -19,4 +19,6 @@ class MongoReader(Protocol):
         *,
         projection: Mapping[str, int] | None = None,
         limit: int,
+        skip: int = 0,
+        sort: Sequence[tuple[str, int]] = (),
     ) -> Sequence[Mapping[str, Any]]: ...
