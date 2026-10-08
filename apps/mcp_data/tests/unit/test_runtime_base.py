@@ -1,7 +1,12 @@
 """Verificações da fundação do runtime MCP de dados."""
 
 import pytest
-from argos_mcp_data.server import StaticServiceTokenVerifier, create_mcp_server
+from argos_mcp_data.application import CattleQueryService
+from argos_mcp_data.server import (
+    StaticServiceTokenVerifier,
+    create_mcp_server,
+    register_cattle_tools,
+)
 from argos_mcp_data.settings import Settings
 
 
@@ -25,11 +30,36 @@ def test_runtime_rejects_missing_read_only_connections_and_auth() -> None:
         create_mcp_server(Settings())
 
 
-def test_mcp_server_initializes_with_auth_and_no_business_tools() -> None:
+def test_mcp_server_initializes_with_auth() -> None:
     server = create_mcp_server(complete_settings())
 
     assert server.name == "argos-mcp-data"
     assert server._tool_manager._tools == {}
+
+
+def test_cattle_tools_are_registered_with_typed_payload_schemas() -> None:
+    server = create_mcp_server(complete_settings())
+    register_cattle_tools(server, CattleQueryService(object(), object()))
+
+    tools = server._tool_manager._tools
+    assert set(tools) == {
+        "list_properties",
+        "list_herds",
+        "list_lots",
+        "list_exception_animals",
+        "list_applications",
+        "list_application_animals",
+        "list_occurrences",
+        "list_animal_lot_history",
+    }
+    for tool in tools.values():
+        schema = tool.parameters
+        assert list(schema["properties"]) == ["payload"]
+        payload = schema["properties"]["payload"]
+        assert payload.get("$ref") or payload.get("type") == "object"
+        definitions = schema.get("$defs", schema.get("definitions", {}))
+        assert definitions
+        assert all(value.get("additionalProperties") is False for value in definitions.values())
 
 
 def test_service_token_verifier_rejects_absent_or_wrong_token() -> None:
