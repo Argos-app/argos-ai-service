@@ -46,7 +46,7 @@ class AgentDefinition:
     prompt_version: str
     input_schema: type[BaseModel]
     output_schema: type[BaseModel]
-    tool_names: tuple[str, ...]
+    tool_slots: tuple[str, ...]
     model_policy: ModelPolicyId
 
 
@@ -66,13 +66,13 @@ _EXPECTED_SCHEMAS: dict[AgentId, tuple[type[BaseModel], type[BaseModel]]] = {
     AgentId.QUESTION_FORMATTER: (QuestionFormatterInput, QuestionFormatterResult),
 }
 
-_ALLOWED_TOOLS: dict[AgentId, frozenset[str]] = {
+ALLOWED_TOOL_SLOTS: dict[AgentId, frozenset[str]] = {
     AgentId.ROUTER: frozenset(),
-    AgentId.FARM: frozenset({"mock_consultar_fazenda"}),
-    AgentId.DOCTOR: frozenset({"mock_consultar_medicamento"}),
-    AgentId.ANALYST: frozenset({"mock_calcular_previsao"}),
-    AgentId.SECRETARY: frozenset({"mock_consultar_fazenda", "mock_preparar_relatorio"}),
-    AgentId.INFORMATION: frozenset({"mock_consultar_documental"}),
+    AgentId.FARM: frozenset({"farm_data"}),
+    AgentId.DOCTOR: frozenset({"medicine_reference"}),
+    AgentId.ANALYST: frozenset({"prediction"}),
+    AgentId.SECRETARY: frozenset({"farm_data", "report_delivery"}),
+    AgentId.INFORMATION: frozenset({"documental_a2a"}),
     AgentId.ORCHESTRATOR: frozenset(),
     AgentId.JUDGE: frozenset(),
     AgentId.QUESTION_FORMATTER: frozenset(),
@@ -131,16 +131,16 @@ class AgentRegistry:
         if (definition.input_schema, definition.output_schema) != expected_schemas:
             raise TypeError(f"Schemas incompatíveis para {definition.agent_id.value}")
 
-        if not isinstance(definition.tool_names, tuple):
-            raise TypeError("tool_names deve ser uma tupla imutável")
-        if any(not isinstance(name, str) or not name.strip() for name in definition.tool_names):
-            raise ValueError("tool_names não pode conter nomes vazios")
-        if len(set(definition.tool_names)) != len(definition.tool_names):
-            raise ValueError(f"Ferramenta duplicada para {definition.agent_id.value}")
+        if not isinstance(definition.tool_slots, tuple):
+            raise TypeError("tool_slots deve ser uma tupla imutável")
+        if any(not isinstance(slot, str) or not slot.strip() for slot in definition.tool_slots):
+            raise ValueError("tool_slots não pode conter identificadores vazios")
+        if len(set(definition.tool_slots)) != len(definition.tool_slots):
+            raise ValueError(f"Slot de ferramenta duplicado para {definition.agent_id.value}")
 
-        allowed_tools = _ALLOWED_TOOLS[definition.agent_id]
-        if not set(definition.tool_names) <= allowed_tools:
-            raise ValueError(f"Ferramenta não permitida para {definition.agent_id.value}")
+        allowed_slots = ALLOWED_TOOL_SLOTS[definition.agent_id]
+        if not set(definition.tool_slots) <= allowed_slots:
+            raise ValueError(f"Slot de ferramenta não permitido para {definition.agent_id.value}")
 
         expected_policy = _EXPECTED_MODEL_POLICIES[definition.agent_id]
         if definition.model_policy is not expected_policy:
@@ -174,7 +174,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=RouterInput,
             output_schema=RoutePlan,
-            tool_names=(),
+            tool_slots=(),
             model_policy=ModelPolicyId.ROUTER,
         ),
         AgentDefinition(
@@ -183,7 +183,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
-            tool_names=("mock_consultar_fazenda",),
+            tool_slots=("farm_data",),
             model_policy=ModelPolicyId.FARM,
         ),
         AgentDefinition(
@@ -192,7 +192,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
-            tool_names=("mock_consultar_medicamento",),
+            tool_slots=("medicine_reference",),
             model_policy=ModelPolicyId.DOCTOR,
         ),
         AgentDefinition(
@@ -201,7 +201,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
-            tool_names=("mock_calcular_previsao",),
+            tool_slots=("prediction",),
             model_policy=ModelPolicyId.ANALYST,
         ),
         AgentDefinition(
@@ -210,7 +210,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
-            tool_names=("mock_consultar_fazenda", "mock_preparar_relatorio"),
+            tool_slots=("farm_data", "report_delivery"),
             model_policy=ModelPolicyId.SECRETARY,
         ),
         AgentDefinition(
@@ -219,7 +219,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
-            tool_names=("mock_consultar_documental",),
+            tool_slots=("documental_a2a",),
             model_policy=ModelPolicyId.INFORMATION,
         ),
         AgentDefinition(
@@ -228,7 +228,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=OrchestratorInput,
             output_schema=OrchestratorResult,
-            tool_names=(),
+            tool_slots=(),
             model_policy=ModelPolicyId.ORCHESTRATOR,
         ),
         AgentDefinition(
@@ -237,7 +237,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=JudgeInput,
             output_schema=JudgeResult,
-            tool_names=(),
+            tool_slots=(),
             model_policy=ModelPolicyId.JUDGE,
         ),
         AgentDefinition(
@@ -246,7 +246,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             prompt_version="1",
             input_schema=QuestionFormatterInput,
             output_schema=QuestionFormatterResult,
-            tool_names=(),
+            tool_slots=(),
             model_policy=ModelPolicyId.QUESTION_FORMATTER,
         ),
     )
