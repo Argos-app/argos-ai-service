@@ -142,7 +142,11 @@ def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
 
     @server.tool()
     async def get_farm_summary(payload: FarmSummaryRequest) -> dict[str, Any]:
-        """Resume rebanhos, lotes e cabeças atuais das propriedades autorizadas."""
+        """Soma lot.head_count dos lotes autorizados, sem adicionar exceções individuais.
+
+        head_count_min/max filtram cada lote antes da soma. active é True por padrão;
+        use active=null para agrupar ativos e inativos com group_by=active.
+        """
         result = await service.get_farm_summary(get_access_context(), payload)
         return result.model_dump(mode="json")
 
@@ -150,7 +154,11 @@ def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
     async def summarize_exception_animals(
         payload: ExceptionSummaryRequest,
     ) -> dict[str, Any]:
-        """Agrupa animais de exceção por situação e informa pesos conhecidos e ausentes."""
+        """Conta exceções autorizadas, com filtros de rebanho, lote, categoria e brinco.
+
+        date_from/to referem-se à data da exceção, não à morte ou ao abate.
+        A soma de pesos inclui somente pesos conhecidos, com contagem dos ausentes.
+        """
         result = await service.summarize_exception_animals(get_access_context(), payload)
         return result.model_dump(mode="json")
 

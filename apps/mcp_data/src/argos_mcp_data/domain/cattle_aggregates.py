@@ -6,32 +6,44 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
-from argos_mcp_data.domain.cattle import _Model
+from argos_mcp_data.domain.cattle import ScopedPageRequest, _Model
 
-FarmGroup = Literal["property", "herd", "lot_category", "exception_lot"]
+FarmGroup = Literal["property", "herd", "lot", "lot_category", "exception_lot", "active"]
 ExceptionGroup = Literal["property", "herd", "lot", "status", "category", "reason"]
 AnimalStatus = Literal["ATIVO", "VENDIDO", "ABATIDO", "MORTO", "RECUPERADO"]
 AnimalCategory = Literal["BEZERRO", "GARROTE", "BOI", "TOURO"]
 
 
-class _AggregateRequest(_Model):
-    property_ids: tuple[UUID, ...] | None = Field(default=None, min_length=1, max_length=100)
+class _AggregateRequest(ScopedPageRequest):
     herd_id: UUID | None = None
     lot_id: UUID | None = None
-    page_size: int = Field(default=50, ge=1, le=100)
-    offset: int = Field(default=0, ge=0, le=10_000)
 
 
 class FarmSummaryRequest(_AggregateRequest):
+    """Filtra lotes antes de agrupar; active=None inclui ativos e inativos."""
+
     lot_category: Literal["ENGORDA", "CRIA", "RECRIA"] | None = None
     active: bool | None = True
     is_exception_lot: bool | None = None
+    head_count_min: int | None = Field(default=None, ge=0)
+    head_count_max: int | None = Field(default=None, ge=0)
     group_by: FarmGroup = "property"
+
+    @model_validator(mode="after")
+    def validate_head_count_range(self):
+        if (
+            self.head_count_min is not None
+            and self.head_count_max is not None
+            and self.head_count_min > self.head_count_max
+        ):
+            raise ValueError("head_count_min deve ser menor ou igual a head_count_max")
+        return self
 
 
 class ExceptionSummaryRequest(_AggregateRequest):
     statuses: tuple[AnimalStatus, ...] | None = Field(default=None, min_length=1, max_length=5)
     category: AnimalCategory | None = None
+    ear_tag: str | None = Field(default=None, min_length=1, max_length=20)
     reason: str | None = Field(default=None, min_length=1, max_length=120)
     date_from: date | None = None
     date_to: date | None = None

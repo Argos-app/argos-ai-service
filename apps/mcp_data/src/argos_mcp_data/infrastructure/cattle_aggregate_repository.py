@@ -32,8 +32,10 @@ class PostgresCattleAggregateRepository(CattleAggregateReadRepository):
         group_columns = {
             "property": ("p.id", "p.name"),
             "herd": ("h.id", "h.herd_name"),
+            "lot": ("l.id", "l.lot_code"),
             "lot_category": ("l.category", "l.category"),
             "exception_lot": ("l.is_exception_lot", "l.is_exception_lot"),
+            "active": ("l.active", "l.active"),
         }
         id_expr, name_expr = group_columns[request.group_by]
         predicates = ["p.id = ANY($1::uuid[])"]
@@ -53,6 +55,12 @@ class PostgresCattleAggregateRepository(CattleAggregateReadRepository):
         if request.is_exception_lot is not None:
             values.append(request.is_exception_lot)
             predicates.append(f"l.is_exception_lot = ${len(values)}")
+        if request.head_count_min is not None:
+            values.append(request.head_count_min)
+            predicates.append(f"l.head_count >= ${len(values)}")
+        if request.head_count_max is not None:
+            values.append(request.head_count_max)
+            predicates.append(f"l.head_count <= ${len(values)}")
         values.extend((request.page_size + 1, request.offset))
         sql = f"""
             SELECT {id_expr} AS group_value, {name_expr} AS group_label,
@@ -103,9 +111,9 @@ class PostgresCattleAggregateRepository(CattleAggregateReadRepository):
         ]
         values: list[Any] = [list(scope.property_ids)]
         for expression, value in (
-            ("h.id", request.herd_id),
-            ("l.id", request.lot_id),
-            ("ae.category", request.category),
+            ("h.id =", request.herd_id),
+            ("l.id =", request.lot_id),
+            ("ae.category =", request.category),
             ("ae.exception_date >=", request.date_from),
             ("ae.exception_date <=", request.date_to),
         ):
@@ -118,6 +126,9 @@ class PostgresCattleAggregateRepository(CattleAggregateReadRepository):
         if request.reason:
             values.append(request.reason)
             predicates.append(f"position(lower(${len(values)}) in lower(ae.exception_reason)) > 0")
+        if request.ear_tag is not None:
+            values.append(request.ear_tag)
+            predicates.append(f"position(lower(${len(values)}) in lower(ae.ear_tag)) > 0")
         values.extend((request.page_size + 1, request.offset))
         sql = f"""
             SELECT {group_expr} AS group_value, {label_expr} AS group_label,
