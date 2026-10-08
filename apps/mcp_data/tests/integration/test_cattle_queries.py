@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 
 import pytest
 
@@ -161,3 +162,80 @@ async def test_occurrences_and_lot_history_exclude_external_property_rows(mcp_da
             }
             for item in history["items"]
         )
+
+
+async def test_missing_invalid_and_expired_delegation_fail_before_mcp(mcp_data_harness):
+    import httpx
+
+    harness = mcp_data_harness
+    headers = {"Authorization": f"Bearer {harness.service_token}"}
+    async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+        missing = await client.get(harness.url, headers=headers)
+        invalid = await client.get(
+            harness.url, headers={**headers, "X-Argos-Delegation": "not-a-token"}
+        )
+        expired = await client.get(
+            harness.url,
+            headers={
+                **headers,
+                "X-Argos-Delegation": harness.delegation_token({"exp": int(time.time()) - 1}),
+            },
+        )
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+    assert expired.status_code == 401
+
+
+async def test_agent_and_operation_mismatch_are_denied_before_repository(mcp_data_harness):
+    harness = mcp_data_harness
+    async with harness.client(delegation_overrides={"operations": ["report.read"]}) as session:
+        denied_operation = await session.call_tool("list_properties", {"payload": {}})
+        assert denied_operation.isError
+
+    async with harness.client(
+        delegation_overrides={"agent": "doutor", "operations": ["medicine.read"]}
+    ) as session:
+        denied_agent = await session.call_tool("list_properties", {"payload": {}})
+        assert denied_agent.isError
+
+
+async def test_revoked_or_inactive_property_invalidates_the_whole_delegation(
+    mcp_data_harness,
+):
+    harness = mcp_data_harness
+    sql = await harness.connect_to_test_database()
+    try:
+        async with harness.client() as session:
+            # The first page proves the delegation was initially usable.
+            first_page = await session.call_tool("list_properties", {"payload": {"page_size": 1}})
+            assert not first_page.isError
+
+            # Deactivate one of the properties still named by the signed token.
+            # Authorization must reject the stale scope before running SQL tools.
+            property_inactive = await sql.execute(
+                "UPDATE property SET active = FALSE WHERE id = $1",
+                harness.fixture_ids["property_a"],
+            )
+            assert property_inactive == "UPDATE 1"
+            denied_inactive = await session.call_tool(
+                "list_properties", {"payload": {"page_size": 1, "offset": 1}}
+            )
+            assert denied_inactive.isError
+
+            await sql.execute(
+                "UPDATE property SET active = TRUE WHERE id = $1",
+                harness.fixture_ids["property_a"],
+            )
+            link_revoked = await sql.execute(
+                "UPDATE user_property SET active = FALSE WHERE user_id = $1 AND property_id = $2",
+                harness.fixture_ids["user_id"],
+                harness.fixture_ids["property_b"],
+            )
+            assert link_revoked == "UPDATE 1"
+            denied_revoked = await session.call_tool(
+                "list_properties", {"payload": {"page_size": 1, "offset": 1}}
+            )
+            assert denied_revoked.isError
+    finally:
+        await sql.close()

@@ -69,7 +69,7 @@ class McpDataHarness:
             self.port = listener.getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}/mcp"
 
-    def delegation_token(self) -> str:
+    def delegation_token(self, overrides: dict[str, object] | None = None) -> str:
         now = int(datetime.now(UTC).timestamp())
         claims = {
             "v": 1,
@@ -88,6 +88,7 @@ class McpDataHarness:
             "jti": uuid4().hex,
             "request_id": uuid4().hex,
         }
+        claims.update(overrides or {})
         header = _b64url(json.dumps({"alg": "EdDSA", "kid": "integration-key"}).encode())
         payload = _b64url(json.dumps(claims, separators=(",", ":")).encode())
         signing_input = f"{header}.{payload}".encode("ascii")
@@ -154,8 +155,14 @@ class McpDataHarness:
             self.log_file.close()
             self.log_file = None
 
+    async def connect_to_test_database(self):
+        import asyncpg
+
+        dsn = SQL_ADMIN_DSN.rsplit("/", 1)[0] + "/" + self.database_name
+        return await asyncpg.connect(dsn, timeout=5)
+
     @asynccontextmanager
-    async def client(self):
+    async def client(self, *, delegation_overrides: dict[str, object] | None = None):
         import httpx
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
@@ -163,7 +170,7 @@ class McpDataHarness:
         async with httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self.service_token}",
-                "X-Argos-Delegation": self.delegation_token(),
+                "X-Argos-Delegation": self.delegation_token(delegation_overrides),
             },
             timeout=httpx.Timeout(30, read=120),
             trust_env=False,
