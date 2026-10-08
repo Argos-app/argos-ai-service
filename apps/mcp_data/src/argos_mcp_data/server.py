@@ -20,6 +20,10 @@ from argos_mcp_data.domain.cattle import (
     ListOccurrencesRequest,
     ListPropertiesRequest,
 )
+from argos_mcp_data.domain.cattle_aggregates import (
+    ExceptionSummaryRequest,
+    FarmSummaryRequest,
+)
 from argos_mcp_data.domain.cattle_documents import ListCattleDocumentsRequest
 from argos_mcp_data.domain.medicine import ListMedicineDocumentsRequest, ListMedicinesRequest
 from argos_mcp_data.settings import Settings
@@ -134,6 +138,20 @@ def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
     async def list_cattle_documents(payload: ListCattleDocumentsRequest) -> dict[str, Any]:
         """Lista documentos Mongo de histórico bovino das propriedades autorizadas."""
         result = await service.list_cattle_documents(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def get_farm_summary(payload: FarmSummaryRequest) -> dict[str, Any]:
+        """Resume rebanhos, lotes e cabeças atuais das propriedades autorizadas."""
+        result = await service.get_farm_summary(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def summarize_exception_animals(
+        payload: ExceptionSummaryRequest,
+    ) -> dict[str, Any]:
+        """Agrupa animais de exceção por situação e informa pesos conhecidos e ausentes."""
+        result = await service.summarize_exception_animals(get_access_context(), payload)
         return result.model_dump(mode="json")
 
 

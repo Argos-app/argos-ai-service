@@ -10,6 +10,7 @@ from argos_mcp_data.infrastructure import (
     MongoCattleDocumentRepository,
     MongoMedicineDocumentRepository,
     PostgresAccessDirectory,
+    PostgresCattleAggregateRepository,
     PostgresCattleRepository,
     PostgresMedicineRepository,
     ReadOnlyMongoReader,
@@ -91,6 +92,7 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             access_policy,
             PostgresCattleRepository(sql_reader),
             document_repository,
+            PostgresCattleAggregateRepository(sql_reader),
         )
         register_cattle_tools(server, cattle_queries)
         medicine_queries = MedicineQueryService(
