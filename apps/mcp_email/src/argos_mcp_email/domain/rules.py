@@ -54,9 +54,15 @@ def ensure_idempotency_consistency(
 
 _ALLOWED_TRANSITIONS: dict[DispatchState, frozenset[DispatchState]] = {
     DispatchState.PENDING: frozenset(
-        {DispatchState.ACCEPTED, DispatchState.FAILED, DispatchState.UNKNOWN}
+        {
+            DispatchState.ACCEPTED,
+            DispatchState.PARTIAL,
+            DispatchState.FAILED,
+            DispatchState.UNKNOWN,
+        }
     ),
     DispatchState.ACCEPTED: frozenset(),
+    DispatchState.PARTIAL: frozenset(),
     DispatchState.FAILED: frozenset(),
     DispatchState.UNKNOWN: frozenset(),
 }

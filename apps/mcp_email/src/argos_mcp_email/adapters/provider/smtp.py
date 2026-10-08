@@ -44,7 +44,7 @@ class SmtpMailProvider:
     ) -> ProviderSendResult:
         message_id = make_msgid()
         try:
-            await asyncio.to_thread(
+            refused_recipients = await asyncio.to_thread(
                 self._send_sync,
                 sender,
                 recipients,
@@ -63,7 +63,13 @@ class SmtpMailProvider:
                 accepted=False,
                 error_code=type(exc).__name__,
             )
-        return ProviderSendResult(accepted=True, provider_message_id=message_id)
+        refused_recipient_count = len(refused_recipients or {})
+        return ProviderSendResult(
+            accepted=True,
+            provider_message_id=message_id,
+            error_code=("partial_recipient_refusal" if refused_recipient_count else None),
+            refused_recipient_count=refused_recipient_count,
+        )
 
     def _send_sync(
         self,
@@ -72,7 +78,7 @@ class SmtpMailProvider:
         subject: str,
         body: str,
         message_id: str,
-    ) -> None:
+    ) -> dict[str, tuple[int, bytes]]:
         message = EmailMessage()
         message["From"] = sender
         message["To"] = ", ".join(recipient.email for recipient in recipients)
@@ -85,4 +91,4 @@ class SmtpMailProvider:
                 smtp.starttls()
             if self._username and self._password:
                 smtp.login(self._username, self._password)
-            smtp.send_message(message)
+            return smtp.send_message(message)

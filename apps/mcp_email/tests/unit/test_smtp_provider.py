@@ -28,6 +28,7 @@ class FakeSmtp:
 
     def send_message(self, message):
         self.messages.append(message)
+        return {}
 
 
 @pytest.mark.asyncio
