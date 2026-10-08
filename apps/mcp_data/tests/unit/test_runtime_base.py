@@ -56,6 +56,8 @@ def test_cattle_tools_are_registered_with_typed_payload_schemas() -> None:
         "list_occurrences",
         "list_animal_lot_history",
         "list_cattle_documents",
+        "get_farm_summary",
+        "summarize_exception_animals",
     }
     for tool in tools.values():
         schema = tool.parameters

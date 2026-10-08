@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from decimal import Decimal
 
 import pytest
 
@@ -35,6 +36,8 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
             "list_occurrences",
             "list_animal_lot_history",
             "list_cattle_documents",
+            "get_farm_summary",
+            "summarize_exception_animals",
             "list_medicines",
             "list_medicine_documents",
         }
@@ -84,6 +87,52 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
         )
         assert len(lots["items"]) == 2
         assert {item["property_id"] for item in lots["items"]} == property_ids
+
+        summary = _result_json(
+            await session.call_tool(
+                "get_farm_summary",
+                {"payload": {"group_by": "property", "page_size": 10}},
+            )
+        )
+        summary_by_property = {item["dimensions"]["property"]: item for item in summary["items"]}
+        assert set(summary_by_property) == property_ids
+        assert all(item["herd_count"] == 1 for item in summary["items"])
+        assert all(item["lot_count"] == 2 for item in summary["items"])
+        assert all(item["head_count"] == 21 for item in summary["items"])
+
+        unauthorized_summary = await session.call_tool(
+            "get_farm_summary",
+            {
+                "payload": {
+                    "property_ids": [str(harness.fixture_ids["property_external"])],
+                }
+            },
+        )
+        assert unauthorized_summary.isError
+
+        exception_summary = _result_json(
+            await session.call_tool(
+                "summarize_exception_animals",
+                {"payload": {"group_by": "status", "page_size": 10}},
+            )
+        )
+        active = next(
+            item for item in exception_summary["items"] if item["dimensions"]["status"] == "ATIVO"
+        )
+        assert active["animal_count"] == 2
+        assert active["known_weight_count"] == 2
+        assert active["missing_weight_count"] == 0
+        assert Decimal(active["known_weight_sum"]) == Decimal("800")
+
+        unauthorized_exceptions = await session.call_tool(
+            "summarize_exception_animals",
+            {
+                "payload": {
+                    "property_ids": [str(harness.fixture_ids["property_external"])],
+                }
+            },
+        )
+        assert unauthorized_exceptions.isError
 
 
 async def test_cattle_documents_are_paginated_and_scoped_by_authorized_properties(
