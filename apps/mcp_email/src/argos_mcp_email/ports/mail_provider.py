@@ -12,6 +12,7 @@ class ProviderSendResult:
     provider_message_id: str | None = None
     error_code: str | None = None
     delivery_unknown: bool = False
+    refused_recipient_count: int = 0
 
 
 class MailProvider(Protocol):

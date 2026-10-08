@@ -79,11 +79,15 @@ class SendReport:
             target_state = (
                 DispatchState.UNKNOWN
                 if provider_result.delivery_unknown
+                else DispatchState.PARTIAL
+                if provider_result.refused_recipient_count > 0
                 else DispatchState.ACCEPTED
                 if provider_result.accepted
                 else DispatchState.FAILED
             )
-            error_code = provider_result.error_code
+            error_code = provider_result.error_code or (
+                "partial_recipient_refusal" if provider_result.refused_recipient_count > 0 else None
+            )
             provider_message_id = provider_result.provider_message_id
         except Exception:
             target_state = DispatchState.UNKNOWN
