@@ -135,6 +135,165 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
         assert unauthorized_exceptions.isError
 
 
+async def test_farm_summary_groups_and_quantity_filters_match_scoped_lot_details(mcp_data_harness):
+    harness = mcp_data_harness
+    async with harness.client() as session:
+        details = _result_json(await session.call_tool("list_lots", {"payload": {"active": True}}))
+        lots = details["items"]
+        dimensions = {
+            "property": "property_id",
+            "herd": "herd_id",
+            "lot": "lot_id",
+            "lot_category": "category",
+            "exception_lot": "is_exception_lot",
+            "active": "active",
+        }
+        for grouping, field in dimensions.items():
+            result = _result_json(
+                await session.call_tool("get_farm_summary", {"payload": {"group_by": grouping}})
+            )
+            expected = {}
+            for lot in lots:
+                expected.setdefault(lot[field], []).append(lot)
+            assert {row["dimensions"][grouping] for row in result["items"]} == set(expected)
+            for row in result["items"]:
+                grouped = expected[row["dimensions"][grouping]]
+                assert row["head_count"] == sum(lot["head_count"] for lot in grouped)
+                assert row["lot_count"] == len(grouped)
+                assert row["herd_count"] == len({lot["herd_id"] for lot in grouped})
+
+        quantity_filters = {"head_count_min": 20, "head_count_max": 20}
+        filtered_details = _result_json(
+            await session.call_tool("list_lots", {"payload": {**quantity_filters, "active": True}})
+        )["items"]
+        assert len(filtered_details) == 2
+        all_groups = _result_json(
+            await session.call_tool(
+                "get_farm_summary", {"payload": {**quantity_filters, "group_by": "lot"}}
+            )
+        )
+        assert {row["dimensions"]["lot"] for row in all_groups["items"]} == {
+            lot["lot_id"] for lot in filtered_details
+        }
+        assert sum(row["head_count"] for row in all_groups["items"]) == 40
+        assert {row["dimensions"]["label"] for row in all_groups["items"]} == {"LOTE-REPETIDO"}
+
+        first = _result_json(
+            await session.call_tool(
+                "get_farm_summary",
+                {"payload": {**quantity_filters, "group_by": "lot", "page_size": 1}},
+            )
+        )
+        second = _result_json(
+            await session.call_tool(
+                "get_farm_summary",
+                {
+                    "payload": {
+                        **quantity_filters,
+                        "group_by": "lot",
+                        "page_size": 1,
+                        "offset": first["next_offset"],
+                    }
+                },
+            )
+        )
+        assert first["has_more"] is True
+        assert second["has_more"] is False
+        assert first["items"] + second["items"] == all_groups["items"]
+
+        activity = _result_json(
+            await session.call_tool(
+                "get_farm_summary", {"payload": {"active": None, "group_by": "active"}}
+            )
+        )
+        by_activity = {row["dimensions"]["active"]: row for row in activity["items"]}
+        assert set(by_activity) == {True, False}
+        assert by_activity[True]["head_count"] == 42
+        assert by_activity[True]["lot_count"] == 4
+        assert by_activity[False]["head_count"] == 0
+        assert by_activity[False]["lot_count"] == 1
+        zero = _result_json(
+            await session.call_tool(
+                "get_farm_summary",
+                {"payload": {"active": False, "head_count_min": 0, "head_count_max": 0}},
+            )
+        )
+        assert len(zero["items"]) == 1
+        assert zero["items"][0]["head_count"] == 0
+
+
+async def test_exception_summary_filters_are_valid_and_preserve_property_scope(mcp_data_harness):
+    harness = mcp_data_harness
+    ids = harness.fixture_ids
+    async with harness.client() as session:
+        for payload in (
+            {"herd_id": str(ids["herd_a"])},
+            {"lot_id": str(ids["exception_lot_a"])},
+            {
+                "property_ids": [str(ids["property_a"])],
+                "herd_id": str(ids["herd_a"]),
+                "lot_id": str(ids["exception_lot_a"]),
+                "category": "BOI",
+                "statuses": ["ATIVO"],
+                "ear_tag": "brinco-igual",
+                "reason": "integração",
+                "date_from": str(ids["today"]),
+                "date_to": str(ids["today"]),
+            },
+        ):
+            result = _result_json(
+                await session.call_tool("summarize_exception_animals", {"payload": payload})
+            )
+            assert len(result["items"]) == 1
+            assert result["items"][0]["animal_count"] == 1
+            assert Decimal(result["items"][0]["known_weight_sum"]) == Decimal("400")
+
+        category = _result_json(
+            await session.call_tool("summarize_exception_animals", {"payload": {"category": "BOI"}})
+        )
+        assert category["items"][0]["animal_count"] == 2
+        for payload in (
+            {"herd_id": str(ids["herd_external"])},
+            {"lot_id": str(ids["exception_lot_external"])},
+            {"ear_tag": "BRINCO-CRUZADO"},
+            {"ear_tag": "' OR 1=1 --"},
+            {"category": "BEZERRO"},
+        ):
+            result = _result_json(
+                await session.call_tool("summarize_exception_animals", {"payload": payload})
+            )
+            assert result["items"] == []
+
+        filtered_animals = _result_json(
+            await session.call_tool(
+                "list_exception_animals", {"payload": {"category": "BOI", "ear_tag": "igual"}}
+            )
+        )["items"]
+        for grouping, field in {
+            "property": "property_id",
+            "lot": "current_lot_id",
+            "category": "category",
+            "status": "status",
+            "reason": "exception_reason",
+        }.items():
+            result = _result_json(
+                await session.call_tool(
+                    "summarize_exception_animals",
+                    {"payload": {"group_by": grouping, "category": "BOI", "ear_tag": "igual"}},
+                )
+            )
+            expected = {}
+            for animal in filtered_animals:
+                expected.setdefault(animal[field], []).append(animal)
+            assert {row["dimensions"][grouping] for row in result["items"]} == set(expected)
+            for row in result["items"]:
+                grouped = expected[row["dimensions"][grouping]]
+                assert row["animal_count"] == len(grouped)
+                assert Decimal(row["known_weight_sum"]) == sum(
+                    Decimal(animal["current_weight"]) for animal in grouped
+                )
+
+
 async def test_cattle_documents_are_paginated_and_scoped_by_authorized_properties(
     mcp_data_harness,
 ):

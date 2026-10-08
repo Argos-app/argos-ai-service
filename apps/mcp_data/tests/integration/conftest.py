@@ -342,6 +342,15 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
         )
 
         await sql.execute(
+            """INSERT INTO lot
+               (id, herd_id, lot_code, category, head_count, open_date, active)
+               VALUES ($1, $2, 'LOTE-INATIVO', 'RECRIA', 0, $3, FALSE)""",
+            uuid4(),
+            herd_a,
+            today,
+        )
+
+        await sql.execute(
             """INSERT INTO supplier (id, company_name, cnpj, active)
                VALUES ($1, 'Fornecedor Teste', $2, TRUE)""",
             supplier_id,
@@ -432,6 +441,10 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
         "property_b": property_b,
         "property_external": property_external,
         "property_ids_authorized": {property_a, property_b},
+        "herd_a": herd_a,
+        "herd_external": herd_external,
+        "exception_lot_a": exception_lot_a,
+        "exception_lot_external": exception_lot_external,
         "animal_a": animal_a,
         "animal_b": animal_b,
         "animal_external": animal_external,
