@@ -40,7 +40,7 @@ class _BoundFilters:
 
     def add(self, condition: str, value: Any) -> None:
         self.values.append(value)
-        self.add_clause(condition, len(self.values) - 1)
+        self.add_clause(condition, len(self.values))
 
     def add_many(self, condition: str, *values: Any) -> None:
         first_index = len(self.values) + 1
