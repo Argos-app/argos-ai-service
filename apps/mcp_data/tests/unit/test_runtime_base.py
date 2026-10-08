@@ -15,6 +15,8 @@ def complete_settings(**overrides: object) -> Settings:
         "sql_dsn": "postgresql://readonly@localhost/argos",
         "mongo_uri": "mongodb://readonly@localhost:27017",
         "mongo_database": "argos",
+        "mongo_cattle_collection": "bois",
+        "mongo_relational_id_format": "string",
         "internal_service_token": "internal-test-token",
         "mcp_auth_issuer_url": "https://issuer.example.test",
         "mcp_resource_server_url": "https://data.example.test/mcp",
@@ -39,7 +41,7 @@ def test_mcp_server_initializes_with_auth() -> None:
 
 def test_cattle_tools_are_registered_with_typed_payload_schemas() -> None:
     server = create_mcp_server(complete_settings())
-    register_cattle_tools(server, CattleQueryService(object(), object()))
+    register_cattle_tools(server, CattleQueryService(object(), object(), object()))
 
     tools = server._tool_manager._tools
     assert set(tools) == {
@@ -51,6 +53,7 @@ def test_cattle_tools_are_registered_with_typed_payload_schemas() -> None:
         "list_application_animals",
         "list_occurrences",
         "list_animal_lot_history",
+        "list_cattle_documents",
     }
     for tool in tools.values():
         schema = tool.parameters

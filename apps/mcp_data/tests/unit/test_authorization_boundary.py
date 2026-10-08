@@ -55,7 +55,7 @@ async def test_denied_cattle_query_never_calls_repository(
     context = _context(agent_id=agent_id, operations=operations)
     current_properties = active_property_ids or {uuid4()}
     repository = _Repository()
-    service = CattleQueryService(AccessPolicy(_Directory(current_properties)), repository)
+    service = CattleQueryService(AccessPolicy(_Directory(current_properties)), repository, object())
 
     with pytest.raises(AccessDeniedError):
         await service.list_properties(context, ListPropertiesRequest())
