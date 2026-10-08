@@ -26,10 +26,13 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        try:
-            port = int(os.getenv("MCP_DATA_PORT", "8000"))
-        except ValueError as exc:
-            raise ValueError("MCP_DATA_PORT deve ser um inteiro") from exc
+        def read_int(name: str, default: int) -> int:
+            try:
+                return int(os.getenv(name, str(default)))
+            except ValueError as exc:
+                raise ValueError(f"{name} deve ser um inteiro") from exc
+
+        port = read_int("MCP_DATA_PORT", 8000)
         if not 1 <= port <= 65535:
             raise ValueError("MCP_DATA_PORT deve estar entre 1 e 65535")
         raw_keys = os.getenv("MCP_DATA_TRUSTED_DELEGATION_KEYS", "{}")
@@ -57,8 +60,8 @@ class Settings:
             mcp_resource_server_url=os.getenv("MCP_DATA_RESOURCE_SERVER_URL"),
             delegation_issuer=os.getenv("MCP_DATA_DELEGATION_ISSUER"),
             trusted_delegation_keys=tuple(delegation_keys.items()),
-            delegation_max_ttl_seconds=int(os.getenv("MCP_DATA_DELEGATION_MAX_TTL", "300")),
-            delegation_clock_skew_seconds=int(os.getenv("MCP_DATA_DELEGATION_CLOCK_SKEW", "30")),
+            delegation_max_ttl_seconds=read_int("MCP_DATA_DELEGATION_MAX_TTL", 300),
+            delegation_clock_skew_seconds=read_int("MCP_DATA_DELEGATION_CLOCK_SKEW", 30),
             mcp_host=os.getenv("MCP_DATA_HOST", "0.0.0.0"),
             mcp_port=port,
         )
