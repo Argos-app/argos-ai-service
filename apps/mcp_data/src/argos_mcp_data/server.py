@@ -1,4 +1,4 @@
-"""Transporte MCP autenticado sem ferramentas de negócio nesta etapa."""
+"""Transporte MCP autenticado e ferramentas de consulta detalhada."""
 
 import hmac
 from typing import Any
@@ -6,6 +6,18 @@ from typing import Any
 from argos_mcp_data.adapters.delegation import (
     DelegationContextMiddleware,
     DelegationTokenVerifier,
+    get_access_context,
+)
+from argos_mcp_data.application.cattle_queries import CattleQueryService
+from argos_mcp_data.domain.cattle import (
+    ListAnimalLotHistoryRequest,
+    ListApplicationAnimalsRequest,
+    ListApplicationsRequest,
+    ListExceptionAnimalsRequest,
+    ListHerdsRequest,
+    ListLotsRequest,
+    ListOccurrencesRequest,
+    ListPropertiesRequest,
 )
 from argos_mcp_data.settings import Settings
 
@@ -34,7 +46,7 @@ class StaticServiceTokenVerifier:
 
 
 def create_mcp_server(settings: Settings) -> Any:
-    """Cria endpoint Streamable HTTP `/mcp`, sem registrar tools nesta etapa."""
+    """Cria endpoint Streamable HTTP `/mcp` autenticado."""
 
     settings.validate_runtime()
     try:
@@ -58,6 +70,62 @@ def create_mcp_server(settings: Settings) -> Any:
             settings.mcp_resource_server_url,
         ),
     )
+
+
+def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
+    """Registra as consultas SQL detalhadas disponíveis ao agente Fazenda."""
+
+    @server.tool()
+    async def list_properties(payload: ListPropertiesRequest) -> dict[str, Any]:
+        """Lista propriedades autorizadas com filtros opcionais de nome e situação."""
+        result = await service.list_properties(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_herds(payload: ListHerdsRequest) -> dict[str, Any]:
+        """Lista rebanhos por propriedade, com filtros de nome, raça e situação."""
+        result = await service.list_herds(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_lots(payload: ListLotsRequest) -> dict[str, Any]:
+        """Lista lotes com categoria, datas, situação e faixa de quantidade de animais."""
+        result = await service.list_lots(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_exception_animals(payload: ListExceptionAnimalsRequest) -> dict[str, Any]:
+        """Lista animais cadastrados na estrutura atual de exceções, com lote e situação."""
+        result = await service.list_exception_animals(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_applications(payload: ListApplicationsRequest) -> dict[str, Any]:
+        """Lista aplicações, medicamentos, doses, quantidades e retirada de carne."""
+        result = await service.list_applications(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_application_animals(
+        payload: ListApplicationAnimalsRequest,
+    ) -> dict[str, Any]:
+        """Lista detalhes por animal das aplicações individualizadas."""
+        result = await service.list_application_animals(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_occurrences(payload: ListOccurrencesRequest) -> dict[str, Any]:
+        """Lista ocorrências clínicas e sua situação para animais autorizados."""
+        result = await service.list_occurrences(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def list_animal_lot_history(
+        payload: ListAnimalLotHistoryRequest,
+    ) -> dict[str, Any]:
+        """Lista o histórico de entrada e saída dos animais em lotes."""
+        result = await service.list_animal_lot_history(get_access_context(), payload)
+        return result.model_dump(mode="json")
 
 
 def create_http_app(server: Any, delegation_verifier: DelegationTokenVerifier) -> Any:

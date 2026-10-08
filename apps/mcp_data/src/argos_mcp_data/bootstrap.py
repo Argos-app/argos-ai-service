@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from argos_mcp_data.adapters.delegation import DelegationTokenVerifier
-from argos_mcp_data.application import AccessPolicy
+from argos_mcp_data.application import AccessPolicy, CattleQueryService
 from argos_mcp_data.infrastructure import (
     AsyncpgSqlReader,
     PostgresAccessDirectory,
+    PostgresCattleRepository,
     ReadOnlyMongoReader,
 )
-from argos_mcp_data.server import create_http_app, create_mcp_server
+from argos_mcp_data.server import create_http_app, create_mcp_server, register_cattle_tools
 from argos_mcp_data.settings import Settings
 
 
@@ -68,12 +69,20 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
         raise
 
     sql_reader = AsyncpgSqlReader(sql_pool)
+    try:
+        access_policy = AccessPolicy(PostgresAccessDirectory(sql_reader))
+        cattle_queries = CattleQueryService(access_policy, PostgresCattleRepository(sql_reader))
+        register_cattle_tools(server, cattle_queries)
+    except Exception:
+        await sql_pool.close()
+        mongo_client.close()
+        raise
     return ServiceRuntime(
         mongo_client=mongo_client,
         sql_pool=sql_pool,
         sql_reader=sql_reader,
         mongo_reader=ReadOnlyMongoReader(database),
-        access_policy=AccessPolicy(PostgresAccessDirectory(sql_reader)),
+        access_policy=access_policy,
         delegation_verifier=delegation_verifier,
         server=server,
     )
