@@ -1,4 +1,5 @@
 -r apps/main_api/requirements.txt
+-r apps/mcp_email/requirements.txt
 pytest>=9.0.3,<10
 pytest-cov>=6,<7
 pytest-asyncio>=0.24,<2

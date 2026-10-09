@@ -1,0 +1,17 @@
+Relatório do lote ${lot_code}
+
+Fazenda: ${property_name}
+Rebanho: ${herd_name} (${herd_breed})
+Categoria: ${lot_category}
+Cabeças no lote: ${head_count}
+Aberto em: ${open_date}
+Liberação para abate: ${slaughter_release_date}
+Apto para abate: ${fit_for_slaughter}
+
+Aplicações:
+${applications}
+
+Animais em exceção:
+${exception_animals}
+
+Consulta realizada em: ${queried_at}
