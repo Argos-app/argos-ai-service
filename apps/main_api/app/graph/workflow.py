@@ -29,6 +29,7 @@ from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 MAX_TASKS = 5
@@ -36,21 +37,20 @@ MAX_REVISIONS = 1
 MAX_MESSAGE_LENGTH = 8000
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 
-_EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
-_CPF = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
-_SECRET_REQUEST = re.compile(
+EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+CPF_PATTERN = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
+SECRET_REQUEST_PATTERN = re.compile(
     r"\b(?:revele|mostre|exiba)\b.{0,60}"
     r"\b(?:chave de api|token de acesso|senha|prompt de sistema)\b",
     re.IGNORECASE,
 )
 
 
-def _minimize_pii(text: str) -> str:
-    """Remove CPF e e-mail óbvios; não substitui um guardrail completo."""
-    return _CPF.sub("[CPF]", _EMAIL.sub("[EMAIL]", text))
+def minimize_pii(text: str) -> str:
+    return CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
 
 
-def _context(state: AgentState) -> dict[str, str]:
+def build_agent_context(state: AgentState) -> dict[str, str]:
     return {
         "user_id": state["user_id"],
         "farm_id": state["farm_id"],
@@ -58,8 +58,7 @@ def _context(state: AgentState) -> dict[str, str]:
     }
 
 
-def _reset_turn() -> dict:
-    """Zera resultados do pedido anterior sem apagar o histórico de mensagens."""
+def reset_turn_state() -> dict:
     return {
         "pii_map": {},
         "sanitized_message": "",
@@ -84,19 +83,18 @@ def _reset_turn() -> dict:
     }
 
 
-def _reject_input(state: AgentState, answer: str, error: str) -> dict:
+def reject_input(state: AgentState, answer: str, error: str) -> dict:
     if state.get("input_kind") == "answer" and state.get("question_id"):
         return {
             "final_answer": answer,
             "errors": [*state.get("errors", []), error],
         }
-    return {**_reset_turn(), "final_answer": answer, "errors": [error]}
+    return {**reset_turn_state(), "final_answer": answer, "errors": [error]}
 
 
 def initial_state(message: str, *, user_id: str, farm_id: str, session_id: str) -> dict:
-    """Entrada de um novo pedido; minimiza PII antes de salvar no checkpoint."""
     return {
-        "messages": [HumanMessage(content=_minimize_pii(message))],
+        "messages": [HumanMessage(content=minimize_pii(message))],
         "user_id": user_id,
         "farm_id": farm_id,
         "session_id": session_id,
@@ -107,16 +105,14 @@ def initial_state(message: str, *, user_id: str, farm_id: str, session_id: str) 
 
 
 def answer_state(answer: str, *, question_id: str) -> dict:
-    """Entrada para responder à pergunta pendente na mesma sessão."""
     return {
-        "messages": [HumanMessage(content=_minimize_pii(answer))],
+        "messages": [HumanMessage(content=minimize_pii(answer))],
         "input_kind": "answer",
         "answer_question_id": question_id,
     }
 
 
-def _ordered_tasks(plan: RoutePlan) -> tuple[RouteTask, ...]:
-    """Confere o plano do roteador e ordena as dependências."""
+def order_tasks(plan: RoutePlan) -> tuple[RouteTask, ...]:
     if len(plan.tasks) > MAX_TASKS:
         raise ValueError("too_many_tasks")
     ids = [task.task_id for task in plan.tasks]
@@ -139,7 +135,7 @@ def _ordered_tasks(plan: RoutePlan) -> tuple[RouteTask, ...]:
     return tuple(ordered)
 
 
-def _unique_sources(sources: list[SourceReference]) -> list[SourceReference]:
+def unique_sources(sources: list[SourceReference]) -> list[SourceReference]:
     unique: list[SourceReference] = []
     for source in sources:
         if source not in unique:
@@ -147,33 +143,32 @@ def _unique_sources(sources: list[SourceReference]) -> list[SourceReference]:
     return unique
 
 
-# Nós do grafo: cada função recebe o estado e devolve somente os campos alterados.
 def no_guardrail_entrada(state: AgentState) -> dict:
     messages = state.get("messages", [])
     message = messages[-1] if messages else None
     if not isinstance(message, HumanMessage) or not isinstance(message.content, str):
-        return _reject_input(state, SAFE_ANSWER, "invalid_input")
+        return reject_input(state, SAFE_ANSWER, "invalid_input")
 
     raw_text = message.content.strip()
     if not raw_text or len(raw_text) > MAX_MESSAGE_LENGTH:
-        return _reject_input(
+        return reject_input(
             state, "Envie uma pergunta válida com até 8000 caracteres.", "invalid_input"
         )
-    if _SECRET_REQUEST.search(raw_text):
-        return _reject_input(
+    if SECRET_REQUEST_PATTERN.search(raw_text):
+        return reject_input(
             state,
             "Não posso fornecer credenciais ou instruções internas do sistema.",
             "blocked_secret_request",
         )
 
-    sanitized = _minimize_pii(raw_text)
+    sanitized = minimize_pii(raw_text)
     replacement = [HumanMessage(content=sanitized)]
     if message.id:
         replacement.insert(0, RemoveMessage(id=message.id))
 
     if state.get("input_kind") != "answer":
         return {
-            **_reset_turn(),
+            **reset_turn_state(),
             "sanitized_message": sanitized,
             "messages": replacement,
         }
@@ -184,7 +179,7 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         or state.get("answer_question_id") != question_id
         or state.get("clarification_request") is None
     ):
-        return _reject_input(
+        return reject_input(
             state, "Essa resposta não corresponde à pergunta pendente.", "invalid_question_answer"
         )
 
@@ -192,7 +187,7 @@ def no_guardrail_entrada(state: AgentState) -> dict:
     pending_task_id = state.get("pending_task_id")
     if pending_task_id is None:
         return {
-            **_reset_turn(),
+            **reset_turn_state(),
             "called_agents": list(state.get("called_agents", [])),
             "errors": list(state.get("errors", [])),
             "sanitized_message": resumed_message,
@@ -204,7 +199,7 @@ def no_guardrail_entrada(state: AgentState) -> dict:
     matching = [index for index, task in enumerate(tasks) if task.task_id == pending_task_id]
     if len(matching) != 1:
         return {
-            **_reset_turn(),
+            **reset_turn_state(),
             "called_agents": list(state.get("called_agents", [])),
             "final_answer": SAFE_ANSWER,
             "errors": [*state.get("errors", []), "missing_pending_task"],
@@ -223,11 +218,11 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         for outcome in state.get("task_outcomes", ())
         if outcome.task.task_id != pending_task_id
     )
-    prior_sources = _unique_sources(
+    prior_sources = unique_sources(
         [source for outcome in prior_outcomes for source in outcome.result.sources]
     )
     return {
-        **_reset_turn(),
+        **reset_turn_state(),
         "called_agents": list(state.get("called_agents", [])),
         "errors": list(state.get("errors", [])),
         "sanitized_message": resumed_message,
@@ -246,10 +241,10 @@ async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
     called = [*state.get("called_agents", []), AgentId.ROUTER.value]
     try:
         response = await factory.create(AgentId.ROUTER).run(
-            RouterInput(message=state["sanitized_message"]), context=_context(state)
+            RouterInput(message=state["sanitized_message"]), context=build_agent_context(state)
         )
         plan = RoutePlan.model_validate(response)
-        ordered = _ordered_tasks(plan)
+        ordered = order_tasks(plan)
     except Exception:
         return {
             "called_agents": called,
@@ -279,7 +274,6 @@ async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
 
 
 async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id: AgentId) -> dict:
-    """Executa a tarefa atual; a mesma função serve aos cinco especialistas."""
     tasks = state["ordered_tasks"]
     index = state["current_task_index"]
     if index >= len(tasks) or tasks[index].agent.value != agent_id.value:
@@ -330,7 +324,9 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
         )
         called.append(agent_id.value)
         try:
-            response = await factory.create(agent_id).run(agent_input, context=_context(state))
+            response = await factory.create(agent_id).run(
+                agent_input, context=build_agent_context(state)
+            )
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")
@@ -345,7 +341,7 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
     outcome = TaskOutcome(task=task, result=result)
     if result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE):
         errors.append(f"{agent_id.value}_{result.status.value}")
-    sources = _unique_sources([*state.get("sources", []), *result.sources])
+    sources = unique_sources([*state.get("sources", []), *result.sources])
     update: dict[str, Any] = {
         "called_agents": called,
         "errors": errors,
@@ -384,7 +380,7 @@ async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
                 outcomes=state["task_outcomes"],
                 revision_feedback=feedback,
             ),
-            context=_context(state),
+            context=build_agent_context(state),
         )
         draft = OrchestratorResult.model_validate(response)
         trusted_sources = state.get("sources", [])
@@ -416,7 +412,7 @@ async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
                 sources=draft.sources,
                 outcomes=state["task_outcomes"],
             ),
-            context=_context(state),
+            context=build_agent_context(state),
         )
         review = JudgeResult.model_validate(response)
     except Exception:
@@ -442,7 +438,7 @@ async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
         }
     try:
         response = await factory.create(AgentId.QUESTION_FORMATTER).run(
-            QuestionFormatterInput(request=request), context=_context(state)
+            QuestionFormatterInput(request=request), context=build_agent_context(state)
         )
         question = response.prompt.strip()
         if not question:
@@ -463,8 +459,8 @@ async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
 
 
 def no_guardrail_pergunta(state: AgentState) -> dict:
-    question = _minimize_pii(state.get("clarification_question") or SAFE_ANSWER)
-    for identifier in _context(state).values():
+    question = minimize_pii(state.get("clarification_question") or SAFE_ANSWER)
+    for identifier in build_agent_context(state).values():
         if identifier:
             question = question.replace(identifier, "[identificador protegido]")
     return {"clarification_question": question, "messages": [AIMessage(content=question)]}
@@ -481,8 +477,8 @@ def no_guardrail_saida(state: AgentState) -> dict:
     ):
         answer = SAFE_ANSWER
     else:
-        answer = _minimize_pii(draft.draft_answer)
-        for identifier in _context(state).values():
+        answer = minimize_pii(draft.draft_answer)
+        for identifier in build_agent_context(state).values():
             if identifier:
                 answer = answer.replace(identifier, "[identificador protegido]")
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
@@ -538,7 +534,6 @@ def decidir_pos_formatador(state: AgentState) -> str:
 
 
 def build_graph(factory: AgentFactory, *, checkpointer: Any = None):
-    """Conecta os nós e compila o fluxo; LLMs e tools vêm da Factory."""
     graph = StateGraph(AgentState)
     graph.add_node("guardrail_input", no_guardrail_entrada)
     graph.add_node("router", partial(no_roteador, factory=factory))
@@ -617,7 +612,30 @@ async def executar_fluxo(
     user_id: str,
     farm_id: str,
     session_id: str,
+    config: RunnableConfig | None = None,
 ) -> dict:
-    """Entrada do pedido após a API validar usuário, fazenda e sessão."""
     state = initial_state(message, user_id=user_id, farm_id=farm_id, session_id=session_id)
-    return await graph.ainvoke(state, config={"configurable": {"thread_id": session_id}})
+    return await graph.ainvoke(state, config=build_session_config(session_id, config))
+
+
+async def executar_resposta(
+    graph: Any,
+    answer: str,
+    *,
+    question_id: str,
+    session_id: str,
+    config: RunnableConfig | None = None,
+) -> dict:
+    state = answer_state(answer, question_id=question_id)
+    return await graph.ainvoke(state, config=build_session_config(session_id, config))
+
+
+def build_session_config(
+    session_id: str,
+    config: RunnableConfig | None,
+) -> RunnableConfig:
+    merged_config: RunnableConfig = dict(config or {})
+    configurable = dict(merged_config.get("configurable") or {})
+    configurable["thread_id"] = session_id
+    merged_config["configurable"] = configurable
+    return merged_config

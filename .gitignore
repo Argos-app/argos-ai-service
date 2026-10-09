@@ -87,3 +87,4 @@ Thumbs.db
 # ─────────────────────────────────────────────
 *.md
 !README.md
+!docs/agent-integration-handoff.md

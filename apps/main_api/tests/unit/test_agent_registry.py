@@ -30,7 +30,7 @@ def test_default_registry_contains_routable_agents_and_question_formatter() -> N
             AgentId.QUESTION_FORMATTER,
         }
     )
-    assert DEFAULT_AGENT_REGISTRY.get(AgentId.QUESTION_FORMATTER).tool_names == ()
+    assert DEFAULT_AGENT_REGISTRY.get(AgentId.QUESTION_FORMATTER).tool_slots == ()
 
 
 def test_registry_rejects_unknown_ids() -> None:
@@ -52,8 +52,8 @@ def test_registry_rejects_incompatible_schemas_tools_and_model_policy() -> None:
     with pytest.raises(TypeError, match="Schemas incompatíveis"):
         AgentRegistry((replace(farm, output_schema=router.output_schema),))
 
-    with pytest.raises(ValueError, match="Ferramenta não permitida"):
-        AgentRegistry((replace(farm, tool_names=("mock_preparar_relatorio",)),))
+    with pytest.raises(ValueError, match="Slot de ferramenta não permitido"):
+        AgentRegistry((replace(farm, tool_slots=("report_delivery",)),))
 
     with pytest.raises(ValueError, match="Política de modelo incompatível"):
         AgentRegistry((replace(farm, model_policy=router.model_policy),))

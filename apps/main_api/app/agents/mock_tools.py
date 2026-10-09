@@ -1,10 +1,10 @@
+from app.ports.agent import AgentId
 from langchain.tools import tool
 from langchain_core.runnables import RunnableConfig
 
 
-@tool
+@tool(description="Simula consulta de aplicações e lotes. Nunca acessa dados verídicos.")
 def mock_consultar_fazenda(consulta: str, config: RunnableConfig) -> str:
-    """Simula consulta de aplicações e lotes. Nunca acessa dados verídicos."""
     configuravel = (config or {}).get("configurable", {})
     farm_id = configuravel.get("farm_id")
 
@@ -24,9 +24,8 @@ def mock_consultar_fazenda(consulta: str, config: RunnableConfig) -> str:
     )
 
 
-@tool
+@tool(description="Simula busca documental sem fornecer orientação clínica.")
 def mock_consultar_medicamento(nome: str) -> str:
-    """Simula busca documental sem fornecer orientação clínica."""
     return (
         f"SIMULAÇÃO: busca por '{nome}'. Nenhuma bula real foi consultada. "
         "Este mock não contém dose, indicação, contraindicação nem carência. "
@@ -34,9 +33,8 @@ def mock_consultar_medicamento(nome: str) -> str:
     )
 
 
-@tool
+@tool(description="Simula previsão para testar o Analista; não usa dados verídicos.")
 def mock_calcular_previsao(pergunta: str) -> str:
-    """Simula previsão para testar o Analista; não usa dados verídicos."""
     return (
         f"SIMULAÇÃO para '{pergunta}'. Resultado FICTÍCIO: 12 aplicações "
         "no próximo período. Premissa: dados sintéticos de teste. "
@@ -46,9 +44,8 @@ def mock_calcular_previsao(pergunta: str) -> str:
     )
 
 
-@tool
+@tool(description="Simula preparação de relatório. Nunca gera arquivo nem envia e-mail.")
 def mock_preparar_relatorio(tipo: str, config: RunnableConfig) -> str:
-    """Simula preparação de relatório. Nunca gera arquivo nem envia e-mail."""
     configuravel = (config or {}).get("configurable", {})
     farm_id = configuravel.get("farm_id")
 
@@ -62,9 +59,8 @@ def mock_preparar_relatorio(tipo: str, config: RunnableConfig) -> str:
     )
 
 
-@tool
+@tool(description="Simula indisponibilidade do Documental; não consulta PDFs.")
 def mock_consultar_documental(pergunta: str) -> str:
-    """Simula indisponibilidade do Documental; não consulta PDFs."""
     return (
         f"MOCK: pergunta recebida: '{pergunta}'. "
         "Serviço Documental indisponível neste teste. "
@@ -78,3 +74,14 @@ MOCK_DOCTOR_TOOLS = [mock_consultar_medicamento]
 MOCK_ANALYST_TOOLS = [mock_calcular_previsao]
 MOCK_SECRETARY_TOOLS = [mock_consultar_fazenda, mock_preparar_relatorio]
 MOCK_INFORMATION_TOOLS = [mock_consultar_documental]
+
+MOCK_AGENT_TOOL_BINDINGS = {
+    AgentId.FARM: {"farm_data": tuple(MOCK_FARM_TOOLS)},
+    AgentId.DOCTOR: {"medicine_reference": tuple(MOCK_DOCTOR_TOOLS)},
+    AgentId.ANALYST: {"prediction": tuple(MOCK_ANALYST_TOOLS)},
+    AgentId.SECRETARY: {
+        "farm_data": (mock_consultar_fazenda,),
+        "report_delivery": (mock_preparar_relatorio,),
+    },
+    AgentId.INFORMATION: {"documental_a2a": tuple(MOCK_INFORMATION_TOOLS)},
+}

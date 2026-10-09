@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.agent_schemas.results import (
@@ -8,15 +8,10 @@ from app.agent_schemas.results import (
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import OrchestratorResult
-from app.agents.mock_tools import (
-    MOCK_ANALYST_TOOLS,
-    MOCK_DOCTOR_TOOLS,
-    MOCK_FARM_TOOLS,
-    MOCK_INFORMATION_TOOLS,
-    MOCK_SECRETARY_TOOLS,
-)
+from app.agents.mock_tools import MOCK_AGENT_TOOL_BINDINGS
 from app.agents.registry import DEFAULT_AGENT_REGISTRY, AgentRegistry, ModelPolicyId
 from app.infrastructure.agents.langchain_factory import (
+    AgentFactoryConfigurationError,
     LangChainAgentFactory,
     validate_agent_configuration,
 )
@@ -33,38 +28,93 @@ from app.prompts.specialists import (
     SECRETARY_SYSTEM_PROMPT,
 )
 from langchain.agents import create_agent
+from langchain_core.tools import BaseTool
+
+AgentToolBindings = Mapping[AgentId, Mapping[str, Sequence[BaseTool]]]
+
+
+def resolve_tool_bindings(
+    registry: AgentRegistry,
+    overrides: AgentToolBindings | None,
+) -> dict[AgentId, dict[str, tuple[BaseTool, ...]]]:
+    resolved = {
+        agent_id: {slot: tuple(tools) for slot, tools in slots.items()}
+        for agent_id, slots in MOCK_AGENT_TOOL_BINDINGS.items()
+    }
+    for agent_id in AgentId:
+        resolved.setdefault(agent_id, {})
+
+    for raw_agent_id, slots in (overrides or {}).items():
+        try:
+            agent_id = AgentId(raw_agent_id)
+        except (TypeError, ValueError) as exc:
+            raise AgentFactoryConfigurationError(
+                f"Agente sem slots de ferramentas conhecidos: {raw_agent_id!r}"
+            ) from exc
+
+        definition = registry.get(agent_id)
+        unknown_slots = set(slots) - set(definition.tool_slots)
+        if unknown_slots:
+            raise AgentFactoryConfigurationError(
+                f"Slots não permitidos para {agent_id.value}: {sorted(unknown_slots)}"
+            )
+
+        current = resolved.setdefault(agent_id, {})
+        current.update({slot: tuple(tools) for slot, tools in slots.items()})
+
+    for agent_id in AgentId:
+        definition = registry.get(agent_id)
+        slots = resolved.get(agent_id, {})
+        if set(slots) != set(definition.tool_slots):
+            raise AgentFactoryConfigurationError(
+                f"Slots de ferramentas incompletos para {agent_id.value}"
+            )
+        if any(not tools for tools in slots.values()):
+            raise AgentFactoryConfigurationError(
+                f"Slot de ferramenta sem implementação para {agent_id.value}"
+            )
+
+    return resolved
 
 
 def build_agent_factory(
     models: Mapping[ModelPolicyId, Any],
     registry: AgentRegistry = DEFAULT_AGENT_REGISTRY,
+    tool_bindings: AgentToolBindings | None = None,
 ) -> LangChainAgentFactory:
-    """Valida as definições e cria cada agente explicitamente."""
+    resolved_tool_bindings = resolve_tool_bindings(registry, tool_bindings)
+
+    def tools_for(agent_id: AgentId) -> list[BaseTool]:
+        definition = registry.get(agent_id)
+        return [
+            tool
+            for slot in definition.tool_slots
+            for tool in resolved_tool_bindings[agent_id][slot]
+        ]
 
     configurations = (
-        (AgentId.ROUTER, ROUTER_SYSTEM_PROMPT, [], RoutePlan),
-        (AgentId.FARM, FARM_SYSTEM_PROMPT, MOCK_FARM_TOOLS, SpecialistResult),
-        (AgentId.DOCTOR, DOCTOR_SYSTEM_PROMPT, MOCK_DOCTOR_TOOLS, SpecialistResult),
-        (AgentId.ANALYST, ANALYST_SYSTEM_PROMPT, MOCK_ANALYST_TOOLS, SpecialistResult),
-        (AgentId.SECRETARY, SECRETARY_SYSTEM_PROMPT, MOCK_SECRETARY_TOOLS, SpecialistResult),
-        (AgentId.INFORMATION, INFORMATION_SYSTEM_PROMPT, MOCK_INFORMATION_TOOLS, SpecialistResult),
-        (AgentId.ORCHESTRATOR, ORCHESTRATOR_SYSTEM_PROMPT, [], OrchestratorResult),
-        (AgentId.JUDGE, JUDGE_SYSTEM_PROMPT, [], JudgeResult),
+        (AgentId.ROUTER, ROUTER_SYSTEM_PROMPT, RoutePlan),
+        (AgentId.FARM, FARM_SYSTEM_PROMPT, SpecialistResult),
+        (AgentId.DOCTOR, DOCTOR_SYSTEM_PROMPT, SpecialistResult),
+        (AgentId.ANALYST, ANALYST_SYSTEM_PROMPT, SpecialistResult),
+        (AgentId.SECRETARY, SECRETARY_SYSTEM_PROMPT, SpecialistResult),
+        (AgentId.INFORMATION, INFORMATION_SYSTEM_PROMPT, SpecialistResult),
+        (AgentId.ORCHESTRATOR, ORCHESTRATOR_SYSTEM_PROMPT, OrchestratorResult),
+        (AgentId.JUDGE, JUDGE_SYSTEM_PROMPT, JudgeResult),
         (
             AgentId.QUESTION_FORMATTER,
             QUESTION_FORMATTER_SYSTEM_PROMPT,
-            [],
             QuestionFormatterResult,
         ),
     )
 
-    for agent_id, prompt, tools, output_schema in configurations:
+    for agent_id, prompt, output_schema in configurations:
         validate_agent_configuration(
             registry,
             models,
             agent_id,
             prompt,
-            tools,
+            resolved_tool_bindings[agent_id],
             output_schema,
         )
 
@@ -77,35 +127,35 @@ def build_agent_factory(
 
     farm_app = create_agent(
         model=models[ModelPolicyId.FARM],
-        tools=MOCK_FARM_TOOLS,
+        tools=tools_for(AgentId.FARM),
         system_prompt=FARM_SYSTEM_PROMPT,
         response_format=SpecialistResult,
     )
 
     doctor_app = create_agent(
         model=models[ModelPolicyId.DOCTOR],
-        tools=MOCK_DOCTOR_TOOLS,
+        tools=tools_for(AgentId.DOCTOR),
         system_prompt=DOCTOR_SYSTEM_PROMPT,
         response_format=SpecialistResult,
     )
 
     analyst_app = create_agent(
         model=models[ModelPolicyId.ANALYST],
-        tools=MOCK_ANALYST_TOOLS,
+        tools=tools_for(AgentId.ANALYST),
         system_prompt=ANALYST_SYSTEM_PROMPT,
         response_format=SpecialistResult,
     )
 
     secretary_app = create_agent(
         model=models[ModelPolicyId.SECRETARY],
-        tools=MOCK_SECRETARY_TOOLS,
+        tools=tools_for(AgentId.SECRETARY),
         system_prompt=SECRETARY_SYSTEM_PROMPT,
         response_format=SpecialistResult,
     )
 
     information_app = create_agent(
         model=models[ModelPolicyId.INFORMATION],
-        tools=MOCK_INFORMATION_TOOLS,
+        tools=tools_for(AgentId.INFORMATION),
         system_prompt=INFORMATION_SYSTEM_PROMPT,
         response_format=SpecialistResult,
     )

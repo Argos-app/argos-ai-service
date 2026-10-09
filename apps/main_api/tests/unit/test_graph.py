@@ -18,7 +18,14 @@ from app.agent_schemas.results import (
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import OrchestratorResult
-from app.graph.workflow import SAFE_ANSWER, answer_state, build_graph, initial_state
+from app.graph.workflow import (
+    SAFE_ANSWER,
+    answer_state,
+    build_graph,
+    executar_fluxo,
+    executar_resposta,
+    initial_state,
+)
 from app.ports.agent import AgentId
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -53,6 +60,20 @@ def request_state(message: str = "Quais aplicações existem?") -> dict:
     )
 
 
+class RecordingGraph:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+    async def ainvoke(
+        self,
+        state: dict[str, Any],
+        *,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls.append((state, config))
+        return state
+
+
 def task(task_id: str = "t1", *, agent: str = "farm", depends_on: tuple[str, ...] = ()):
     return RouteTask(
         task_id=task_id,
@@ -70,6 +91,56 @@ def test_judge_cannot_approve_with_unsupported_claims() -> None:
             reason="Há uma afirmação sem fonte",
             unsupported_claims=("Afirmação sem fonte",),
         )
+
+
+@pytest.mark.asyncio
+async def test_executar_fluxo_preserves_trace_config_and_uses_trusted_session_id() -> None:
+    graph = RecordingGraph()
+    config = {
+        "configurable": {"thread_id": "untrusted-thread", "checkpoint_ns": "test"},
+        "metadata": {"origin": "api"},
+        "tags": ["argos"],
+    }
+
+    result = await executar_fluxo(
+        graph,
+        "Quais aplicações existem?",
+        user_id="user-demo",
+        farm_id="farm-demo",
+        session_id="session-demo",
+        config=config,
+    )
+
+    state, run_config = graph.calls[0]
+    assert state["user_id"] == "user-demo"
+    assert run_config["configurable"] == {
+        "thread_id": "session-demo",
+        "checkpoint_ns": "test",
+    }
+    assert run_config["metadata"] == {"origin": "api"}
+    assert run_config["tags"] == ["argos"]
+    assert result is state
+
+
+@pytest.mark.asyncio
+async def test_executar_resposta_resumes_the_requested_question_thread() -> None:
+    graph = RecordingGraph()
+    question_id = "2c18f674-5608-4af2-a40c-b0fb1d6f0441"
+
+    state = await executar_resposta(
+        graph,
+        "Quero consultar setembro.",
+        question_id=question_id,
+        session_id="session-demo",
+        config={"metadata": {"origin": "api"}},
+    )
+
+    captured_state, run_config = graph.calls[0]
+    assert captured_state["input_kind"] == "answer"
+    assert captured_state["answer_question_id"] == question_id
+    assert captured_state["messages"][-1].content == "Quero consultar setembro."
+    assert run_config["configurable"]["thread_id"] == "session-demo"
+    assert state is captured_state
 
 
 @pytest.mark.asyncio
