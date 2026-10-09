@@ -1,10 +1,9 @@
-"""Testes da composição e do adaptador LangChain de agentes."""
-
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain.tools import tool
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -93,6 +92,39 @@ def test_build_agent_factory_registers_question_formatter_without_tools(monkeypa
     )
     assert formatter_call["tools"] == []
     assert "Formatador de Perguntas" in formatter_call["system_prompt"]
+
+
+def test_build_agent_factory_accepts_real_tools_by_registered_slot(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_create_agent(**kwargs: Any) -> _FakeRunnable:
+        calls.append(kwargs)
+        return _FakeRunnable()
+
+    @tool("get_lot_summary", description="Retorna um resumo do lote para testes.")
+    def get_lot_summary(lot_id: str) -> str:
+        return f"Resumo do lote {lot_id}"
+
+    monkeypatch.setattr(specialists, "create_agent", fake_create_agent)
+    build_agent_factory(
+        _models(),
+        tool_bindings={AgentId.FARM: {"farm_data": (get_lot_summary,)}},
+    )
+
+    farm_call = next(
+        call for call in calls if [item.name for item in call["tools"]] == ["get_lot_summary"]
+    )
+    assert farm_call["response_format"] is SpecialistResult
+
+
+def test_build_agent_factory_rejects_tool_slot_not_allowed_for_agent() -> None:
+    with pytest.raises(langchain_factory.AgentFactoryConfigurationError, match="não permitidos"):
+        build_agent_factory(
+            _models(),
+            tool_bindings={
+                AgentId.FARM: {"report_delivery": (mock_consultar_fazenda,)},
+            },
+        )
 
 
 def test_factory_fails_when_model_for_policy_is_missing() -> None:

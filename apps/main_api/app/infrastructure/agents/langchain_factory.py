@@ -1,6 +1,6 @@
 """Adapta os contratos Agent e AgentFactory para LangChain."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
 
@@ -22,7 +22,7 @@ def validate_agent_configuration(
     models: Mapping[ModelPolicyId, Any],
     agent_id: AgentId,
     prompt: str,
-    tools: list[Any],
+    tool_slots: Mapping[str, Sequence[Any]],
     output_schema: type[BaseModel],
 ) -> None:
     """Confere a configuração concreta usada no create_agent."""
@@ -41,10 +41,20 @@ def validate_agent_configuration(
     if not isinstance(prompt, str) or not prompt.strip():
         raise AgentFactoryConfigurationError(f"Prompt não configurado para {agent_id.value}")
 
-    actual_tool_names = tuple(getattr(tool, "name", None) for tool in tools)
-    if actual_tool_names != definition.tool_names:
+    if set(tool_slots) != set(definition.tool_slots):
         raise AgentFactoryConfigurationError(
-            f"Ferramentas de {agent_id.value} não correspondem ao Registry"
+            f"Slots de ferramentas de {agent_id.value} não correspondem ao Registry"
+        )
+
+    tools = tuple(tool for slot in definition.tool_slots for tool in tool_slots[slot])
+    actual_tool_names = tuple(getattr(tool, "name", None) for tool in tools)
+    if any(not isinstance(name, str) or not name.strip() for name in actual_tool_names):
+        raise AgentFactoryConfigurationError(
+            f"Há ferramenta sem nome configurado para {agent_id.value}"
+        )
+    if len(set(actual_tool_names)) != len(actual_tool_names):
+        raise AgentFactoryConfigurationError(
+            f"Há nomes de ferramentas duplicados para {agent_id.value}"
         )
 
     if output_schema is not definition.output_schema:

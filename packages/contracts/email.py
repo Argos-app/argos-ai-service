@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .lot_report import LotReportEnvelope
 
@@ -73,6 +73,13 @@ class PrepareReportRequest(_EmailContract):
     report_title: str = Field(min_length=1, max_length=200)
     requested_by: UUID
 
+    @field_validator("report_title")
+    @classmethod
+    def validate_report_title(cls, value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise ValueError("report_title deve conter uma única linha")
+        return value
+
     @model_validator(mode="after")
     def validate_requester(self) -> PrepareReportRequest:
         if self.requested_by != self.report_source.principal_user_id:
@@ -123,6 +130,7 @@ class SendReportRequest(_EmailContract):
 class DispatchStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
+    PARTIAL = "partial"
     FAILED = "failed"
     UNKNOWN = "unknown"
 

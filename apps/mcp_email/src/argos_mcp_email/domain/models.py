@@ -15,6 +15,7 @@ class ReportState(StrEnum):
 class DispatchState(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
+    PARTIAL = "partial"
     FAILED = "failed"
     UNKNOWN = "unknown"
 
