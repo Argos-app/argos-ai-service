@@ -2,10 +2,11 @@
 
 import asyncio
 from dataclasses import replace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
+import uvicorn
 from argos_mcp_prediction import bootstrap
 
 pytestmark = pytest.mark.asyncio
@@ -67,8 +68,12 @@ async def test_runtime_rejects_writable_session_and_closes_pool(
 async def test_server_exit_closes_runtime(monkeypatch, sql_pool, failure):
     pool, _ = sql_pool
     server = AsyncMock()
-    server.run_streamable_http_async.side_effect = failure
-    runtime = bootstrap.ServiceRuntime(pool, object(), server)
+    server.settings.log_level = "INFO"
+    runtime = bootstrap.ServiceRuntime(pool, object(), server, object(), object())
+    serve = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(uvicorn, "Config", MagicMock())
+    monkeypatch.setattr(uvicorn, "Server", MagicMock(return_value=MagicMock(serve=serve)))
+    monkeypatch.setattr(bootstrap, "create_http_app", MagicMock())
     monkeypatch.setattr(bootstrap, "create_runtime", AsyncMock(return_value=runtime))
     if failure is None:
         await bootstrap.run_server()
@@ -76,3 +81,13 @@ async def test_server_exit_closes_runtime(monkeypatch, sql_pool, failure):
         with pytest.raises(type(failure)):
             await bootstrap.run_server()
     pool.close.assert_awaited_once()
+
+
+async def test_invalid_public_key_fails_before_pool_is_opened(monkeypatch, configured_settings):
+    create_pool = AsyncMock()
+    monkeypatch.setattr(asyncpg, "create_pool", create_pool)
+    with pytest.raises(ValueError, match="chave pública"):
+        await bootstrap.create_runtime(
+            replace(configured_settings, trusted_delegation_keys=(("key", "invalid"),))
+        )
+    create_pool.assert_not_awaited()
