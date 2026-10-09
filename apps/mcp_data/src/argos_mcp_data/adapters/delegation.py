@@ -1,7 +1,6 @@
 """Validação de atestação Ed25519 e contexto por chamada HTTP/MCP."""
 
 import base64
-import contextvars
 import json
 import re
 import time
@@ -12,6 +11,7 @@ from uuid import UUID
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from mcp.server.lowlevel.server import request_ctx
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -19,9 +19,7 @@ from argos_mcp_data.application import AccessPolicy
 from argos_mcp_data.domain import AccessContext, AuthorizedScope
 from argos_mcp_data.domain.errors import AccessContextError
 
-_delegation_context: contextvars.ContextVar[AccessContext | None] = contextvars.ContextVar(
-    "argos_mcp_data_delegation", default=None
-)
+_ACCESS_CONTEXT_KEY = "argos_mcp_data_access_context"
 _TOKEN_PART = re.compile(r"^[A-Za-z0-9_-]+$")
 _OPERATION = re.compile(r"^[a-z][a-z0-9_.:-]{0,63}$")
 _AGENTS = {"fazenda", "doutor"}
@@ -53,7 +51,7 @@ def _json_object(data: bytes) -> dict[str, Any]:
 
     try:
         parsed = json.loads(data, object_pairs_hook=reject_duplicate_keys)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as exc:
         raise AccessContextError("contexto delegado inválido") from exc
     if not isinstance(parsed, dict):
         raise AccessContextError("contexto delegado inválido")
@@ -140,7 +138,10 @@ class DelegationTokenVerifier:
             raise AccessContextError("contexto delegado inválido")
 
         try:
-            user_id = UUID(claims["sub"])
+            subject = claims["sub"]
+            if not isinstance(subject, str):
+                raise ValueError
+            user_id = UUID(subject)
             properties_raw = claims["authorized_property_ids"]
             if not isinstance(properties_raw, list) or not 1 <= len(properties_raw) <= 1000:
                 raise ValueError
@@ -189,8 +190,17 @@ class DelegationTokenVerifier:
 
 
 def get_access_context() -> AccessContext:
-    context = _delegation_context.get()
-    if context is None:
+    # O SDK transporta a requisição HTTP atual nos metadados de cada mensagem.
+    # Um ContextVar próprio seria herdado da inicialização da sessão MCP e
+    # manteria uma delegação antiga nas chamadas seguintes da mesma sessão.
+    try:
+        request = request_ctx.get().request
+    except LookupError as exc:
+        raise AccessContextError("contexto de acesso obrigatório") from exc
+    if request is None:
+        raise AccessContextError("contexto de acesso obrigatório")
+    context = request.scope.get("state", {}).get(_ACCESS_CONTEXT_KEY)
+    if not isinstance(context, AccessContext):
         raise AccessContextError("contexto de acesso obrigatório")
     return context
 
@@ -240,8 +250,9 @@ class DelegationContextMiddleware:
             )(scope, receive, send)
             return
 
-        context_token = _delegation_context.set(context)
-        try:
-            await self._app(scope, receive, send)
-        finally:
-            _delegation_context.reset(context_token)
+        # Copiar o estado evita compartilhar identidade entre requisições.
+        scoped_request = {
+            **scope,
+            "state": {**scope.get("state", {}), _ACCESS_CONTEXT_KEY: context},
+        }
+        await self._app(scoped_request, receive, send)
