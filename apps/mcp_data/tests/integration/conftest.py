@@ -165,6 +165,17 @@ class McpDataHarness:
         dsn = SQL_ADMIN_DSN.rsplit("/", 1)[0] + "/" + self.database_name
         return await asyncpg.connect(dsn, timeout=5)
 
+    async def create_read_only_test_pool(self):
+        import asyncpg
+
+        dsn = SQL_ADMIN_DSN.rsplit("/", 1)[0] + "/" + self.database_name
+        return await asyncpg.create_pool(
+            dsn,
+            min_size=1,
+            max_size=1,
+            server_settings={"default_transaction_read_only": "on"},
+        )
+
     @asynccontextmanager
     async def client(self, *, delegation_overrides: dict[str, object] | None = None):
         import httpx
@@ -241,6 +252,41 @@ async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> N
                 ("autorizado-a", "property_a"),
                 ("autorizado-b", "property_b"),
                 ("externo", "property_external"),
+            )
+        ]
+    )
+    medicine = {
+        "report_created_at": now,
+        "last_updated_at": now,
+        "active_ingredient": "Ingrediente Teste",
+        "indication": "Uso de integração",
+        "therapeutic_category": {
+            "therapeutic_category_id": str(fixture_ids["therapeutic_category_id"]),
+            "name": "Antibiótico",
+        },
+        "supplier": {
+            "supplier_id": str(fixture_ids["supplier_id"]),
+            "company_name": "Fornecedor Teste",
+        },
+        "needs_prescription": False,
+        "meat_withdrawal_days": 0,
+        "dose": "1.0",
+        "unit": "ml",
+        "route": "INTRAMUSCULAR",
+    }
+    await database["medicamentos"].insert_many(
+        [
+            {
+                **medicine,
+                "_id": document_id,
+                "relational_medicine_id": str(medicine_id),
+                "brand_name": name,
+                "active": active,
+            }
+            for document_id, medicine_id, name, active in (
+                ("medicine-active-a", fixture_ids["medicine_id"], "Medicamento Teste", True),
+                ("medicine-active-b", uuid4(), "Outro Medicamento", True),
+                ("medicine-inactive", uuid4(), "Medicamento Inativo", False),
             )
         ]
     )
@@ -437,6 +483,9 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
 
     return {
         "user_id": user_id,
+        "medicine_id": medicine_id,
+        "supplier_id": supplier_id,
+        "therapeutic_category_id": category_id,
         "property_a": property_a,
         "property_b": property_b,
         "property_external": property_external,

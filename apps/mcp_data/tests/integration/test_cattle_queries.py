@@ -436,10 +436,26 @@ async def test_missing_invalid_and_expired_delegation_fail_before_mcp(mcp_data_h
                 "X-Argos-Delegation": harness.delegation_token({"exp": int(time.time()) - 1}),
             },
         )
+        invalid_subject = await client.get(
+            harness.url,
+            headers={
+                **headers,
+                "X-Argos-Delegation": harness.delegation_token({"sub": 123}),
+            },
+        )
+        valid_delegation = {"X-Argos-Delegation": harness.delegation_token()}
+        missing_service_token = await client.get(harness.url, headers=valid_delegation)
+        wrong_service_token = await client.get(
+            harness.url,
+            headers={**valid_delegation, "Authorization": "Bearer wrong-test-token"},
+        )
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
     assert expired.status_code == 401
+    assert invalid_subject.status_code == 401
+    assert missing_service_token.status_code == 401
+    assert wrong_service_token.status_code == 401
 
 
 async def test_agent_and_operation_mismatch_are_denied_before_repository(mcp_data_harness):
@@ -453,6 +469,157 @@ async def test_agent_and_operation_mismatch_are_denied_before_repository(mcp_dat
     ) as session:
         denied_agent = await session.call_tool("list_properties", {"payload": {}})
         assert denied_agent.isError
+
+
+async def test_delegation_is_taken_from_each_request_in_the_same_mcp_session(mcp_data_harness):
+    from uuid import uuid4
+
+    import httpx
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+
+    harness = mcp_data_harness
+    property_a = str(harness.fixture_ids["property_a"])
+    property_b = str(harness.fixture_ids["property_b"])
+    async with httpx.AsyncClient(
+        headers={
+            "Authorization": f"Bearer {harness.service_token}",
+            "X-Argos-Delegation": harness.delegation_token(),
+        },
+        timeout=httpx.Timeout(30, read=120),
+        trust_env=False,
+    ) as http_client:
+        async with streamable_http_client(harness.url, http_client=http_client) as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await session.initialize()
+                initial = _result_json(await session.call_tool("list_properties", {"payload": {}}))
+                assert {item["property_id"] for item in initial["items"]} == {
+                    property_a,
+                    property_b,
+                }
+
+                http_client.headers["X-Argos-Delegation"] = harness.delegation_token(
+                    {"authorized_property_ids": [property_a]}
+                )
+                properties = _result_json(
+                    await session.call_tool("list_properties", {"payload": {}})
+                )
+                assert {item["property_id"] for item in properties["items"]} == {property_a}
+                documents = _result_json(
+                    await session.call_tool("list_cattle_documents", {"payload": {}})
+                )
+                assert {item["relational_property_id"] for item in documents["items"]} == {
+                    property_a
+                }
+                summary = _result_json(await session.call_tool("get_farm_summary", {"payload": {}}))
+                assert {item["dimensions"]["property"] for item in summary["items"]} == {property_a}
+
+                for overrides in (
+                    {"operations": ["report.read"]},
+                    {"agent": "doutor", "operations": ["medicine.read"]},
+                    {"sub": str(uuid4())},
+                ):
+                    http_client.headers["X-Argos-Delegation"] = harness.delegation_token(overrides)
+                    denied = await session.call_tool("list_properties", {"payload": {}})
+                    assert denied.isError
+
+
+async def test_doctor_reads_medicine_catalog_and_documents_with_validated_filters(mcp_data_harness):
+    harness = mcp_data_harness
+    medicine_id = str(harness.fixture_ids["medicine_id"])
+    async with harness.client(
+        delegation_overrides={"agent": "doutor", "operations": ["medicine.read"]}
+    ) as session:
+        catalog = _result_json(
+            await session.call_tool(
+                "list_medicines",
+                {
+                    "payload": {
+                        "medicine_id": medicine_id,
+                        "brand_name": "medicamento teste",
+                        "active_ingredient": "ingrediente teste",
+                        "therapeutic_category": "antibiótico",
+                    }
+                },
+            )
+        )
+        assert len(catalog["items"]) == 1
+        medicine = catalog["items"][0]
+        assert medicine["medicine_id"] == medicine_id
+        assert medicine["supplier_name"] == "Fornecedor Teste"
+        assert Decimal(medicine["dose"]) == Decimal("1.0")
+
+        page = _result_json(
+            await session.call_tool("list_medicine_documents", {"payload": {"page_size": 1}})
+        )
+        assert page["has_more"] is True
+        next_page = _result_json(
+            await session.call_tool(
+                "list_medicine_documents",
+                {"payload": {"page_size": 1, "offset": page["next_offset"]}},
+            )
+        )
+        assert next_page["has_more"] is False
+        assert {item["id"] for item in page["items"] + next_page["items"]} == {
+            "medicine-active-a",
+            "medicine-active-b",
+        }
+        document = page["items"][0]
+        selected = _result_json(
+            await session.call_tool(
+                "list_medicine_documents",
+                {
+                    "payload": {
+                        "medicine_id": medicine_id,
+                        "active_ingredient": "ingrediente teste",
+                        "therapeutic_category": "antibiótico",
+                        "needs_prescription": False,
+                        "updated_from": document["last_updated_at"],
+                        "updated_to": document["last_updated_at"],
+                    }
+                },
+            )
+        )
+        assert [item["id"] for item in selected["items"]] == ["medicine-active-a"]
+        inactive = _result_json(
+            await session.call_tool("list_medicine_documents", {"payload": {"active": False}})
+        )
+        assert [item["id"] for item in inactive["items"]] == ["medicine-inactive"]
+
+        for tool, text in (
+            ("list_medicines", "' OR 1=1 --"),
+            ("list_medicine_documents", ".*"),
+        ):
+            empty = _result_json(await session.call_tool(tool, {"payload": {"brand_name": text}}))
+            assert empty["items"] == []
+        invalid = await session.call_tool(
+            "list_medicine_documents", {"payload": {"updated_from": "2026-01-01T00:00:00"}}
+        )
+        assert invalid.isError
+
+    async with harness.client() as session:
+        denied = await session.call_tool("list_medicines", {"payload": {}})
+        assert denied.isError
+
+
+async def test_sql_reader_rejects_writes_and_preserves_data(mcp_data_harness):
+    import asyncpg
+    from argos_mcp_data.infrastructure.sql import AsyncpgSqlReader
+
+    pool = await mcp_data_harness.create_read_only_test_pool()
+    reader = AsyncpgSqlReader(pool)
+    property_id = mcp_data_harness.fixture_ids["property_a"]
+    try:
+        before = await reader.fetch_all("SELECT active FROM property WHERE id = $1", property_id)
+        with pytest.raises(asyncpg.ReadOnlySQLTransactionError):
+            await reader.fetch_all(
+                "UPDATE property SET active = FALSE WHERE id = $1 RETURNING active", property_id
+            )
+        after = await reader.fetch_all("SELECT active FROM property WHERE id = $1", property_id)
+        assert before == after
+        assert after[0]["active"] is True
+    finally:
+        await pool.close()
 
 
 async def test_revoked_or_inactive_property_invalidates_the_whole_delegation(

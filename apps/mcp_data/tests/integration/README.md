@@ -1,13 +1,16 @@
 # Integração do MCP de dados
 
-Os testes desta pasta sobem o serviço MCP real e registram onze ferramentas pelo
-SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09 do commit
-remoto `origin/develop` `2f24af7abd25ab4afda7cb1561f02973db0b19d5`, criam dados
-sintéticos, inserem documentos de histórico bovino sintéticos em uma coleção
-Mongo descartável e removem os dois bancos ao final. Os documentos Mongo são
-validados estruturalmente e pelo escopo de propriedades; não precisam
+Os testes desta pasta sobem o serviço MCP real e registram treze ferramentas
+pelo SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09 do
+commit remoto `origin/develop` `2f24af7abd25ab4afda7cb1561f02973db0b19d5`, criam
+dados sintéticos, inserem documentos de histórico bovino e medicamentos em
+coleções Mongo descartáveis e removem os dois bancos ao final. Os documentos
+Mongo são validados estruturalmente e pelo escopo de propriedades; não precisam
 corresponder a linhas relacionais. A integração verifica paginação, seleção de
-propriedade e rejeição de uma propriedade fora do contexto autorizado.
+propriedade e rejeição de uma propriedade fora do contexto autorizado. Também
+verifica o contexto atualizado em cada chamada dentro da mesma sessão MCP,
+autenticação de serviço, consultas de medicamentos pelo Doutor e bloqueio de
+escrita pelo leitor SQL sem alterar os registros.
 
 Requisitos: Docker Compose, Python do projeto com as dependências de integração
 e um clone local de `argos-data-engineering` que contenha o commit acima. O

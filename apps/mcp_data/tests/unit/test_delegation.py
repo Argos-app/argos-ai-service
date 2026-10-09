@@ -74,6 +74,8 @@ def test_valid_delegation_produces_immutable_access_context() -> None:
         {"authorized_property_ids": []},
         {"authorized_property_ids": ["not-a-uuid"]},
         {"operations": ["cattle.read", "cattle.read"]},
+        {"sub": 123},
+        {"sub": {}},
     ],
 )
 def test_invalid_claims_fail_closed(overrides: dict[str, object]) -> None:
@@ -91,6 +93,14 @@ def test_signature_tampering_is_rejected() -> None:
 
     with pytest.raises(AccessContextError):
         verifier.verify(tampered)
+
+
+def test_deeply_nested_token_header_is_rejected() -> None:
+    verifier, _, _ = make_verifier_and_token()
+    header = b'{"nested":' + b"[" * 5000 + b"0" + b"]" * 5000 + b"}"
+
+    with pytest.raises(AccessContextError):
+        verifier.verify(f"{b64url(header)}.e30.AA")
 
 
 def test_access_context_cannot_select_property_outside_claim_or_current_access() -> None:
