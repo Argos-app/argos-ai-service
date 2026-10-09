@@ -3,11 +3,13 @@
 import hmac
 from typing import Any
 
+from argos_mcp_prediction.adapters.delegation import DelegationContextMiddleware
 from argos_mcp_prediction.settings import Settings
+from packages.security.delegation import DelegationTokenVerifier
 
 
 class StaticServiceTokenVerifier:
-    """Autentica somente o serviço chamador; delegação do usuário vem na etapa 3."""
+    """Autentica somente o serviço chamador; delegação do usuário é validada pelo middleware."""
 
     def __init__(self, expected_token: str, resource_server_url: str) -> None:
         if not expected_token:
@@ -56,3 +58,8 @@ def create_mcp_server(settings: Settings) -> Any:
             settings.mcp_resource_server_url,
         ),
     )
+
+
+def create_http_app(server: Any, delegation_verifier: DelegationTokenVerifier) -> Any:
+    """Combina o app MCP com a delegação por requisição, como no MCP de dados."""
+    return DelegationContextMiddleware(server.streamable_http_app(), delegation_verifier)
