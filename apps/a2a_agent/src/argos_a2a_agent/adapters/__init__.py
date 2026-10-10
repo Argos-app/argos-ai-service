@@ -1,1 +1,1 @@
-"""Adapters de entrada e infraestrutura do serviço A2A."""
+"""Adapters de entrada, documentos e infraestrutura do serviço A2A."""

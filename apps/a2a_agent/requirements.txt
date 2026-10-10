@@ -1,0 +1,5 @@
+a2a-sdk[http-server]>=1.1.5,<2
+cryptography>=43,<51
+qdrant-client>=1.15,<2
+pypdf>=5,<7
+uvicorn[standard]>=0.34,<1
