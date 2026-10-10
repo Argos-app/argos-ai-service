@@ -120,8 +120,8 @@ def create_a2a_server(
 
     routes = [Route("/health/live", live), Route("/health/ready", ready)]
     if agent_registry is not None:
-        if not settings.a2a_public_url:
-            raise ValueError("A2A_PUBLIC_URL é obrigatória para publicar o Agent Card")
+        if not settings.a2a_endpoint_url:
+            raise ValueError("A2A_ENDPOINT_URL é obrigatória para publicar o Agent Card")
         try:
             from a2a.server.request_handlers import DefaultRequestHandler
             from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
@@ -136,7 +136,7 @@ def create_a2a_server(
         except ImportError as exc:
             raise RuntimeError("instale a2a-sdk[http-server] para publicar o endpoint A2A") from exc
 
-        card = create_agent_card(settings.a2a_public_url)
+        card = create_agent_card(settings.a2a_endpoint_url)
         handler = DefaultRequestHandler(
             agent_executor=DocumentA2AExecutor(agent_registry),
             task_store=InMemoryTaskStore(owner_resolver=task_owner),

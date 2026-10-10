@@ -27,6 +27,12 @@ class TextChunker:
         self._overlap_chars = overlap_chars
         self._max_chunks = max_chunks
 
+    @property
+    def fingerprint_config(self) -> tuple[int, int, int]:
+        """Parâmetros que alteram a saída vetorizada do chunker."""
+
+        return (self._max_chars, self._overlap_chars, self._max_chunks)
+
     def split(self, document: ParsedDocument) -> tuple[DocumentChunk, ...]:
         chunks: list[DocumentChunk] = []
         for page in document.pages:
