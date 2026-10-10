@@ -35,6 +35,10 @@ class IndexReadError(DocumentDomainError):
     code = "document_index_read_failed"
 
 
+class DocumentQueryTooBroadError(DocumentDomainError):
+    code = "document_query_too_broad"
+
+
 class IndexWriteError(DocumentDomainError):
     code = "document_index_write_failed"
 

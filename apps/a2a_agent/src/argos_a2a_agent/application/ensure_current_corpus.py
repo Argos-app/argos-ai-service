@@ -81,6 +81,11 @@ class EnsureCurrentCorpus:
 
         return self._from_sync_result(result)
 
+    async def reauthorize(self, context: DocumentAccessContext | None) -> None:
+        """Revalida a permissão antes de liberar conteúdo após uma leitura demorada."""
+
+        await self._access_policy.authorize(context)
+
     @staticmethod
     def _from_sync_result(result: CorpusSyncResult) -> EnsureCurrentCorpusOutcome:
         status = CorpusRefreshStatus.UPDATED if result.updated else CorpusRefreshStatus.UNCHANGED
