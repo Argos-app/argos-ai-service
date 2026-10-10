@@ -185,6 +185,20 @@ def test_upsert_writes_only_allowlisted_payload_into_revision_staging() -> None:
     assert client.collections[collection].distance is Distance.COSINE
 
 
+def test_upsert_keeps_document_hash_separate_from_corpus_generation_hash() -> None:
+    corpus_revision = "c" * 64
+    document_revision = "d" * 64
+    client = FakeQdrantClient()
+    item = indexed_chunk(revision=document_revision)
+
+    run_immediate(writer(client).upsert_chunks(corpus_revision, (item,)))
+
+    collection, points, _ = client.upsert_calls[0]
+    assert collection == f"documents__g_{corpus_revision}"
+    assert points[0].payload["corpus_revision"] == corpus_revision
+    assert points[0].payload["revision_hash"] == document_revision
+
+
 def test_upsert_rejects_invalid_revision_duplicate_ids_and_wrong_vector_size() -> None:
     client = FakeQdrantClient()
     adapter = writer(client)
@@ -209,8 +223,13 @@ def test_upsert_and_remove_are_scoped_to_exact_staging_generation() -> None:
     adapter = writer(client)
     item = indexed_chunk()
 
-    with pytest.raises(IndexWriteError, match="geração"):
-        run_immediate(adapter.upsert_chunks("b" * 64, (item,)))
+    corpus_revision = "b" * 64
+    run_immediate(adapter.upsert_chunks(corpus_revision, (item,)))
+    upsert_collection, points, _ = client.upsert_calls[0]
+    assert upsert_collection == f"documents__g_{corpus_revision}"
+    assert points[0].payload["corpus_revision"] == corpus_revision
+    assert points[0].payload["revision_hash"] == REVISION
+
     run_immediate(adapter.remove_document(REVISION, item.chunk.document_id))
 
     collection, selector, wait = client.delete_calls[0]
