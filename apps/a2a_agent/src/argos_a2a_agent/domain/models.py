@@ -157,8 +157,14 @@ class DocumentChunk:
 class IndexedDocumentChunk:
     chunk: DocumentChunk
     vector: tuple[float, ...]
+    metadata: DocumentMetadata
 
     def __post_init__(self) -> None:
+        if (
+            self.metadata.document_id != self.chunk.document_id
+            or self.metadata.revision_hash != self.chunk.revision_hash
+        ):
+            raise ValueError("metadados do chunk devem corresponder ao documento e à revisão")
         if not self.vector or any(not math.isfinite(value) for value in self.vector):
             raise ValueError("vetor deve conter valores finitos")
 

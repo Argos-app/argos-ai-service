@@ -50,7 +50,7 @@ class PrepareDocumentForIndex:
             normalized = self._validate_vectors(vectors, len(batch), dimensions)
             dimensions = len(normalized[0])
             indexed.extend(
-                IndexedDocumentChunk(chunk=chunk, vector=vector)
+                IndexedDocumentChunk(chunk=chunk, vector=vector, metadata=source.metadata)
                 for chunk, vector in zip(batch, normalized, strict=True)
             )
         return tuple(indexed)
