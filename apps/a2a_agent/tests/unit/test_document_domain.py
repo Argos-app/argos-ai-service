@@ -153,7 +153,10 @@ def test_parsed_pages_are_nonempty_ordered_and_unique() -> None:
 
 def test_chunks_and_embeddings_require_current_sha_and_finite_vectors() -> None:
     document_chunk = chunk()
-    indexed = IndexedDocumentChunk(chunk=document_chunk, vector=(0.1, 0.2))
+    source_metadata = metadata(document_id=document_chunk.document_id)
+    indexed = IndexedDocumentChunk(
+        chunk=document_chunk, vector=(0.1, 0.2), metadata=source_metadata
+    )
 
     assert indexed.vector == (0.1, 0.2)
     with pytest.raises(ValueError, match="SHA-256"):
@@ -161,7 +164,11 @@ def test_chunks_and_embeddings_require_current_sha_and_finite_vectors() -> None:
     with pytest.raises(ValueError, match="vazio"):
         DocumentChunk(uuid4(), uuid4(), "c" * 64, 0, 1, 1, "  ")
     with pytest.raises(ValueError, match="finitos"):
-        IndexedDocumentChunk(chunk=document_chunk, vector=(float("nan"),))
+        IndexedDocumentChunk(
+            chunk=document_chunk,
+            vector=(float("nan"),),
+            metadata=source_metadata,
+        )
     with pytest.raises(ValueError, match="score"):
         DocumentSearchHit(chunk=document_chunk, score=float("inf"))
 
