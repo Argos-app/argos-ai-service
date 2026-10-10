@@ -39,6 +39,14 @@ class DocumentQueryTooBroadError(DocumentDomainError):
     code = "document_query_too_broad"
 
 
+class DocumentAnswerGenerationError(DocumentDomainError):
+    code = "document_answer_generation_failed"
+
+
+class DocumentAgentDeadlineError(DocumentDomainError):
+    code = "document_agent_deadline_exceeded"
+
+
 class IndexWriteError(DocumentDomainError):
     code = "document_index_write_failed"
 
