@@ -1,6 +1,7 @@
 """Composição completa do runtime isolado do serviço A2A documental."""
 
 import hashlib
+import importlib
 import inspect
 import json
 import re
@@ -250,6 +251,33 @@ async def create_runtime(
         delegation_verifier=delegation_verifier,
         _closers=tuple(closers),
     )
+
+
+async def load_runtime_dependencies(factory_path: str | None) -> RuntimeDependencies:
+    """Carrega o composition root implantado para FAIIS, LLM e permissões.
+
+    O plugin é código confiável fornecido pelo deployment. Sua factory pode ser
+    síncrona ou assíncrona e deve retornar somente as portas do runtime A2A.
+    """
+    if not isinstance(factory_path, str) or not factory_path.strip():
+        raise ValueError("A2A_RUNTIME_FACTORY deve apontar para module:callable")
+    module_name, separator, attribute = factory_path.partition(":")
+    if not separator or not module_name.strip() or not attribute.strip():
+        raise ValueError("A2A_RUNTIME_FACTORY deve usar o formato module:callable")
+    try:
+        module = importlib.import_module(module_name)
+        factory = getattr(module, attribute)
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError("não foi possível carregar a factory do runtime A2A") from exc
+    if not callable(factory):
+        raise TypeError("A2A_RUNTIME_FACTORY deve apontar para uma função")
+    dependencies = factory()
+    if inspect.isawaitable(dependencies):
+        dependencies = await dependencies
+    if not isinstance(dependencies, RuntimeDependencies):
+        raise TypeError("a factory A2A deve retornar RuntimeDependencies")
+    dependencies.validate()
+    return dependencies
 
 
 async def run_server(
