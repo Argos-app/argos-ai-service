@@ -235,13 +235,6 @@ class EstimateMedicineConsumptionResponse(_PredictionContract):
         if self.status == PredictionStatus.ESTIMATED:
             if not self.items or self.data_origin == DataOrigin.UNKNOWN:
                 raise ValueError("estimativa exige histórico e origem conhecida")
-            for evidence in self.coverage:
-                if (
-                    evidence.status != CoverageStatus.CONFIRMED
-                    or evidence.window.start > self.history_window.start
-                    or evidence.window.end < self.history_window.end
-                ):
-                    raise ValueError("estimativa exige cobertura confirmada de todo o histórico")
             if any(
                 item.estimated_quantity is None or not item.monthly_history for item in self.items
             ):

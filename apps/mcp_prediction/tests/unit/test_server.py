@@ -48,10 +48,10 @@ def result_json(response):
     )
 
 
-async def test_authenticated_http_initialization_and_empty_catalog(
+async def test_authenticated_http_initialization_and_prediction_tool_catalog(
     configured_settings, signed_delegation
 ):
-    server = create_mcp_server(configured_settings)
+    server = create_mcp_server(configured_settings, object())
     assert server.name == "argos-mcp-prediction"
     verifier = DelegationTokenVerifier(
         dict(configured_settings.trusted_delegation_keys),
@@ -125,14 +125,16 @@ async def test_authenticated_http_initialization_and_empty_catalog(
         listed = await client.post(
             "/mcp", headers=headers, json={"jsonrpc": "2.0", "id": 3, "method": "tools/list"}
         )
-        assert result_json(listed)["result"]["tools"] == []
+        tools = result_json(listed)["result"]["tools"]
+        assert [tool["name"] for tool in tools] == ["estimate_medicine_consumption"]
+        assert list(tools[0]["inputSchema"]["properties"]) == ["payload"]
 
 
 async def test_same_mcp_session_uses_each_request_context_and_revalidates_access(
     configured_settings,
     signed_delegation,
 ):
-    server = create_mcp_server(configured_settings)
+    server = create_mcp_server(configured_settings, object())
     verifier = DelegationTokenVerifier(
         dict(configured_settings.trusted_delegation_keys),
         issuer=configured_settings.delegation_issuer,

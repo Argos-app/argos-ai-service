@@ -20,7 +20,7 @@ async def test_invalid_settings_never_open_pool(monkeypatch, configured_settings
     create_pool.assert_not_awaited()
 
 
-async def test_runtime_opens_read_only_pool_without_business_tools(
+async def test_runtime_opens_read_only_pool_and_registers_prediction_tool(
     monkeypatch, configured_settings, sql_pool
 ):
     pool, connection = sql_pool
@@ -33,7 +33,8 @@ async def test_runtime_opens_read_only_pool_without_business_tools(
         server_settings={"default_transaction_read_only": "on"},
     )
     connection.fetchval.assert_awaited_once_with("SHOW default_transaction_read_only")
-    assert await runtime.server.list_tools() == []
+    tools = await runtime.server.list_tools()
+    assert [tool.name for tool in tools] == ["estimate_medicine_consumption"]
     pool.close.assert_not_awaited()
     await runtime.close()
     pool.close.assert_awaited_once()
