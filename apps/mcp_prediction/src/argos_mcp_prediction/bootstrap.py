@@ -16,7 +16,6 @@ from argos_mcp_prediction.server import (
     create_mcp_server,
 )
 from argos_mcp_prediction.settings import Settings
-from packages.contracts import DataOrigin
 from packages.security.access_policy import AccessPolicy
 from packages.security.delegation import DelegationTokenVerifier
 
@@ -66,7 +65,7 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             access_policy=access_policy,
             consumption_repository=PostgresConsumptionRepository(sql_reader),
             coverage_repository=UnknownCoverageRepository(),
-            data_origin=DataOrigin.UNKNOWN,
+            data_origin=configured.data_origin,
         )
         server = create_mcp_server(
             configured,

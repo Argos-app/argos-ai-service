@@ -4,6 +4,8 @@ import json
 import os
 from dataclasses import dataclass, field
 
+from packages.contracts import DataOrigin
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -15,6 +17,7 @@ class Settings:
     trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
     delegation_max_ttl_seconds: int = 300
     delegation_clock_skew_seconds: int = 30
+    data_origin: DataOrigin = DataOrigin.UNKNOWN
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
 
@@ -38,6 +41,12 @@ class Settings:
             raise ValueError(
                 "MCP_PREDICTION_TRUSTED_DELEGATION_KEYS deve mapear key ID para chave Base64"
             )
+        try:
+            data_origin = DataOrigin(os.getenv("MCP_PREDICTION_DATA_ORIGIN", "unknown"))
+        except ValueError as exc:
+            raise ValueError(
+                "MCP_PREDICTION_DATA_ORIGIN deve ser recorded, synthetic ou unknown"
+            ) from exc
         return cls(
             sql_dsn=os.getenv("MCP_PREDICTION_SQL_DSN"),
             internal_service_token=os.getenv("MCP_PREDICTION_INTERNAL_SERVICE_TOKEN"),
@@ -47,6 +56,7 @@ class Settings:
             trusted_delegation_keys=tuple(delegation_keys.items()),
             delegation_max_ttl_seconds=read_int("MCP_PREDICTION_DELEGATION_MAX_TTL", 300),
             delegation_clock_skew_seconds=read_int("MCP_PREDICTION_DELEGATION_CLOCK_SKEW", 30),
+            data_origin=data_origin,
             mcp_host=os.getenv("MCP_PREDICTION_HOST", "0.0.0.0"),
             mcp_port=read_int("MCP_PREDICTION_PORT", 8000),
         )
@@ -62,6 +72,8 @@ class Settings:
         missing = [name for name, value in required.items() if not value or not value.strip()]
         if not self.trusted_delegation_keys:
             missing.append("MCP_PREDICTION_TRUSTED_DELEGATION_KEYS")
+        if not isinstance(self.data_origin, DataOrigin):
+            raise ValueError("MCP_PREDICTION_DATA_ORIGIN inválida")
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.mcp_port <= 65535:
