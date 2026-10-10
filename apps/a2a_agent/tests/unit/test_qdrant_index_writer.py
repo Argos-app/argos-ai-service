@@ -60,6 +60,7 @@ def indexed_chunk(*, revision: str = REVISION, chunk_id=None) -> IndexedDocument
 class FakeQdrantClient:
     def __init__(self):
         self.collections = {}
+        self.points = {}
         self.aliases = {}
         self.upsert_calls = []
         self.delete_calls = []
@@ -72,6 +73,7 @@ class FakeQdrantClient:
 
     async def create_collection(self, *, collection_name, vectors_config):
         self.collections[collection_name] = vectors_config
+        self.points[collection_name] = []
         return True
 
     async def get_collection(self, *, collection_name):
@@ -82,6 +84,10 @@ class FakeQdrantClient:
         if self.fail_upsert:
             raise RuntimeError("simulated Qdrant failure")
         self.upsert_calls.append((collection_name, points, wait))
+        point_ids = {point.id for point in points}
+        self.points[collection_name] = [
+            point for point in self.points.get(collection_name, []) if point.id not in point_ids
+        ] + list(points)
 
     async def delete(self, *, collection_name, points_selector, wait):
         self.delete_calls.append((collection_name, points_selector, wait))
@@ -106,6 +112,29 @@ class FakeQdrantClient:
     async def delete_collection(self, *, collection_name):
         self.deleted_collections.append(collection_name)
         self.collections.pop(collection_name, None)
+        self.points.pop(collection_name, None)
+
+    async def scroll(
+        self,
+        *,
+        collection_name,
+        scroll_filter,
+        limit,
+        offset,
+        with_payload,
+        with_vectors,
+    ):
+        assert with_payload and with_vectors
+        required_revision = scroll_filter.must[0].match.value
+        matching = [
+            point
+            for point in self.points.get(collection_name, [])
+            if point.payload["corpus_revision"] == required_revision
+        ]
+        start = offset or 0
+        page = matching[start : start + limit]
+        next_offset = start + len(page) if start + len(page) < len(matching) else None
+        return page, next_offset
 
 
 def writer(client=None, **settings):
@@ -189,6 +218,57 @@ def test_upsert_and_remove_are_scoped_to_exact_staging_generation() -> None:
     assert selector.filter.must[0].key == "document_id"
     assert selector.filter.must[0].match.value == str(item.chunk.document_id)
     assert wait is True
+
+
+def test_copy_documents_reuses_vectors_and_refreshes_payload_for_next_generation() -> None:
+    source_revision = "b" * 64
+    target_revision = "c" * 64
+    client = FakeQdrantClient()
+    adapter = writer(client)
+    item = indexed_chunk(revision=source_revision)
+    source_collection = f"documents__g_{source_revision}"
+    client.collections[source_collection] = SimpleNamespace(size=3, distance=Distance.COSINE)
+    client.points[source_collection] = [
+        SimpleNamespace(
+            id=str(item.chunk.chunk_id),
+            vector=list(item.vector),
+            payload=adapter._payload(item, source_revision),
+        )
+    ]
+
+    run_immediate(
+        adapter.copy_documents(
+            source_revision,
+            target_revision,
+            {item.chunk.document_id: item.metadata},
+        )
+    )
+
+    target_collection, points, wait = client.upsert_calls[0]
+    assert target_collection == f"documents__g_{target_revision}"
+    assert wait is True
+    assert points[0].id == str(item.chunk.chunk_id)
+    assert points[0].vector == list(item.vector)
+    assert points[0].payload["corpus_revision"] == target_revision
+    assert points[0].payload["text"] == item.chunk.text
+
+
+def test_copy_documents_fails_if_an_expected_document_has_no_indexed_chunks() -> None:
+    source_revision = "b" * 64
+    target_revision = "c" * 64
+    client = FakeQdrantClient()
+    source_collection = f"documents__g_{source_revision}"
+    client.collections[source_collection] = SimpleNamespace(size=3, distance=Distance.COSINE)
+    item = indexed_chunk(revision=source_revision)
+
+    with pytest.raises(IndexWriteError, match="não contém chunks"):
+        run_immediate(
+            writer(client).copy_documents(
+                source_revision,
+                target_revision,
+                {item.chunk.document_id: item.metadata},
+            )
+        )
 
 
 def test_publish_atomically_replaces_active_alias_and_preserves_old_generation() -> None:
