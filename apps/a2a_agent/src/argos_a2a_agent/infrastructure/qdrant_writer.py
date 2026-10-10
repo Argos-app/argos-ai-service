@@ -61,8 +61,6 @@ class QdrantDocumentIndexWriter:
         for item in chunks:
             if item.metadata.revision_hash != item.chunk.revision_hash:
                 raise IndexWriteError("metadados não correspondem à revisão do chunk")
-            if item.chunk.revision_hash != revision:
-                raise IndexWriteError("chunk não pertence à geração solicitada")
             if len(item.vector) != self._vector_size or any(
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
