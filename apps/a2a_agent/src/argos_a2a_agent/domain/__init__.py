@@ -2,6 +2,7 @@
 
 from argos_a2a_agent.domain.errors import (
     CorpusSynchronizationError,
+    CorpusUpdatingError,
     DocumentDomainError,
     DocumentNotFoundError,
     EmbeddingProviderError,
@@ -32,6 +33,7 @@ __all__ = [
     "CorpusManifest",
     "CorpusSyncResult",
     "CorpusSynchronizationError",
+    "CorpusUpdatingError",
     "DocumentChunk",
     "DocumentDomainError",
     "DocumentFilter",

@@ -241,3 +241,5 @@ class CorpusSyncResult:
             raise ValueError("removed_document_ids não pode conter duplicatas")
         if set(self.changed_document_ids) & set(self.removed_document_ids):
             raise ValueError("um documento não pode estar alterado e removido na mesma execução")
+        if not self.updated and (self.changed_document_ids or self.removed_document_ids):
+            raise ValueError("resultado sem atualização não pode indicar mudanças")

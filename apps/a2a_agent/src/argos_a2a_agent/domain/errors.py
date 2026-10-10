@@ -45,3 +45,7 @@ class StaleDocumentRevisionError(DocumentDomainError):
 
 class CorpusSynchronizationError(DocumentDomainError):
     code = "document_corpus_synchronization_failed"
+
+
+class CorpusUpdatingError(CorpusSynchronizationError):
+    code = "document_corpus_updating"
