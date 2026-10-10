@@ -1,14 +1,18 @@
 """Composição completa do runtime isolado do serviço A2A documental."""
 
 import hashlib
-import importlib
 import inspect
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from argos_a2a_agent.adapters.authorization import PostgresDocumentPermissionDirectory
 from argos_a2a_agent.adapters.documents.pypdf_parser import PyPdfParser
+from argos_a2a_agent.adapters.providers import (
+    OpenAICompatibleAnswerGenerator,
+    OpenAICompatibleEmbeddingProvider,
+)
 from argos_a2a_agent.adapters.storage import LocalDocumentSource, LocalManifestRepository
 from argos_a2a_agent.agents.factory import DocumentAgentFactory
 from argos_a2a_agent.application.ensure_current_corpus import EnsureCurrentCorpus
@@ -35,12 +39,7 @@ _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 
 @dataclass(frozen=True, slots=True)
 class RuntimeDependencies:
-    """Adapters externos sem implementação contratual neste repositório.
-
-    O deployment fornece o adapter FAIIS de embeddings, o gerador de resposta
-    escolhido e a consulta vigente de permissão. O bootstrap não substitui
-    nenhum deles por mocks ou permissões implícitas.
-    """
+    """Portas concretas utilizadas pelo runtime e injetáveis em integrações."""
 
     embeddings: EmbeddingProvider
     embedding_fingerprint: str
@@ -128,6 +127,62 @@ async def _close_resources(resources: list[Any]) -> None:
         raise ExceptionGroup("falha ao liberar recursos durante bootstrap", errors)
 
 
+async def create_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
+    """Cria adapters reais usando APIs OpenAI-compatible e PostgreSQL read-only."""
+
+    try:
+        import asyncpg
+    except ImportError as exc:
+        raise RuntimeError("instale a dependência 'asyncpg' para consultar permissões") from exc
+
+    pool = await asyncpg.create_pool(
+        settings.permission_sql_dsn,
+        min_size=1,
+        max_size=10,
+        command_timeout=5,
+        server_settings={"default_transaction_read_only": "on"},
+    )
+    provider_resources: list[Any] = []
+    try:
+        async with pool.acquire() as connection:
+            read_only = await connection.fetchval("SHOW default_transaction_read_only")
+        if str(read_only).lower() != "on":
+            raise RuntimeError("a conexão de autorização PostgreSQL não está somente leitura")
+
+        embeddings = OpenAICompatibleEmbeddingProvider(
+            settings.embeddings_api_url,
+            settings.embeddings_api_key,
+            settings.embeddings_model,
+            settings.model_timeout_seconds,
+        )
+        provider_resources.append(embeddings)
+        answer_generator = OpenAICompatibleAnswerGenerator(
+            settings.answer_api_url,
+            settings.answer_api_key,
+            settings.answer_model,
+            settings.model_timeout_seconds,
+        )
+        provider_resources.append(answer_generator)
+        permission_directory = PostgresDocumentPermissionDirectory(
+            pool,
+            settings.documents_read_role_codes,
+        )
+        fingerprint_material = (
+            f"openai-compatible:{settings.embeddings_model}:{settings.embeddings_model_revision}"
+        )
+        return RuntimeDependencies(
+            embeddings=embeddings,
+            embedding_fingerprint=hashlib.sha256(fingerprint_material.encode("utf-8")).hexdigest(),
+            embedding_vector_size=settings.qdrant_vector_size,
+            answer_generator=answer_generator,
+            permission_directory=permission_directory,
+        )
+    except BaseException:
+        await _close_resources(provider_resources)
+        await pool.close()
+        raise
+
+
 async def create_runtime(
     settings: Settings | None = None,
     *,
@@ -136,16 +191,7 @@ async def create_runtime(
     """Valida e conecta segurança, atualização, consulta, agentes e protocolo."""
 
     configured = settings or Settings.from_env()
-    configured.validate_runtime()
-    if dependencies is None:
-        raise ValueError(
-            "runtime incompleto: injete adapters reais de embeddings, geração de resposta "
-            "e consulta vigente de documents.read"
-        )
-    dependencies.validate()
-    if dependencies.embedding_vector_size != configured.qdrant_vector_size:
-        raise ValueError("dimensão do adapter de embeddings diverge da configuração Qdrant")
-
+    configured.validate_runtime(require_providers=dependencies is None)
     if configured.document_source_root is None or configured.manifest_path is None:
         raise ValueError("fonte local e caminho do manifesto são obrigatórios")
     source = LocalDocumentSource(
@@ -159,29 +205,35 @@ async def create_runtime(
     # Detecta manifesto ilegível/corrompido antes de aceitar tráfego; ausência é
     # válida na primeira inicialização e será criada pelo sincronizador.
     await manifests.load()
-    parser = PyPdfParser()
-    chunker = TextChunker()
-    processor = PrepareDocumentForIndex(parser, dependencies.embeddings, chunker)
-    delegation_verifier = GlobalDocumentDelegationTokenVerifier(
-        dict(configured.trusted_delegation_keys),
-        issuer=configured.delegation_issuer,
-        audience=configured.resource_server_url,
-        max_ttl_seconds=configured.delegation_max_ttl_seconds,
-        clock_skew_seconds=configured.delegation_clock_skew_seconds,
-    )
-
-    try:
-        from qdrant_client import AsyncQdrantClient
-    except ImportError as exc:
-        raise RuntimeError("instale a dependência 'qdrant-client' para iniciar o serviço") from exc
-
+    dependencies = dependencies or await create_runtime_dependencies(configured)
     resources: list[Any] = [
         dependencies.embeddings,
         dependencies.answer_generator,
         dependencies.permission_directory,
     ]
-    reader_client = None
     try:
+        dependencies.validate()
+        if dependencies.embedding_vector_size != configured.qdrant_vector_size:
+            raise ValueError("dimensão do adapter de embeddings diverge da configuração Qdrant")
+
+        parser = PyPdfParser()
+        chunker = TextChunker()
+        processor = PrepareDocumentForIndex(parser, dependencies.embeddings, chunker)
+        delegation_verifier = GlobalDocumentDelegationTokenVerifier(
+            dict(configured.trusted_delegation_keys),
+            issuer=configured.delegation_issuer,
+            audience=configured.resource_server_url,
+            max_ttl_seconds=configured.delegation_max_ttl_seconds,
+            clock_skew_seconds=configured.delegation_clock_skew_seconds,
+        )
+
+        try:
+            from qdrant_client import AsyncQdrantClient
+        except ImportError as exc:
+            raise RuntimeError(
+                "instale a dependência 'qdrant-client' para iniciar o serviço"
+            ) from exc
+
         reader_client = AsyncQdrantClient(
             url=configured.qdrant_url,
             api_key=configured.qdrant_read_api_key,
@@ -231,53 +283,25 @@ async def create_runtime(
             delegation_verifier=delegation_verifier,
             agent_registry=agent_registry,
         )
+
+        # Os adapters passam à propriedade do runtime depois que a composição tem êxito.
+        closers = []
+        seen: set[int] = set()
+        for resource in resources:
+            if id(resource) in seen:
+                continue
+            seen.add(id(resource))
+            close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
+            if callable(close):
+                closers.append(close)
+        return ServiceRuntime(
+            server=server,
+            delegation_verifier=delegation_verifier,
+            _closers=tuple(closers),
+        )
     except BaseException:
         await _close_resources(resources)
         raise
-
-    # Os adapters injetados passam à propriedade do runtime somente depois da
-    # composição ter êxito; todos são fechados junto aos dois clientes Qdrant.
-    closers = []
-    seen: set[int] = set()
-    for resource in resources:
-        if id(resource) in seen:
-            continue
-        seen.add(id(resource))
-        close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
-        if callable(close):
-            closers.append(close)
-    return ServiceRuntime(
-        server=server,
-        delegation_verifier=delegation_verifier,
-        _closers=tuple(closers),
-    )
-
-
-async def load_runtime_dependencies(factory_path: str | None) -> RuntimeDependencies:
-    """Carrega o composition root implantado para FAIIS, LLM e permissões.
-
-    O plugin é código confiável fornecido pelo deployment. Sua factory pode ser
-    síncrona ou assíncrona e deve retornar somente as portas do runtime A2A.
-    """
-    if not isinstance(factory_path, str) or not factory_path.strip():
-        raise ValueError("A2A_RUNTIME_FACTORY deve apontar para module:callable")
-    module_name, separator, attribute = factory_path.partition(":")
-    if not separator or not module_name.strip() or not attribute.strip():
-        raise ValueError("A2A_RUNTIME_FACTORY deve usar o formato module:callable")
-    try:
-        module = importlib.import_module(module_name)
-        factory = getattr(module, attribute)
-    except (ImportError, AttributeError) as exc:
-        raise RuntimeError("não foi possível carregar a factory do runtime A2A") from exc
-    if not callable(factory):
-        raise TypeError("A2A_RUNTIME_FACTORY deve apontar para uma função")
-    dependencies = factory()
-    if inspect.isawaitable(dependencies):
-        dependencies = await dependencies
-    if not isinstance(dependencies, RuntimeDependencies):
-        raise TypeError("a factory A2A deve retornar RuntimeDependencies")
-    dependencies.validate()
-    return dependencies
 
 
 async def run_server(

@@ -3,6 +3,7 @@
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -26,6 +27,16 @@ class Settings:
     delegation_max_ttl_seconds: int = 300
     delegation_clock_skew_seconds: int = 30
     qdrant_timeout_seconds: float = 5
+    embeddings_api_url: str | None = None
+    embeddings_api_key: str | None = field(default=None, repr=False)
+    embeddings_model: str | None = None
+    embeddings_model_revision: str | None = None
+    answer_api_url: str | None = None
+    answer_api_key: str | None = field(default=None, repr=False)
+    answer_model: str | None = None
+    permission_sql_dsn: str | None = field(default=None, repr=False)
+    documents_read_role_codes: tuple[str, ...] = ("ADMIN", "GERENTE", "PECUARISTA", "APLICADOR")
+    model_timeout_seconds: float = 20
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
     a2a_endpoint_url: str | None = None
@@ -56,6 +67,15 @@ class Settings:
             timeout = float(os.getenv("A2A_QDRANT_TIMEOUT_SECONDS", "5"))
         except ValueError as exc:
             raise ValueError("A2A_QDRANT_TIMEOUT_SECONDS deve ser um número") from exc
+        try:
+            model_timeout = float(os.getenv("A2A_MODEL_TIMEOUT_SECONDS", "20"))
+        except ValueError as exc:
+            raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser um número") from exc
+        raw_roles = os.getenv(
+            "A2A_DOCUMENTS_READ_ROLE_CODES",
+            "ADMIN,GERENTE,PECUARISTA,APLICADOR",
+        )
+        role_codes = tuple(item.strip().upper() for item in raw_roles.split(",") if item.strip())
         return cls(
             qdrant_url=os.getenv("A2A_QDRANT_URL"),
             qdrant_read_api_key=os.getenv("A2A_QDRANT_READ_API_KEY"),
@@ -79,12 +99,22 @@ class Settings:
             delegation_max_ttl_seconds=max_ttl,
             delegation_clock_skew_seconds=clock_skew,
             qdrant_timeout_seconds=timeout,
+            embeddings_api_url=os.getenv("A2A_EMBEDDINGS_API_URL"),
+            embeddings_api_key=os.getenv("A2A_EMBEDDINGS_API_KEY"),
+            embeddings_model=os.getenv("A2A_EMBEDDINGS_MODEL"),
+            embeddings_model_revision=os.getenv("A2A_EMBEDDINGS_MODEL_REVISION"),
+            answer_api_url=os.getenv("A2A_ANSWER_API_URL"),
+            answer_api_key=os.getenv("A2A_ANSWER_API_KEY"),
+            answer_model=os.getenv("A2A_ANSWER_MODEL"),
+            permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
+            documents_read_role_codes=role_codes,
+            model_timeout_seconds=model_timeout,
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
             a2a_endpoint_url=os.getenv("A2A_ENDPOINT_URL"),
         )
 
-    def validate_runtime(self) -> None:
+    def validate_runtime(self, *, require_providers: bool = True) -> None:
         required = {
             "A2A_QDRANT_URL": self.qdrant_url,
             "A2A_QDRANT_READ_API_KEY": self.qdrant_read_api_key,
@@ -98,6 +128,19 @@ class Settings:
             "A2A_DELEGATION_ISSUER": self.delegation_issuer,
             "A2A_ENDPOINT_URL": self.a2a_endpoint_url,
         }
+        if require_providers:
+            required.update(
+                {
+                    "A2A_EMBEDDINGS_API_URL": self.embeddings_api_url,
+                    "A2A_EMBEDDINGS_API_KEY": self.embeddings_api_key,
+                    "A2A_EMBEDDINGS_MODEL": self.embeddings_model,
+                    "A2A_EMBEDDINGS_MODEL_REVISION": self.embeddings_model_revision,
+                    "A2A_ANSWER_API_URL": self.answer_api_url,
+                    "A2A_ANSWER_API_KEY": self.answer_api_key,
+                    "A2A_ANSWER_MODEL": self.answer_model,
+                    "A2A_PERMISSION_SQL_DSN": self.permission_sql_dsn,
+                }
+            )
         missing = [
             name
             for name, value in required.items()
@@ -105,6 +148,8 @@ class Settings:
         ]
         if not self.trusted_delegation_keys:
             missing.append("A2A_TRUSTED_DELEGATION_KEYS")
+        if not self.documents_read_role_codes:
+            missing.append("A2A_DOCUMENTS_READ_ROLE_CODES")
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.a2a_port <= 65535:
@@ -115,6 +160,13 @@ class Settings:
             raise ValueError("A2A_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos")
         if not self.a2a_host.strip():
             raise ValueError("A2A_HOST não pode ser vazio")
+        if len(self.documents_read_role_codes) != len(set(self.documents_read_role_codes)):
+            raise ValueError("A2A_DOCUMENTS_READ_ROLE_CODES não pode conter duplicatas")
+        if any(
+            not re.fullmatch(r"[A-Z][A-Z0-9_]{0,29}", code) or code == "SISTEMA"
+            for code in self.documents_read_role_codes
+        ):
+            raise ValueError("papel configurado para documents.read é inválido")
         if self.qdrant_read_api_key == self.qdrant_write_api_key:
             raise ValueError("credenciais Qdrant de leitura e escrita devem ser distintas")
         if (
@@ -155,6 +207,11 @@ class Settings:
             or not 0 < self.qdrant_timeout_seconds <= 30
         ):
             raise ValueError("A2A_QDRANT_TIMEOUT_SECONDS deve ser maior que 0 e até 30")
+        if (
+            not math.isfinite(self.model_timeout_seconds)
+            or not 0 < self.model_timeout_seconds <= 30
+        ):
+            raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser maior que 0 e até 30")
         for name, value in (
             ("A2A_QDRANT_URL", self.qdrant_url),
             ("A2A_RESOURCE_SERVER_URL", self.resource_server_url),
@@ -174,5 +231,50 @@ class Settings:
                 valid = False
             if not valid:
                 raise ValueError(f"{name} deve ser uma URL HTTP(S) sem credenciais ou query")
+        provider_urls = (
+            (
+                ("A2A_EMBEDDINGS_API_URL", self.embeddings_api_url, "/embeddings"),
+                ("A2A_ANSWER_API_URL", self.answer_api_url, "/chat/completions"),
+            )
+            if require_providers
+            else ()
+        )
+        for name, value, expected_path in provider_urls:
+            try:
+                parsed = urlsplit(value)
+                local_http = parsed.scheme == "http" and parsed.hostname in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                }
+                valid = (
+                    (parsed.scheme == "https" or local_http)
+                    and bool(parsed.hostname)
+                    and parsed.username is None
+                    and parsed.password is None
+                )
+                valid = (
+                    valid
+                    and parsed.path.rstrip("/").endswith(expected_path)
+                    and not parsed.query
+                    and not parsed.fragment
+                    and (parsed.port is None or 1 <= parsed.port <= 65535)
+                )
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError(f"{name} deve ser HTTPS e terminar em {expected_path}")
+        model_names = (
+            (
+                ("A2A_EMBEDDINGS_MODEL", self.embeddings_model),
+                ("A2A_EMBEDDINGS_MODEL_REVISION", self.embeddings_model_revision),
+                ("A2A_ANSWER_MODEL", self.answer_model),
+            )
+            if require_providers
+            else ()
+        )
+        for name, value in model_names:
+            if not isinstance(value, str) or not value.strip() or len(value) > 200:
+                raise ValueError(f"{name} deve ser texto não vazio de até 200 caracteres")
         if any(char.isspace() for char in self.internal_service_token):
             raise ValueError("A2A_INTERNAL_SERVICE_TOKEN não pode conter espaços")

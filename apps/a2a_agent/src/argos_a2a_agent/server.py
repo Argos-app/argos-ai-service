@@ -97,7 +97,7 @@ def create_a2a_server(
     sincronização sem anunciar uma capacidade indisponível.
     """
 
-    settings.validate_runtime()
+    settings.validate_runtime(require_providers=False)
     try:
         from starlette.applications import Starlette
         from starlette.middleware import Middleware

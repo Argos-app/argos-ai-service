@@ -86,11 +86,11 @@ ficam no repositório.
 
 O serviço tem build independente em `apps/a2a_agent/Dockerfile` e Compose
 operacional documentado em
-[`apps/a2a_agent/README.md`](apps/a2a_agent/README.md). O processo exige uma
-factory de adapters confiável (`A2A_RUNTIME_FACTORY`) para embeddings FAIIS,
-geração de respostas e autorização vigente; esses adapters externos ainda não
-estão disponíveis neste repositório e a imagem falha fechada sem eles. A origem
-cloud e a chamada real pelo principal seguem pendentes.
+[`apps/a2a_agent/README.md`](apps/a2a_agent/README.md). O runtime implementa
+adapters HTTP OpenAI-compatible para embeddings e geração, além de uma consulta
+PostgreSQL somente leitura para autorização documental. Endpoints, modelos,
+papéis autorizados, credenciais e o Qdrant precisam ser configurados no
+deployment. A origem cloud e a chamada real pelo principal seguem pendentes.
 
 ## Estrutura do projeto
 

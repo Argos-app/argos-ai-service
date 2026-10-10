@@ -37,7 +37,6 @@ documentos distintos sobre o repositório ligado ao mesmo alias Qdrant.
 O catálogo dos PDFs de fixture é global e não contém escopo de propriedade; por
 isso a homologação verifica a ausência de metadados de propriedade no Qdrant e
 testa isolamento de tasks por usuário, sem simular isolamento multi-propriedade.
-O teste continua local: não executa o principal, não consulta cloud nem
-provedores reais, e não valida o adapter FAIIS ou geração de linguagem de
-produção. As chaves e o volume são exclusivos de teste; não reutilize em outros
-ambientes.
+O teste continua local: não executa o principal, não consulta cloud nem valida
+os adapters HTTP reais de embeddings e geração usados pelo runtime de produção.
+As chaves e o volume são exclusivos de teste; não reutilize em outros ambientes.

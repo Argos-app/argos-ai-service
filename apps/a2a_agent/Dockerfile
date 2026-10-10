@@ -2,7 +2,7 @@ FROM python:3.14.3-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:/app/src:/opt/argos/a2a-adapters
+    PYTHONPATH=/app:/app/src
 
 WORKDIR /app
 

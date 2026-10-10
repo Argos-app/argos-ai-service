@@ -16,12 +16,10 @@ services:
             A2A_ENDPOINT_URL: ${A2A_ENDPOINT_URL:?configure A2A_ENDPOINT_URL in apps/a2a_agent/.env}
             A2A_DOCUMENT_SOURCE_ROOT: /var/lib/argos/a2a/documents
             A2A_MANIFEST_PATH: /var/lib/argos/a2a/state/manifest.json
-            A2A_RUNTIME_FACTORY: ${A2A_RUNTIME_FACTORY:?configure A2A_RUNTIME_FACTORY in apps/a2a_agent/.env}
         ports:
             - "127.0.0.1:${A2A_PUBLISHED_PORT:-8000}:8000"
         volumes:
             - ${A2A_DOCUMENTS_PATH:-./data/documents}:/var/lib/argos/a2a/documents:ro
-            - ${A2A_ADAPTERS_PATH:?configure A2A_ADAPTERS_PATH in apps/a2a_agent/.env}:/opt/argos/a2a-adapters:ro
             - a2a-state:/var/lib/argos/a2a/state
         read_only: true
         tmpfs:

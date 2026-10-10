@@ -13,7 +13,7 @@ compartilhadas explicitamente:
 ```powershell
 docker build -f apps/a2a_agent/Dockerfile -t argos-a2a-agent:local .
 Copy-Item apps/a2a_agent/.env.example apps/a2a_agent/.env
-# Edite .env com URLs, credenciais e adapters fornecidos pelo deployment.
+# Edite .env com URLs, modelos e credenciais do deployment.
 docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml up --build -d
 ```
 
@@ -31,21 +31,28 @@ arquivos PDF allowlisted. O Compose monta a origem como somente leitura. A
 origem cloud permanece fora desta entrega até a definição do provedor e de sua
 configuração de acesso.
 
-## Adapters de runtime
+## Integrações do runtime
 
-O runtime requer adapters de embeddings FAIIS, geração de respostas e consulta
-vigente da permissão `documents.read`. Eles ainda não são implementados neste
-repositório. O deployment fornece um módulo Python confiável no diretório
-montado em `/opt/argos/a2a-adapters`, configura `A2A_RUNTIME_FACTORY` no formato
-`modulo:factory` e a factory retorna `RuntimeDependencies`. A factory pode ser
-síncrona ou assíncrona. O exemplo de ambiente usa placeholders e não inicia o
-serviço até esses adapters e todos os segredos/configurações obrigatórios serem
-substituídos. O serviço falha fechado quando a factory está ausente ou inválida.
+O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
+`/chat/completions`. Configure os endpoints HTTPS, chaves, nomes dos modelos e
+uma revisão imutável do modelo de embeddings. Essa revisão participa do
+fingerprint de indexação; alterá-la força o sincronizador a criar uma nova
+geração compatível com Qdrant. O modelo e a dimensão devem ser os mesmos usados
+para indexar e consultar.
 
-Não monte código de adapter não revisado: ele é código executável dentro do
-processo. Não versione `apps/a2a_agent/.env`; injete Bearer, chaves públicas de
-delegação e credenciais Qdrant por um gerenciador de segredos. Configure
-credenciais Qdrant diferentes e não compartilhe a chave do writer com clientes.
+O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Ele
+exige usuário ativo, papel ativo, ausência de bloqueio vigente e código de papel
+incluído em `A2A_DOCUMENTS_READ_ROLE_CODES`. A configuração padrão mapeia os
+papéis humanos existentes para `documents.read` e exclui `SISTEMA`. A conexão
+usa transações read-only; configure um usuário de banco com privilégio somente
+de leitura. A credencial de banco não é compartilhada com os clientes Qdrant.
+
+Embeddings recebem texto extraído dos PDFs; o gerador recebe a pergunta e os
+trechos recuperados. Use endpoints aprovados para esses dados e injete chaves,
+Bearer, DSN e chave pública de delegação pelo gerenciador de segredos. Não
+versione `apps/a2a_agent/.env`. O serviço falha fechado quando as configurações
+estão ausentes, a permissão não pode ser confirmada ou um provedor retorna
+resposta inválida.
 
 ## Operação e recuperação
 
