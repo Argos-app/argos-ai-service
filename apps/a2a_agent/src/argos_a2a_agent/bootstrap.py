@@ -20,7 +20,11 @@ class ServiceRuntime:
         await self.qdrant_client.close()
 
 
-async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
+async def create_runtime(
+    settings: Settings | None = None,
+    *,
+    agent_registry: Any | None = None,
+) -> ServiceRuntime:
     configured = settings or Settings.from_env()
     configured.validate_runtime()
     delegation_verifier = GlobalDocumentDelegationTokenVerifier(
@@ -47,6 +51,7 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             configured,
             readiness_check=client.get_collections,
             delegation_verifier=delegation_verifier,
+            agent_registry=agent_registry,
         )
     except BaseException:
         await client.close()
@@ -59,11 +64,15 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
     )
 
 
-async def run_server(settings: Settings | None = None) -> None:
+async def run_server(
+    settings: Settings | None = None,
+    *,
+    agent_registry: Any | None = None,
+) -> None:
     import uvicorn
 
     configured = settings or Settings.from_env()
-    runtime = await create_runtime(configured)
+    runtime = await create_runtime(configured, agent_registry=agent_registry)
     try:
         config = uvicorn.Config(runtime.server, host=configured.a2a_host, port=configured.a2a_port)
         await uvicorn.Server(config).serve()

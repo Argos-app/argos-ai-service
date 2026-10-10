@@ -21,6 +21,7 @@ class Settings:
     qdrant_timeout_seconds: float = 5
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
+    a2a_public_url: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -61,6 +62,7 @@ class Settings:
             qdrant_timeout_seconds=timeout,
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
+            a2a_public_url=os.getenv("A2A_PUBLIC_URL"),
         )
 
     def validate_runtime(self) -> None:
@@ -85,6 +87,23 @@ class Settings:
             raise ValueError("A2A_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos")
         if not self.a2a_host.strip():
             raise ValueError("A2A_HOST não pode ser vazio")
+        if self.a2a_public_url is not None:
+            try:
+                parsed_public_url = urlsplit(self.a2a_public_url)
+                valid_public_url = (
+                    parsed_public_url.scheme in {"http", "https"}
+                    and bool(parsed_public_url.hostname)
+                    and parsed_public_url.username is None
+                    and parsed_public_url.password is None
+                    and parsed_public_url.path.rstrip("/").endswith("/a2a")
+                    and not parsed_public_url.query
+                    and not parsed_public_url.fragment
+                    and (parsed_public_url.port is None or 1 <= parsed_public_url.port <= 65535)
+                )
+            except ValueError:
+                valid_public_url = False
+            if not valid_public_url:
+                raise ValueError("A2A_PUBLIC_URL deve ser URL HTTP(S) completa terminando em /a2a")
         if (
             not math.isfinite(self.qdrant_timeout_seconds)
             or not 0 < self.qdrant_timeout_seconds <= 30

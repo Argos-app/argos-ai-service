@@ -1,4 +1,4 @@
-"""Fundação ASGI autenticada; especialistas e operações A2A são etapas posteriores."""
+"""Servidor ASGI autenticado e endpoint A2A do agente Informações."""
 
 import hmac
 from collections.abc import Awaitable, Callable
@@ -88,11 +88,13 @@ def create_a2a_server(
     *,
     readiness_check: Callable[[], Awaitable[Any]],
     delegation_verifier: GlobalDocumentDelegationTokenVerifier,
+    agent_registry: Any | None = None,
 ) -> Any:
-    """Cria o transporte protegido sem publicar skills ou executores provisórios.
+    """Cria healthchecks e, quando composto, o transporte A2A protegido.
 
-    A montagem de Agent Card, SDK routes e tasks depende dos especialistas e da
-    integração posterior dos serviços de consulta ao catálogo global.
+    O transporte não publica um Agent Card sem um registry funcional. Isso
+    permite que etapas posteriores componham o provedor de respostas e a
+    sincronização sem anunciar uma capacidade indisponível.
     """
 
     settings.validate_runtime()
@@ -116,8 +118,41 @@ def create_a2a_server(
             return JSONResponse({"status": "unavailable"}, status_code=503)
         return JSONResponse({"status": "ready"})
 
+    routes = [Route("/health/live", live), Route("/health/ready", ready)]
+    if agent_registry is not None:
+        if not settings.a2a_public_url:
+            raise ValueError("A2A_PUBLIC_URL é obrigatória para publicar o Agent Card")
+        try:
+            from a2a.server.request_handlers import DefaultRequestHandler
+            from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
+            from a2a.server.tasks import InMemoryTaskStore
+
+            from argos_a2a_agent.adapters.inbound.a2a_server import (
+                DocumentA2AExecutor,
+                DocumentCallContextBuilder,
+                create_agent_card,
+                task_owner,
+            )
+        except ImportError as exc:
+            raise RuntimeError("instale a2a-sdk[http-server] para publicar o endpoint A2A") from exc
+
+        card = create_agent_card(settings.a2a_public_url)
+        handler = DefaultRequestHandler(
+            agent_executor=DocumentA2AExecutor(agent_registry),
+            task_store=InMemoryTaskStore(owner_resolver=task_owner),
+            agent_card=card,
+        )
+        routes.extend(create_agent_card_routes(card))
+        routes.extend(
+            create_jsonrpc_routes(
+                handler,
+                rpc_url="/a2a",
+                context_builder=DocumentCallContextBuilder(),
+            )
+        )
+
     return Starlette(
-        routes=[Route("/health/live", live), Route("/health/ready", ready)],
+        routes=routes,
         middleware=[
             Middleware(
                 ServiceAuthenticationMiddleware,
