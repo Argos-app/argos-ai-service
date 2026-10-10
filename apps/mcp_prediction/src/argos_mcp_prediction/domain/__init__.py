@@ -1,6 +1,7 @@
 """Núcleo de regras do MCP de predição."""
 
 from .consumption import (
+    ConsumptionCalculation,
     ConsumptionEstimate,
     ConsumptionGroup,
     ConsumptionState,
@@ -8,9 +9,12 @@ from .consumption import (
     CoverageRecord,
     CoverageState,
     MonthlyConsumptionRecord,
+    MonthlyConsumptionSummary,
+    PredictionWindows,
 )
 
 __all__ = [
+    "ConsumptionCalculation",
     "ConsumptionEstimate",
     "ConsumptionGroup",
     "ConsumptionState",
@@ -18,4 +22,6 @@ __all__ = [
     "CoverageRecord",
     "CoverageState",
     "MonthlyConsumptionRecord",
+    "MonthlyConsumptionSummary",
+    "PredictionWindows",
 ]

@@ -61,3 +61,29 @@ class ConsumptionEstimate:
     application_events: Decimal | None = None
     head_administrations: Decimal | None = None
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PredictionWindows:
+    history_start: date
+    history_end: date
+    forecast_start: date
+    forecast_end: date
+
+
+@dataclass(frozen=True, slots=True)
+class MonthlyConsumptionSummary:
+    month: int
+    calendar_days: int
+    quantity: Decimal
+    application_events: int
+    head_administrations: int
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumptionCalculation:
+    estimate: ConsumptionEstimate
+    monthly_history: tuple[MonthlyConsumptionSummary, ...]
+    historical_quantity: Decimal
+    historical_application_events: int
+    historical_head_administrations: int
