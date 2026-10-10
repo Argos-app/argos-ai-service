@@ -139,7 +139,7 @@ class PostgresConsumptionRepository(ConsumptionReadRepository):
                 list(scope.property_ids),
                 start,
                 end,
-                list(medicine_names) if medicine_names is not None else None,
+                [name.strip() for name in medicine_names] if medicine_names is not None else None,
                 _MAX_MONTHLY_ROWS + 1,
             )
         except Exception as exc:

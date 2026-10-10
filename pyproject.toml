@@ -13,8 +13,9 @@ extend-exclude = [".venv", "build", "dist", "node_modules"]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "apps"]
+testpaths = ["tests", "apps", "packages"]
 python_files = ["test_*.py", "*_test.py"]
-pythonpath = [".", "apps/mcp_email/src", "apps/mcp_data/src"]
-addopts = "-ra"
+pythonpath = [".", "apps/mcp_email/src", "apps/mcp_data/src", "apps/mcp_prediction/src"]
+addopts = "-ra --import-mode=importlib"
+asyncio_default_fixture_loop_scope = "function"
 markers = ["integration: exige os serviços descartáveis do compose de integração"]

@@ -123,18 +123,21 @@ class EstimateMedicineConsumption:
         reasons = []
         if request.medicine_names is not None:
             matched_names = {
-                name.casefold()
+                (group.property_id, name.casefold())
                 for group in groups
                 for name in request.medicine_names
                 if self._matches_name(group, name)
             }
             missing_names = [
-                name for name in request.medicine_names if name.casefold() not in matched_names
+                (property_id, name)
+                for property_id in scope.property_ids
+                for name in request.medicine_names
+                if (property_id, name.casefold()) not in matched_names
             ]
             if missing_names:
                 reasons.append(
                     "Não foi encontrado histórico de aplicação para todos os nomes solicitados "
-                    "nas propriedades autorizadas; não é possível afirmar consumo zero."
+                    "em cada propriedade selecionada; não é possível afirmar consumo zero."
                 )
         for group, monthly_records in sorted(
             groups.items(),

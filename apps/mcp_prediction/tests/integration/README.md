@@ -20,6 +20,11 @@ faz a integração falhar. O fixture cria um banco com nome aleatório, insere o
 schema mínimo exercitado pelos adapters, gera aplicações em cada mês da janela
 anual e remove o banco e a role de leitura ao finalizar.
 
+Ao executar o runner dentro de Docker, `MCP_PREDICTION_TEST_ADMIN_DSN` pode
+substituir o endereço padrão `127.0.0.1:54330` pelo endpoint do PostgreSQL
+descartável na rede dos containers. Essa configuração pertence somente aos
+testes; a role do runtime continua separada e recebe apenas `SELECT`.
+
 O processo MCP real recebe uma chave Ed25519 efêmera, token interno descartável
 e configuração `MCP_PREDICTION_DATA_ORIGIN=synthetic`. A conta de preparação
 cria schema e dados; o runtime usa uma role separada, com `SELECT` nos objetos

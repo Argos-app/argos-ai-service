@@ -10,13 +10,14 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parents[4]
-SQL_ADMIN_DSN = (
+SQL_ADMIN_DSN = os.getenv("MCP_PREDICTION_TEST_ADMIN_DSN") or (
     "postgresql://mcp_prediction_admin:mcp_prediction_local_only@127.0.0.1:54330/"
     "mcp_prediction_test"
 )
@@ -92,8 +93,10 @@ class PredictionHarness:
             self.port = listener.getsockname()[1]
         self.url = f"http://127.0.0.1:{self.port}/mcp"
         self.database_dsn = SQL_ADMIN_DSN.rsplit("/", 1)[0] + "/" + database_name
+        database_endpoint = urlsplit(SQL_ADMIN_DSN)
         self.reader_dsn = (
-            f"postgresql://{reader_role}:{reader_password}@127.0.0.1:54330/{database_name}"
+            f"postgresql://{reader_role}:{reader_password}@{database_endpoint.hostname}:"
+            f"{database_endpoint.port or 5432}/{database_name}"
         )
 
     def delegation_token(self, *, authorized_properties=None, overrides=None):

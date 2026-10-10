@@ -18,19 +18,19 @@ from packages.contracts import (
 
 
 def test_request_defaults_and_json_uuid_roundtrip():
-    property_id, medicine_id = uuid4(), uuid4()
+    property_id = uuid4()
     request = EstimateMedicineConsumptionRequest.model_validate_json(
         json.dumps(
             {
                 "property_ids": [str(property_id)],
-                "medicine_ids": [str(medicine_id)],
+                "medicine_names": ["  ivermectina  "],
                 "as_of": (date.today() - timedelta(days=1)).isoformat(),
             }
         )
     )
     assert request.horizon_days == 28
     assert request.property_ids == (property_id,)
-    assert request.medicine_ids == (medicine_id,)
+    assert request.medicine_names == ("ivermectina",)
     assert (
         EstimateMedicineConsumptionRequest.model_validate_json(request.model_dump_json()) == request
     )
@@ -38,7 +38,7 @@ def test_request_defaults_and_json_uuid_roundtrip():
         request.horizon_days = 1
 
 
-@pytest.mark.parametrize("field", ["property_ids", "medicine_ids"])
+@pytest.mark.parametrize("field", ["property_ids"])
 @pytest.mark.parametrize(
     "value", [[], ["invalid"], [str(uuid4())] * 2, [str(uuid4()) for _ in range(101)]]
 )
@@ -47,11 +47,19 @@ def test_invalid_uuid_filters_are_rejected(field, value):
         EstimateMedicineConsumptionRequest(as_of="2024-12-31", **{field: value})
 
 
-@pytest.mark.parametrize("field", ["property_ids", "medicine_ids"])
+@pytest.mark.parametrize("field", ["property_ids"])
 def test_filter_accepts_up_to_100_distinct_ids(field):
     values = tuple(uuid4() for _ in range(100))
     request = EstimateMedicineConsumptionRequest(as_of="2024-12-31", **{field: values})
     assert getattr(request, field) == values
+
+
+@pytest.mark.parametrize(
+    "value", [[], [""], ["   "], ["x" * 81], ["ivermectina", "IVERMECTINA"], ["x"] * 101]
+)
+def test_invalid_medicine_name_filters_are_rejected(value):
+    with pytest.raises(ValidationError):
+        EstimateMedicineConsumptionRequest(as_of="2024-12-31", medicine_names=value)
 
 
 @pytest.mark.parametrize("value", [0, 29, True, 1.5, "7"])
@@ -119,6 +127,8 @@ def response_payload():
             {
                 "property_id": property_id,
                 "medicine_id": medicine_id,
+                "medicine_name": "Marca veterinária",
+                "active_ingredient": "Ivermectina",
                 "unit": "ml",
                 "historical_quantity": "1.230",
                 "historical_application_events": 1,
@@ -153,7 +163,7 @@ def test_response_preserves_decimal_precision_and_schema(response_payload):
     )
     schema = EstimateMedicineConsumptionRequest.model_json_schema()
     assert schema["additionalProperties"] is False
-    assert set(schema["properties"]) == {"property_ids", "medicine_ids", "as_of", "horizon_days"}
+    assert set(schema["properties"]) == {"property_ids", "medicine_names", "as_of", "horizon_days"}
 
 
 @pytest.mark.parametrize("unit", ["ml", "mg", "g", "UI", "dose"])
@@ -177,8 +187,6 @@ def test_invalid_quantities_are_rejected(response_payload, value):
         "duplicate_group",
         "duplicate_coverage",
         "missing_coverage",
-        "unconfirmed",
-        "short_coverage",
         "no_source",
         "missing_estimate",
         "partial_estimate",
@@ -204,10 +212,6 @@ def test_response_invariants_fail_closed(response_payload, change):
         response_payload["coverage"].append(dict(coverage))
     elif change == "missing_coverage":
         response_payload["coverage"] = []
-    elif change == "unconfirmed":
-        coverage.update(status="unknown", reason="Cobertura não comprovada")
-    elif change == "short_coverage":
-        coverage["window"]["start"] = "2024-02-01"
     elif change == "no_source":
         coverage["source"] = None
     elif change == "missing_estimate":
@@ -239,6 +243,17 @@ def test_response_invariants_fail_closed(response_payload, change):
         response_payload["limitations"] = []
     with pytest.raises(ValidationError):
         EstimateMedicineConsumptionResponse(**response_payload)
+
+
+@pytest.mark.parametrize("status", ["unknown", "incomplete"])
+def test_coverage_confirmation_does_not_block_estimated_response(response_payload, status):
+    response_payload["coverage"][0].update(
+        status=status, window=None, source=None, reason="Completude não comprovada"
+    )
+    result = EstimateMedicineConsumptionResponse(**response_payload)
+    assert result.status == "estimated"
+    assert result.items[0].estimated_quantity is not None
+    assert result.coverage[0].status == status
 
 
 @pytest.mark.parametrize("status", ["insufficient_data", "inconsistent_data"])

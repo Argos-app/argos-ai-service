@@ -192,5 +192,9 @@ def calculate_consumption(
                 group, ConsumptionState.ESTIMATED, quantity, events, heads
             )
         return ConsumptionCalculation(
-            estimate, summaries, historical_quantity, historical_events, historical_heads
+            estimate,
+            summaries if records else (),
+            historical_quantity,
+            historical_events,
+            historical_heads,
         )

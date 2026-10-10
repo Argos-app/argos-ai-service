@@ -274,10 +274,11 @@ async def test_query_parameters_and_decimal_precision_are_preserved():
     reader = AsyncMock()
     reader.fetch_all.return_value = [aggregate_row(scope, medicine)]
     result = await PostgresConsumptionRepository(reader).aggregate_monthly(
-        scope, start=START, end=END, medicine_names=("requested brand",)
+        scope, start=START, end=END, medicine_names=(" test brand ",)
     )
     query, *parameters = reader.fetch_all.await_args.args
-    assert parameters == [list(scope.property_ids), START, END, ["requested brand"], 12001]
+    assert parameters == [list(scope.property_ids), START, END, ["test brand"], 12001]
+    assert "test brand" not in query
     assert str(medicine) not in query and str(scope.property_ids[0]) not in query
     assert result[0].quantity == Decimal("0.1234567890123456789")
 
@@ -308,7 +309,9 @@ async def test_invalid_scope_never_queries_source(change):
         {"start": START, "end": date.today()},
         {"start": date(2023, 1, 1), "end": END},
         {"medicine_names": ()},
-        {"medicine_names": ("'; DROP TABLE application; --",)},
+        {"medicine_names": ("   ",)},
+        {"medicine_names": ("x" * 81,)},
+        {"medicine_names": ("Marca", "marca")},
         {"medicine_names": tuple(str(uuid4()) for _ in range(101))},
     ],
 )
@@ -340,6 +343,7 @@ async def test_invalid_source_records_fail_closed(change):
         row["property_id"] = uuid4()
     elif change == "outside_medicine":
         row["medicine_id"] = uuid4()
+        row["medicine_name"] = "Other brand"
     elif change == "invalid_quantity":
         row["quantity"] = Decimal("NaN")
     elif change == "invalid_unit":

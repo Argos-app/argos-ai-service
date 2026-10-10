@@ -45,6 +45,8 @@ class PredictionMode(StrEnum):
 
 
 IdFilter = Annotated[tuple[UUID, ...], Field(min_length=1, max_length=100)]
+MedicineName = Annotated[str, Field(min_length=1, max_length=80)]
+MedicineNameFilter = Annotated[tuple[MedicineName, ...], Field(min_length=1, max_length=100)]
 NonNegativeDecimal = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
 NonNegativeCount = Annotated[StrictInt, Field(ge=0)]
 Reason = Annotated[str, Field(min_length=1, max_length=500)]
@@ -69,18 +71,35 @@ def _unique_ids(value):
     return value
 
 
+def _unique_names(value):
+    if value is not None and len({name.casefold() for name in value}) != len(value):
+        raise ValueError("nomes de medicamento duplicados não são permitidos")
+    return value
+
+
 class EstimateMedicineConsumptionRequest(_PredictionContract):
     """Filtros apenas reduzem o escopo validado pelo caso de uso; não concedem acesso."""
 
     property_ids: IdFilter | None = None
-    medicine_ids: IdFilter | None = None
+    medicine_names: MedicineNameFilter | None = Field(
+        default=None,
+        description=(
+            "Nomes comerciais ou princípios ativos; busca sem distinção entre maiúsculas e "
+            "minúsculas dentro do histórico das propriedades autorizadas."
+        ),
+    )
     as_of: date = Field(description="Último dia encerrado do histórico, no calendário do serviço.")
     horizon_days: StrictInt = Field(default=28, ge=1, le=28)
 
-    @field_validator("property_ids", "medicine_ids")
+    @field_validator("property_ids")
     @classmethod
-    def validate_ids(cls, value):
+    def validate_property_ids(cls, value):
         return _unique_ids(value)
+
+    @field_validator("medicine_names")
+    @classmethod
+    def validate_medicine_names(cls, value):
+        return _unique_names(value)
 
     @field_validator("as_of", mode="before")
     @classmethod
@@ -151,6 +170,8 @@ class MonthlyConsumption(_PredictionContract):
 class MedicineConsumptionEstimate(_PredictionContract):
     property_id: UUID
     medicine_id: UUID
+    medicine_name: MedicineName
+    active_ingredient: MedicineName
     unit: ConsumptionUnit
     historical_quantity: NonNegativeDecimal
     historical_application_events: NonNegativeCount

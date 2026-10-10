@@ -4,6 +4,7 @@ SQLite valida joins e predicados desta consulta; PostgreSQL real fica na etapa 1
 """
 
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -37,7 +38,7 @@ class FixtureSqlReader:
 )
 async def test_current_user_and_link_must_be_active(change):
     user, owner, property_id = uuid4(), uuid4(), uuid4()
-    with sqlite3.connect(":memory:") as database:
+    with closing(sqlite3.connect(":memory:")) as database:
         database.row_factory = sqlite3.Row
         database.executescript("""
             CREATE TABLE permission (id TEXT, active BOOLEAN);

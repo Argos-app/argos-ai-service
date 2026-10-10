@@ -2,7 +2,7 @@
 
 import json
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Context, Decimal, localcontext
 
 import pytest
 
@@ -57,7 +57,8 @@ async def test_real_tool_calculates_annual_history_with_unknown_coverage(predict
         for entry in item["monthly_history"]
         if entry["month"] == (harness.as_of + timedelta(days=1)).month
     )
-    assert Decimal(item["estimated_quantity"]) == Decimal(10) / month["calendar_days"]
+    with localcontext(Context(prec=50)):
+        assert Decimal(item["estimated_quantity"]) == Decimal(10) / month["calendar_days"]
 
     admin = await asyncpg.connect(harness.database_dsn)
     try:
