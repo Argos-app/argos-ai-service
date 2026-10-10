@@ -1,5 +1,6 @@
 """Configuração explícita do serviço A2A, seguindo o bootstrap dos MCPs."""
 
+import json
 import math
 import os
 from dataclasses import dataclass, field
@@ -13,16 +14,36 @@ class Settings:
     qdrant_collection: str | None = None
     internal_service_token: str | None = field(default=None, repr=False)
     resource_server_url: str | None = None
+    delegation_issuer: str | None = None
+    trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
+    delegation_max_ttl_seconds: int = 300
+    delegation_clock_skew_seconds: int = 30
     qdrant_timeout_seconds: float = 5
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
 
     @classmethod
     def from_env(cls) -> Settings:
+        raw_keys = os.getenv("A2A_TRUSTED_DELEGATION_KEYS", "{}")
         try:
-            port = int(os.getenv("A2A_PORT", "8000"))
-        except ValueError as exc:
-            raise ValueError("A2A_PORT deve ser um inteiro") from exc
+            delegation_keys = json.loads(raw_keys)
+        except json.JSONDecodeError as exc:
+            raise ValueError("A2A_TRUSTED_DELEGATION_KEYS deve ser JSON") from exc
+        if not isinstance(delegation_keys, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in delegation_keys.items()
+        ):
+            raise ValueError("A2A_TRUSTED_DELEGATION_KEYS deve mapear key ID para chave Base64")
+
+        def read_int(name: str, default: int) -> int:
+            try:
+                return int(os.getenv(name, str(default)))
+            except ValueError as exc:
+                raise ValueError(f"{name} deve ser um inteiro") from exc
+
+        port = read_int("A2A_PORT", 8000)
+        max_ttl = read_int("A2A_DELEGATION_MAX_TTL", 300)
+        clock_skew = read_int("A2A_DELEGATION_CLOCK_SKEW", 30)
         try:
             timeout = float(os.getenv("A2A_QDRANT_TIMEOUT_SECONDS", "5"))
         except ValueError as exc:
@@ -33,6 +54,10 @@ class Settings:
             qdrant_collection=os.getenv("A2A_QDRANT_COLLECTION"),
             internal_service_token=os.getenv("A2A_INTERNAL_SERVICE_TOKEN"),
             resource_server_url=os.getenv("A2A_RESOURCE_SERVER_URL"),
+            delegation_issuer=os.getenv("A2A_DELEGATION_ISSUER"),
+            trusted_delegation_keys=tuple(delegation_keys.items()),
+            delegation_max_ttl_seconds=max_ttl,
+            delegation_clock_skew_seconds=clock_skew,
             qdrant_timeout_seconds=timeout,
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
@@ -45,12 +70,19 @@ class Settings:
             "A2A_QDRANT_COLLECTION": self.qdrant_collection,
             "A2A_INTERNAL_SERVICE_TOKEN": self.internal_service_token,
             "A2A_RESOURCE_SERVER_URL": self.resource_server_url,
+            "A2A_DELEGATION_ISSUER": self.delegation_issuer,
         }
         missing = [name for name, value in required.items() if not value or not value.strip()]
+        if not self.trusted_delegation_keys:
+            missing.append("A2A_TRUSTED_DELEGATION_KEYS")
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.a2a_port <= 65535:
             raise ValueError("A2A_PORT deve estar entre 1 e 65535")
+        if not 1 <= self.delegation_max_ttl_seconds <= 300:
+            raise ValueError("A2A_DELEGATION_MAX_TTL deve estar entre 1 e 300 segundos")
+        if not 0 <= self.delegation_clock_skew_seconds <= 60:
+            raise ValueError("A2A_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos")
         if not self.a2a_host.strip():
             raise ValueError("A2A_HOST não pode ser vazio")
         if (
