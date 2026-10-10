@@ -9,9 +9,8 @@ from uuid import UUID
 class ReadOnlyQdrantReader:
     """Coleção fixa por configuração; não expõe cliente ou operações de escrita.
 
-    Filtros pertencem ao código dos futuros repositórios, nunca ao payload do
-    agente. Esta camada valida formato/limites; autorização e filtros de revisão
-    documental serão responsabilidade dos casos de uso e repositórios.
+    Filtros pertencem ao código dos repositórios, nunca ao payload do agente.
+    Esta camada valida formato/limites; o repositório injeta a revisão publicada.
     """
 
     def __init__(self, client: Any, collection: str) -> None:
@@ -89,3 +88,41 @@ class ReadOnlyQdrantReader:
             exact=True,
         )
         return result.count
+
+    async def scroll(
+        self,
+        *,
+        query_filter: Mapping[str, Any],
+        limit: int,
+        offset: str | int | None = None,
+    ) -> tuple[Sequence[Mapping[str, Any]], str | int | None]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("limit deve ser um inteiro entre 1 e 100")
+        if offset is not None and not (
+            isinstance(offset, int)
+            and not isinstance(offset, bool)
+            and 0 <= offset < 2**64
+            or isinstance(offset, str)
+            and _is_uuid(offset)
+        ):
+            raise ValueError("offset deve ser UUID ou inteiro sem sinal de 64 bits")
+        points, next_offset = await self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=self._validated_filter(query_filter),
+            limit=limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        records = tuple(point.model_dump(mode="json") for point in points)
+        if next_offset is not None:
+            next_offset = str(next_offset) if isinstance(next_offset, UUID) else next_offset
+        return records, next_offset
+
+
+def _is_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True

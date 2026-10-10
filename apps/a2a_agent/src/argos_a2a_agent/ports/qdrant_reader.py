@@ -16,3 +16,12 @@ class QdrantReader(Protocol):
     async def retrieve(self, point_ids: Sequence[str | int]) -> Sequence[Mapping[str, Any]]: ...
 
     async def count(self, *, query_filter: Mapping[str, Any]) -> int: ...
+
+    async def scroll(
+        self,
+        *,
+        query_filter: Mapping[str, Any],
+        limit: int,
+        offset: str | int | None = None,
+    ) -> tuple[Sequence[Mapping[str, Any]], str | int | None]:
+        """Percorre pontos em páginas limitadas, sem expor operações de escrita."""
