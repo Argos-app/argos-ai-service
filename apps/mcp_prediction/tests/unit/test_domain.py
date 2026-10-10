@@ -24,9 +24,9 @@ from argos_mcp_prediction.domain.errors import (
 
 def test_groups_preserve_property_medicine_and_unit():
     property_id, medicine_id = uuid4(), uuid4()
-    ml = ConsumptionGroup(property_id, medicine_id, ConsumptionUnit.ML)
-    mg = ConsumptionGroup(property_id, medicine_id, ConsumptionUnit.MG)
-    other = ConsumptionGroup(uuid4(), medicine_id, ConsumptionUnit.ML)
+    ml = ConsumptionGroup(property_id, medicine_id, ConsumptionUnit.ML, "Marca", "Ingrediente")
+    mg = ConsumptionGroup(property_id, medicine_id, ConsumptionUnit.MG, "Marca", "Ingrediente")
+    other = ConsumptionGroup(uuid4(), medicine_id, ConsumptionUnit.ML, "Marca", "Ingrediente")
     assert len({ml, mg, other}) == 3
     with pytest.raises(FrozenInstanceError):
         ml.unit = ConsumptionUnit.MG
@@ -36,7 +36,7 @@ def test_groups_preserve_property_medicine_and_unit():
 
 
 def test_unknown_coverage_and_insufficient_estimate_do_not_default_to_zero():
-    group = ConsumptionGroup(uuid4(), uuid4(), ConsumptionUnit.ML)
+    group = ConsumptionGroup(uuid4(), uuid4(), ConsumptionUnit.ML, "Marca", "Ingrediente")
     coverage = CoverageRecord(group.property_id, CoverageState.UNKNOWN)
     estimate = ConsumptionEstimate(group, ConsumptionState.INSUFFICIENT_DATA)
     assert coverage.source is None

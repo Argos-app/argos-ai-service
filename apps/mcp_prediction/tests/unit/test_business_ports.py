@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from argos_mcp_prediction.domain import (
@@ -30,14 +30,21 @@ class FakeConsumptionRepository:
         *,
         start: date,
         end: date,
-        medicine_ids: tuple[UUID, ...] | None = None,
+        medicine_names: tuple[str, ...] | None = None,
     ) -> tuple[MonthlyConsumptionRecord, ...]:
         return tuple(
             record
             for observed_on, record in self.records
             if start <= observed_on <= end
             and record.group.property_id in scope.property_ids
-            and (medicine_ids is None or record.group.medicine_id in medicine_ids)
+            and (
+                medicine_names is None
+                or any(
+                    name.casefold() in record.group.medicine_name.casefold()
+                    or name.casefold() in record.group.active_ingredient.casefold()
+                    for name in medicine_names
+                )
+            )
         )
 
 
@@ -84,7 +91,13 @@ def make_scope(properties):
 
 def record(property_id, medicine_id, unit=ConsumptionUnit.ML):
     return MonthlyConsumptionRecord(
-        ConsumptionGroup(property_id, medicine_id, unit), 1, Decimal("1.230"), 1, 2
+        ConsumptionGroup(
+            property_id, medicine_id, unit, f"Medicine {medicine_id}", f"Ingredient {medicine_id}"
+        ),
+        1,
+        Decimal("1.230"),
+        1,
+        2,
     )
 
 
@@ -103,7 +116,10 @@ async def test_consumption_dependency_preserves_scope_date_boundaries_and_medici
     )
     scope = make_scope((a,))
     selected = await repository.aggregate_monthly(
-        scope, start=date(2024, 1, 1), end=date(2024, 1, 31), medicine_ids=(medicine,)
+        scope,
+        start=date(2024, 1, 1),
+        end=date(2024, 1, 31),
+        medicine_names=(f"Medicine {medicine}",),
     )
     assert selected == (first, last)
     assert selected[0].quantity == Decimal("1.230")
@@ -112,7 +128,7 @@ async def test_consumption_dependency_preserves_scope_date_boundaries_and_medici
     )
     assert len(unfiltered) == 3
     absent = await repository.aggregate_monthly(
-        scope, start=date(2024, 1, 1), end=date(2024, 1, 31), medicine_ids=(uuid4(),)
+        scope, start=date(2024, 1, 1), end=date(2024, 1, 31), medicine_names=("missing",)
     )
     assert absent == ()
 
@@ -139,7 +155,7 @@ async def test_coverage_dependency_uses_trusted_evidence_only_for_scope():
 
 async def test_dependency_failure_is_distinct_from_no_history():
     class UnavailableRepository:
-        async def aggregate_monthly(self, scope, *, start, end, medicine_ids=None):
+        async def aggregate_monthly(self, scope, *, start, end, medicine_names=None):
             raise ConsumptionSourceUnavailableError("Fonte indisponível")
 
     repository: ConsumptionReadRepository = UnavailableRepository()

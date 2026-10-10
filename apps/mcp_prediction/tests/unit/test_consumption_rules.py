@@ -25,7 +25,7 @@ TODAY = date(2026, 1, 1)
 
 
 def group(unit=ConsumptionUnit.ML):
-    return ConsumptionGroup(uuid4(), uuid4(), unit)
+    return ConsumptionGroup(uuid4(), uuid4(), unit, "Marca", "Ingrediente")
 
 
 def confirmed(selected, windows):

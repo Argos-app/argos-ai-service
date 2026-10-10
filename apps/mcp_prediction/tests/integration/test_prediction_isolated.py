@@ -30,7 +30,7 @@ async def test_real_tool_calculates_annual_history_with_unknown_coverage(predict
                 {
                     "payload": {
                         "property_ids": [str(harness.property_a)],
-                        "medicine_ids": [str(harness.medicine_id)],
+                        "medicine_names": ["ivermectina"],
                         "as_of": as_of.isoformat(),
                         "horizon_days": 1,
                     }
@@ -47,6 +47,8 @@ async def test_real_tool_calculates_annual_history_with_unknown_coverage(predict
     assert len(result["items"]) == 1
     item = result["items"][0]
     assert item["property_id"] == str(harness.property_a)
+    assert item["medicine_name"] == "Marca de teste"
+    assert item["active_ingredient"] == "Ivermectina"
     assert item["historical_quantity"] == "120.0"
     assert item["historical_application_events"] == 12
     assert item["historical_head_administrations"] == 48
@@ -92,7 +94,7 @@ async def test_authentication_and_property_filter_are_enforced(prediction_harnes
             {
                 "payload": {
                     "property_ids": [str(harness.property_b)],
-                    "medicine_ids": [str(harness.medicine_id)],
+                    "medicine_names": ["Ivermectina"],
                     "as_of": harness.as_of.isoformat(),
                     "horizon_days": 1,
                 }
@@ -113,7 +115,7 @@ async def test_same_medicine_is_aggregated_only_for_each_delegated_property(pred
                     {
                         "payload": {
                             "property_ids": [str(property_id)],
-                            "medicine_ids": [str(harness.medicine_id)],
+                            "medicine_names": ["Marca de teste"],
                             "as_of": harness.as_of.isoformat(),
                             "horizon_days": 1,
                         }

@@ -1,4 +1,4 @@
-# Integração isolada do MCP de predição
+# Validação isolada do MCP de predição
 
 Execute a partir da raiz do repositório com Docker Desktop disponível. A
 infraestrutura usa uma instância PostgreSQL local, descartável e em `tmpfs`;
@@ -31,8 +31,15 @@ do fixture, além de `default_transaction_read_only=on` no pool.
   ferramenta e argumento `payload`.
 - Consulta ao PostgreSQL real e cálculo anual agregado, incluindo quantidade,
   eventos, cabeças-administrações, modo de simulação e cobertura desconhecida.
-- Isolamento: propriedades externas ao contexto assinado não aparecem no
-  resultado, e um filtro fora do contexto delegado é rejeitado.
+- Isolamento entre propriedades: o mesmo medicamento tem consumos distintos em
+  duas fazendas, e cada delegação recebe apenas o agregado da propriedade
+  selecionada. Filtros fora do contexto são rejeitados.
+- Contexto atualizado por chamada na mesma sessão, concorrência entre delegações
+  e revogação de acesso cobertos também pelos testes unitários do servidor e da
+  política de acesso.
 - Bearer e delegação ausentes ou inválidos são rejeitados no transporte.
-- A role usada pelo MCP não tem permissão de escrita e uma tentativa de `INSERT`
-  é negada pelo PostgreSQL.
+- Limite de consulta SQL e cancelamento verificados pela configuração do pool e
+  pelos testes unitários do leitor/repositório; limite de grupos não retorna
+  agregados parciais.
+- A role usada pelo MCP pode consultar os objetos do fixture e tem escrita
+  negada pelo PostgreSQL para `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE` e DDL.

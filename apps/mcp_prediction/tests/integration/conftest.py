@@ -36,7 +36,10 @@ CREATE TABLE user_property (
 );
 CREATE TABLE herd (id UUID PRIMARY KEY, property_id UUID NOT NULL);
 CREATE TABLE lot (id UUID PRIMARY KEY, herd_id UUID NOT NULL);
-CREATE TABLE medicine (id UUID PRIMARY KEY);
+CREATE TABLE medicine (
+    id UUID PRIMARY KEY, brand_name VARCHAR(80) NOT NULL,
+    active_ingredient VARCHAR(80) NOT NULL
+);
 CREATE TABLE medicine_batch (id UUID PRIMARY KEY, medicine_id UUID NOT NULL);
 CREATE TABLE application (
     id UUID PRIMARY KEY, lot_id UUID NOT NULL, medicine_batch_id UUID NOT NULL,
@@ -297,7 +300,10 @@ async def _seed_database(sql, harness, as_of):
         "INSERT INTO lot VALUES ($1, $2)",
         [(lot_id, herd_ids[property_id]) for property_id, lot_id in lot_ids.items()],
     )
-    await sql.execute("INSERT INTO medicine VALUES ($1)", harness.medicine_id)
+    await sql.execute(
+        "INSERT INTO medicine VALUES ($1, 'Marca de teste', 'Ivermectina')",
+        harness.medicine_id,
+    )
     await sql.execute("INSERT INTO medicine_batch VALUES ($1, $2)", batch_id, harness.medicine_id)
     application_rows = []
     for property_id, heads in (

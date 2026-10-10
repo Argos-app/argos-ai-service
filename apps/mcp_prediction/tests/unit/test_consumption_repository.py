@@ -52,21 +52,31 @@ class FixtureSqlReader:
 
     async def fetch_all(self, query, *parameters):
         query = query.replace("p.id = ANY($1::uuid[])", "p.id IN (SELECT value FROM json_each($1))")
-        query = query.replace("m.id = ANY($4::uuid[])", "m.id IN (SELECT value FROM json_each($4))")
+        query = query.replace(
+            "FROM unnest($4::text[]) AS requested(name)", "FROM json_each($4) AS requested"
+        )
+        query = query.replace(
+            "position(lower(requested.name) in lower(m.brand_name))",
+            "instr(lower(m.brand_name), lower(requested.value))",
+        )
+        query = query.replace(
+            "position(lower(requested.name) in lower(m.active_ingredient))",
+            "instr(lower(m.active_ingredient), lower(requested.value))",
+        )
         query = query.replace(
             "EXTRACT(MONTH FROM a.application_date)",
             "CAST(strftime('%m', a.application_date) AS INTEGER)",
         )
-        for cast in ("::uuid[]", "::date", "::integer", "::bigint"):
+        for cast in ("::uuid[]", "::text[]", "::date", "::integer", "::bigint"):
             query = query.replace(cast, "")
-        properties, start, end, medicines, limit = parameters
+        properties, start, end, names, limit = parameters
         rows = self.database.execute(
             query,
             {
                 "1": json.dumps([str(value) for value in properties]),
                 "2": start.isoformat(),
                 "3": end.isoformat(),
-                "4": None if medicines is None else json.dumps([str(value) for value in medicines]),
+                "4": None if names is None else json.dumps(list(names)),
                 "5": limit,
             },
         ).fetchall()
@@ -88,7 +98,8 @@ def fixture_database():
         CREATE TABLE property (id TEXT PRIMARY KEY, active BOOLEAN);
         CREATE TABLE herd (id TEXT PRIMARY KEY, property_id TEXT, active BOOLEAN);
         CREATE TABLE lot (id TEXT PRIMARY KEY, herd_id TEXT, active BOOLEAN, close_date TEXT);
-        CREATE TABLE medicine (id TEXT PRIMARY KEY, active BOOLEAN);
+        CREATE TABLE medicine (
+            id TEXT PRIMARY KEY, active BOOLEAN, brand_name TEXT, active_ingredient TEXT);
         CREATE TABLE medicine_batch (id TEXT PRIMARY KEY, medicine_id TEXT);
         CREATE TABLE application (id TEXT PRIMARY KEY, lot_id TEXT, medicine_batch_id TEXT,
             application_date TEXT, unit TEXT, dose INTEGER, head_count_applied INTEGER,
@@ -103,8 +114,13 @@ def fixture_database():
         database.execute(
             "INSERT INTO lot VALUES (?, ?, 0, '2025-01-14')", (str(property_id), str(property_id))
         )
-    for identifier in (medicine, other_medicine):
-        database.execute("INSERT INTO medicine VALUES (?, 0)", (str(identifier),))
+    for identifier, name, ingredient in (
+        (medicine, "Brand One", "Compound One"),
+        (other_medicine, "Brand Two", "Compound Two"),
+    ):
+        database.execute(
+            "INSERT INTO medicine VALUES (?, 0, ?, ?)", (str(identifier), name, ingredient)
+        )
         database.execute(
             "INSERT INTO medicine_batch VALUES (?, ?)", (str(identifier), str(identifier))
         )
@@ -169,11 +185,11 @@ async def test_sql_aggregates_all_scoped_base_applications_once(fixture_database
     assert len(rows) == 4
     assert all(row.group.property_id == a for row in rows)
     selected = await repository.aggregate_monthly(
-        make_scope((a,)), start=START, end=END, medicine_ids=(medicine,)
+        make_scope((a,)), start=START, end=END, medicine_names=("brand one",)
     )
     assert len(selected) == 3
     missing = await repository.aggregate_monthly(
-        make_scope((a,)), start=START, end=END, medicine_ids=(uuid4(),)
+        make_scope((a,)), start=START, end=END, medicine_names=("not a medicine",)
     )
     assert missing == ()
 
@@ -219,7 +235,10 @@ async def test_group_limit_never_returns_truncated_estimate(fixture_database, co
     add = fixture_database[-1]
     for _ in range(count):
         identifier = uuid4()
-        database.execute("INSERT INTO medicine VALUES (?, 1)", (str(identifier),))
+        database.execute(
+            "INSERT INTO medicine VALUES (?, 1, ?, ?)",
+            (str(identifier), f"Brand {identifier}", f"Compound {identifier}"),
+        )
         database.execute(
             "INSERT INTO medicine_batch VALUES (?, ?)", (str(identifier), str(identifier))
         )
@@ -238,6 +257,8 @@ def aggregate_row(scope, medicine_id):
     return {
         "property_id": scope.property_ids[0],
         "medicine_id": medicine_id,
+        "medicine_name": "Test brand",
+        "active_ingredient": "Test compound",
         "unit": "ml",
         "month": 1,
         "quantity": Decimal("0.1234567890123456789"),
@@ -253,10 +274,10 @@ async def test_query_parameters_and_decimal_precision_are_preserved():
     reader = AsyncMock()
     reader.fetch_all.return_value = [aggregate_row(scope, medicine)]
     result = await PostgresConsumptionRepository(reader).aggregate_monthly(
-        scope, start=START, end=END, medicine_ids=(medicine,)
+        scope, start=START, end=END, medicine_names=("requested brand",)
     )
     query, *parameters = reader.fetch_all.await_args.args
-    assert parameters == [list(scope.property_ids), START, END, [medicine], 12001]
+    assert parameters == [list(scope.property_ids), START, END, ["requested brand"], 12001]
     assert str(medicine) not in query and str(scope.property_ids[0]) not in query
     assert result[0].quantity == Decimal("0.1234567890123456789")
 
@@ -286,9 +307,9 @@ async def test_invalid_scope_never_queries_source(change):
         {"start": END, "end": START},
         {"start": START, "end": date.today()},
         {"start": date(2023, 1, 1), "end": END},
-        {"medicine_ids": ()},
-        {"medicine_ids": ("'; DROP TABLE application; --",)},
-        {"medicine_ids": tuple(uuid4() for _ in range(101))},
+        {"medicine_names": ()},
+        {"medicine_names": ("'; DROP TABLE application; --",)},
+        {"medicine_names": tuple(str(uuid4()) for _ in range(101))},
     ],
 )
 async def test_invalid_filters_never_query_source(filters):
@@ -331,7 +352,7 @@ async def test_invalid_source_records_fail_closed(change):
     reader.fetch_all.return_value = rows
     with pytest.raises(InvalidConsumptionDataError):
         await PostgresConsumptionRepository(reader).aggregate_monthly(
-            scope, start=START, end=END, medicine_ids=(medicine,)
+            scope, start=START, end=END, medicine_names=("test brand",)
         )
 
 
