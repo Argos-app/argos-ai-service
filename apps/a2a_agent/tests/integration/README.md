@@ -24,9 +24,20 @@ resultado aprovado por skip. A API de leitura recebe somente a chave
 essa credencial e exigem resposta de autorização negada. A chave de escrita é
 usada somente pelo writer no teste.
 
-O harness comprova a integração implementada entre fonte local, parser PDF,
-embeddings stub, sincronizador, publicação do alias e leitor Qdrant. O serviço
-A2A de tarefas, os agentes Documental/Legal, os casos de busca/agregação, a
-autorização delegada do chamador e a reinicialização do processo servidor ainda
-não existem nesta revisão e não são afirmados por estes testes. As chaves e o
-volume são exclusivos de teste local; não reutilize em outros ambientes.
+Além dos testes de componentes, `test_a2a_runtime.py` sobe um processo servidor
+A2A filho, conecta-o ao Qdrant descartável e envia mensagens pelo cliente
+oficial do SDK. Os adapters de embeddings, geração de resposta e permissão são
+determinísticos e exclusivos de teste. A suíte cobre as skills Legal, Documental
+e a composição `mixed` (consulta combinada de leis e termos), concorrência,
+autenticação de serviço e delegação, revogação de permissão, isolamento de tasks
+por usuário, atualização de revisão e reinício do processo. Após a sincronização
+pelo A2A, também exercita os casos de uso de trecho detalhado e agregação de
+documentos distintos sobre o repositório ligado ao mesmo alias Qdrant.
+
+O catálogo dos PDFs de fixture é global e não contém escopo de propriedade; por
+isso a homologação verifica a ausência de metadados de propriedade no Qdrant e
+testa isolamento de tasks por usuário, sem simular isolamento multi-propriedade.
+O teste continua local: não executa o principal, não consulta cloud nem
+provedores reais, e não valida o adapter FAIIS ou geração de linguagem de
+produção. As chaves e o volume são exclusivos de teste; não reutilize em outros
+ambientes.
