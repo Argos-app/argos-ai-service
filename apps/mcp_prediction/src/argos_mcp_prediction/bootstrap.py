@@ -3,10 +3,20 @@
 from dataclasses import dataclass
 from typing import Any
 
-from argos_mcp_prediction.infrastructure import AsyncpgSqlReader
+from argos_mcp_prediction.application import EstimateMedicineConsumption
+from argos_mcp_prediction.infrastructure import (
+    AsyncpgSqlReader,
+    PostgresConsumptionRepository,
+    UnknownCoverageRepository,
+)
 from argos_mcp_prediction.infrastructure.access_directory import PostgresAccessDirectory
-from argos_mcp_prediction.server import create_http_app, create_mcp_server
+from argos_mcp_prediction.server import (
+    McpPredictionServer,
+    create_http_app,
+    create_mcp_server,
+)
 from argos_mcp_prediction.settings import Settings
+from packages.contracts import DataOrigin
 from packages.security.access_policy import AccessPolicy
 from packages.security.delegation import DelegationTokenVerifier
 
@@ -24,11 +34,10 @@ class ServiceRuntime:
 
 
 async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
-    """Abre somente o pool de leitura; não cria objetos nem publica ferramentas."""
+    """Abre o pool read-only e compõe a única ferramenta de negócio."""
 
     configured = settings or Settings.from_env()
     configured.validate_runtime()
-    server = create_mcp_server(configured)
     delegation_verifier = DelegationTokenVerifier(
         dict(configured.trusted_delegation_keys),
         issuer=configured.delegation_issuer,
@@ -52,11 +61,22 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             if str(read_only).lower() != "on":
                 raise RuntimeError("a sessão PostgreSQL não está configurada como read-only")
         sql_reader = AsyncpgSqlReader(sql_pool)
+        access_policy = AccessPolicy(PostgresAccessDirectory(sql_reader))
+        estimate_consumption = EstimateMedicineConsumption(
+            access_policy=access_policy,
+            consumption_repository=PostgresConsumptionRepository(sql_reader),
+            coverage_repository=UnknownCoverageRepository(),
+            data_origin=DataOrigin.UNKNOWN,
+        )
+        server = create_mcp_server(
+            configured,
+            McpPredictionServer(estimate_consumption, configured),
+        )
         return ServiceRuntime(
             sql_pool=sql_pool,
             sql_reader=sql_reader,
             server=server,
-            access_policy=AccessPolicy(PostgresAccessDirectory(sql_reader)),
+            access_policy=access_policy,
             delegation_verifier=delegation_verifier,
         )
     except BaseException:

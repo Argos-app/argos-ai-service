@@ -1,4 +1,4 @@
-"""Regras puras de cobertura e continuidade do consumo por mês do ano.
+"""Regras puras de continuidade do consumo por mês do ano.
 
 Janelas são inclusivas. A estimativa usa Decimal com precisão local de 50 dígitos,
 sem arredondar contagens fracionárias ou converter medicamentos/unidades.
@@ -121,11 +121,11 @@ def calculate_consumption(
     coverage: CoverageRecord | None,
     windows: PredictionWindows,
 ) -> ConsumptionCalculation:
-    """Calcula um grupo isolado; ausência/insuficiência nunca gera necessidade zero.
+    """Calcula um grupo isolado pela distribuição mensal do histórico disponível.
 
-    records deve vir da seleção exata da janela no repositório autorizado. Meses
-    ausentes só representam zero observado quando a cobertura anual foi comprovada
-    e existe histórico de aplicações do produto. Não inferir cobertura dos eventos.
+    records deve vir da seleção exata da janela no repositório autorizado. Como a
+    completude do histórico não é confirmada neste MVP, meses sem eventos são
+    tratados como zero observado; a resposta precisa expor essa limitação.
     """
     _validate_windows(windows)
     if (
@@ -135,6 +135,10 @@ def calculate_consumption(
         or not isinstance(group.unit, ConsumptionUnit)
     ):
         raise InvalidConsumptionDataError("grupo de consumo inválido")
+    # A evidência continua sendo validada para evitar associação a outra
+    # propriedade, mas sua ausência ou incompletude não bloqueia o cálculo.
+    if coverage is not None:
+        coverage_failure_reason(coverage, property_id=group.property_id, windows=windows)
     by_month = {}
     for record in records:
         if (
@@ -153,17 +157,13 @@ def calculate_consumption(
         ):
             raise InvalidConsumptionDataError("histórico mensal inconsistente")
         by_month[record.month] = record
-    reason = coverage_failure_reason(coverage, property_id=group.property_id, windows=windows)
-    if not records:
-        reason = reason or "medicamento sem histórico de aplicações na janela"
+    reason = None if records else "medicamento sem histórico de aplicações na janela"
     history_days = _calendar_days(windows.history_start, windows.history_end)
     future_days = _calendar_days(windows.forecast_start, windows.forecast_end)
     with localcontext(Context(prec=50)):
         historical_quantity = sum((record.quantity for record in records), Decimal(0))
         historical_events = sum(record.application_events for record in records)
         historical_heads = sum(record.head_administrations for record in records)
-        # Sem cobertura, preservar somente meses com eventos: nenhuma lacuna vira zero.
-        months = sorted(by_month) if reason is not None else range(1, 13)
         summaries = tuple(
             MonthlyConsumptionSummary(
                 month,
@@ -172,7 +172,7 @@ def calculate_consumption(
                 by_month[month].application_events if month in by_month else 0,
                 by_month[month].head_administrations if month in by_month else 0,
             )
-            for month in months
+            for month in range(1, 13)
         )
         if reason is not None:
             estimate = ConsumptionEstimate(

@@ -38,6 +38,7 @@ from packages.security.errors import AccessDeniedError
 _OPERATION = "prediction.read"
 _LIMITATIONS = (
     "A estimativa repete o padrão mensal observado em um único ano e não prevê mudanças de manejo.",
+    "A completude do histórico não foi verificada; meses sem registros são tratados como zero.",
     "Cabeças-administrações representam aplicações acumuladas, não animais únicos tratados.",
     "Medicamentos e unidades permanecem separados, sem conversão ou recomendação clínica.",
 )
@@ -86,9 +87,7 @@ class EstimateMedicineConsumption:
             scope, start=windows.history_start, end=windows.history_end
         )
         coverage_by_property = self._index_coverage(scope, coverage_records)
-        coverage_response, coverage_reasons = self._coverage_response(
-            scope, coverage_by_property, windows
-        )
+        coverage_response = self._coverage_response(scope, coverage_by_property, windows)
 
         try:
             records = await self._consumption_repository.aggregate_monthly(
@@ -122,7 +121,7 @@ class EstimateMedicineConsumption:
             groups[record.group].append(record)
 
         calculations = []
-        reasons = list(coverage_reasons)
+        reasons = []
         if request.medicine_ids is not None:
             observed_pairs = {(group.property_id, group.medicine_id) for group in groups}
             missing_pairs = [
@@ -236,14 +235,12 @@ class EstimateMedicineConsumption:
         scope: AuthorizedScope,
         coverage_by_property: dict[UUID, CoverageRecord],
         windows: PredictionWindows,
-    ) -> tuple[tuple[PropertyCoverage, ...], list[str]]:
+    ) -> tuple[PropertyCoverage, ...]:
         response = []
-        reasons = []
         for property_id in scope.property_ids:
             coverage = coverage_by_property[property_id]
             reason = coverage_failure_reason(coverage, property_id=property_id, windows=windows)
             if reason is not None:
-                reasons.append(reason)
                 status = (
                     CoverageStatus.UNKNOWN
                     if coverage.state == CoverageState.UNKNOWN
@@ -265,7 +262,7 @@ class EstimateMedicineConsumption:
                     source=coverage.source,
                 )
             )
-        return tuple(response), reasons
+        return tuple(response)
 
     @staticmethod
     def _reason(reasons: list[str]) -> str:
