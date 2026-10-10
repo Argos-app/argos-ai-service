@@ -17,6 +17,7 @@ class Settings:
     trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
     delegation_max_ttl_seconds: int = 300
     delegation_clock_skew_seconds: int = 30
+    sql_timeout_seconds: int = 5
     data_origin: DataOrigin = DataOrigin.UNKNOWN
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
@@ -56,6 +57,7 @@ class Settings:
             trusted_delegation_keys=tuple(delegation_keys.items()),
             delegation_max_ttl_seconds=read_int("MCP_PREDICTION_DELEGATION_MAX_TTL", 300),
             delegation_clock_skew_seconds=read_int("MCP_PREDICTION_DELEGATION_CLOCK_SKEW", 30),
+            sql_timeout_seconds=read_int("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", 5),
             data_origin=data_origin,
             mcp_host=os.getenv("MCP_PREDICTION_HOST", "0.0.0.0"),
             mcp_port=read_int("MCP_PREDICTION_PORT", 8000),
@@ -84,3 +86,5 @@ class Settings:
             raise ValueError(
                 "MCP_PREDICTION_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos"
             )
+        if not 1 <= self.sql_timeout_seconds <= 60:
+            raise ValueError("MCP_PREDICTION_SQL_TIMEOUT_SECONDS deve estar entre 1 e 60")

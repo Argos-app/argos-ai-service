@@ -1,5 +1,7 @@
 """Parametrização e encerramento da transação de leitura."""
 
+import asyncio
+
 import pytest
 from argos_mcp_prediction.infrastructure import AsyncpgSqlReader
 
@@ -41,4 +43,13 @@ async def test_read_only_setup_failure_prevents_query(sql_pool):
     with pytest.raises(RuntimeError, match="read-only setup failed"):
         await AsyncpgSqlReader(pool).fetch_all("SELECT $1", 7)
     connection.fetch.assert_not_awaited()
+    pool.acquire.return_value.__aexit__.assert_awaited_once()
+
+
+async def test_query_cancellation_propagates_without_returning_partial_rows(sql_pool):
+    pool, connection = sql_pool
+    connection.fetch.side_effect = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await AsyncpgSqlReader(pool).fetch_all("SELECT $1", 30)
+    connection.transaction.return_value.__aexit__.assert_awaited_once()
     pool.acquire.return_value.__aexit__.assert_awaited_once()

@@ -31,6 +31,7 @@ async def test_runtime_opens_read_only_pool_and_registers_prediction_tool(
     create_pool.assert_awaited_once_with(
         configured_settings.sql_dsn,
         server_settings={"default_transaction_read_only": "on"},
+        command_timeout=configured_settings.sql_timeout_seconds,
     )
     connection.fetchval.assert_awaited_once_with("SHOW default_transaction_read_only")
     tools = await runtime.server.list_tools()

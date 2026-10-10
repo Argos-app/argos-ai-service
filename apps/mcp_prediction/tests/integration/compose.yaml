@@ -1,0 +1,18 @@
+name: argos-mcp-prediction-integration
+
+services:
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: mcp_prediction_admin
+            POSTGRES_PASSWORD: mcp_prediction_local_only
+            POSTGRES_DB: mcp_prediction_test
+        ports:
+            - "127.0.0.1:54330:5432"
+        tmpfs:
+            - /var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U mcp_prediction_admin -d mcp_prediction_test"]
+            interval: 2s
+            timeout: 5s
+            retries: 30

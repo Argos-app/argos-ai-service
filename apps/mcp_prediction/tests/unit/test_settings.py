@@ -5,6 +5,8 @@ from dataclasses import replace
 import pytest
 from argos_mcp_prediction.settings import Settings
 
+from packages.contracts import DataOrigin
+
 
 @pytest.mark.parametrize(
     ("field", "env"),
@@ -29,6 +31,8 @@ def test_missing_configuration_is_rejected(configured_settings, field, env):
         {"delegation_max_ttl_seconds": 301},
         {"delegation_clock_skew_seconds": -1},
         {"delegation_clock_skew_seconds": 61},
+        {"sql_timeout_seconds": 0},
+        {"sql_timeout_seconds": 61},
         {"mcp_port": 0},
         {"mcp_port": 65536},
     ],
@@ -49,6 +53,8 @@ def test_configuration_reads_only_prediction_environment(monkeypatch):
     monkeypatch.setenv("MCP_PREDICTION_AUTH_ISSUER_URL", "https://issuer.example.test")
     monkeypatch.setenv("MCP_PREDICTION_RESOURCE_SERVER_URL", "https://prediction.example.test/mcp")
     monkeypatch.setenv("MCP_PREDICTION_PORT", "8102")
+    monkeypatch.setenv("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", "7")
+    monkeypatch.setenv("MCP_PREDICTION_DATA_ORIGIN", "synthetic")
     monkeypatch.setenv("MCP_EMAIL_INTERNAL_SERVICE_TOKEN", "other-token")
     monkeypatch.setenv("MCP_PREDICTION_DELEGATION_ISSUER", "argos-main-service")
     monkeypatch.setenv("MCP_PREDICTION_TRUSTED_DELEGATION_KEYS", '{"test-key": "public-key"}')
@@ -56,11 +62,19 @@ def test_configuration_reads_only_prediction_environment(monkeypatch):
     settings.validate_runtime()
     assert settings.internal_service_token == "own-token"
     assert settings.mcp_port == 8102
+    assert settings.sql_timeout_seconds == 7
+    assert settings.data_origin == DataOrigin.SYNTHETIC
 
 
 def test_invalid_environment_integer_is_rejected(monkeypatch):
     monkeypatch.setenv("MCP_PREDICTION_PORT", "invalid")
     with pytest.raises(ValueError, match="MCP_PREDICTION_PORT"):
+        Settings.from_env()
+
+
+def test_invalid_data_origin_is_rejected(monkeypatch):
+    monkeypatch.setenv("MCP_PREDICTION_DATA_ORIGIN", "unverified-value")
+    with pytest.raises(ValueError, match="MCP_PREDICTION_DATA_ORIGIN"):
         Settings.from_env()
 
 

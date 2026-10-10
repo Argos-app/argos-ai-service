@@ -53,6 +53,7 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
     sql_pool = await asyncpg.create_pool(
         configured.sql_dsn,
         server_settings={"default_transaction_read_only": "on"},
+        command_timeout=configured.sql_timeout_seconds,
     )
     try:
         async with sql_pool.acquire() as connection:
