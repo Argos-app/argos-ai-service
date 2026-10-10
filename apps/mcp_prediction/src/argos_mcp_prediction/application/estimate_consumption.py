@@ -94,7 +94,7 @@ class EstimateMedicineConsumption:
                 scope,
                 start=windows.history_start,
                 end=windows.history_end,
-                medicine_ids=request.medicine_ids,
+                medicine_names=request.medicine_names,
             )
         except InvalidConsumptionDataError:
             return self._inconsistent_response(scope, request, windows, coverage_response)
@@ -113,27 +113,28 @@ class EstimateMedicineConsumption:
                 raise InvalidConsumptionDataError(
                     "repositório retornou uma propriedade externa ao escopo"
                 )
-            if (
-                request.medicine_ids is not None
-                and record.group.medicine_id not in request.medicine_ids
+            if request.medicine_names is not None and not self._matches_any_name(
+                record.group, request.medicine_names
             ):
-                raise InvalidConsumptionDataError("repositório ignorou o filtro de medicamentos")
+                raise InvalidConsumptionDataError("repositório ignorou o filtro por nome")
             groups[record.group].append(record)
 
         calculations = []
         reasons = []
-        if request.medicine_ids is not None:
-            observed_pairs = {(group.property_id, group.medicine_id) for group in groups}
-            missing_pairs = [
-                (property_id, medicine_id)
-                for property_id in scope.property_ids
-                for medicine_id in request.medicine_ids
-                if (property_id, medicine_id) not in observed_pairs
+        if request.medicine_names is not None:
+            matched_names = {
+                name.casefold()
+                for group in groups
+                for name in request.medicine_names
+                if self._matches_name(group, name)
+            }
+            missing_names = [
+                name for name in request.medicine_names if name.casefold() not in matched_names
             ]
-            if missing_pairs:
+            if missing_names:
                 reasons.append(
-                    "Pelo menos um medicamento solicitado não possui aplicações registradas "
-                    "em todas as propriedades selecionadas; não é possível afirmar consumo zero."
+                    "Não foi encontrado histórico de aplicação para todos os nomes solicitados "
+                    "nas propriedades autorizadas; não é possível afirmar consumo zero."
                 )
         for group, monthly_records in sorted(
             groups.items(),
@@ -169,6 +170,8 @@ class EstimateMedicineConsumption:
                 MedicineConsumptionEstimate(
                     property_id=estimate.group.property_id,
                     medicine_id=estimate.group.medicine_id,
+                    medicine_name=estimate.group.medicine_name,
+                    active_ingredient=estimate.group.active_ingredient,
                     unit=estimate.group.unit.value,
                     historical_quantity=calculation.historical_quantity,
                     historical_application_events=calculation.historical_application_events,
@@ -208,6 +211,17 @@ class EstimateMedicineConsumption:
             reason=None if status == PredictionStatus.ESTIMATED else self._reason(reasons),
             items=tuple(response_items),
         )
+
+    @staticmethod
+    def _matches_name(group: ConsumptionGroup, name: str) -> bool:
+        query = name.strip().casefold()
+        return (
+            query in group.medicine_name.casefold() or query in group.active_ingredient.casefold()
+        )
+
+    @classmethod
+    def _matches_any_name(cls, group: ConsumptionGroup, names: tuple[str, ...]) -> bool:
+        return any(cls._matches_name(group, name) for name in names)
 
     @staticmethod
     def _index_coverage(

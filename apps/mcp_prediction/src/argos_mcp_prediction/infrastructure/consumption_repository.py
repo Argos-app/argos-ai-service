@@ -22,6 +22,7 @@ _MAX_MONTHLY_ROWS = _MAX_GROUPS * 12
 _CONSUMPTION_SQL = """
     WITH scoped_applications AS (
         SELECT a.id, p.id AS property_id, m.id AS medicine_id,
+               m.brand_name AS medicine_name, m.active_ingredient,
                a.application_date, a.unit, a.dose, a.head_count_applied
         FROM application AS a
         JOIN lot AS l ON l.id = a.lot_id
@@ -33,7 +34,15 @@ _CONSUMPTION_SQL = """
           AND p.active = TRUE
           AND a.active = TRUE
           AND a.application_date BETWEEN $2::date AND $3::date
-          AND ($4::uuid[] IS NULL OR m.id = ANY($4::uuid[]))
+          AND (
+              $4::text[] IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM unnest($4::text[]) AS requested(name)
+                  WHERE position(lower(requested.name) in lower(m.brand_name)) > 0
+                     OR position(lower(requested.name) in lower(m.active_ingredient)) > 0
+              )
+          )
     ), checked_applications AS (
         SELECT a.*,
                (
@@ -54,16 +63,16 @@ _CONSUMPTION_SQL = """
                ) AS inconsistent
         FROM scoped_applications AS a
     ), consumption_groups AS (
-        SELECT property_id, medicine_id, unit
+        SELECT property_id, medicine_id, medicine_name, active_ingredient, unit
         FROM scoped_applications
-        GROUP BY property_id, medicine_id, unit
+        GROUP BY property_id, medicine_id, medicine_name, active_ingredient, unit
     ), summary AS (
         SELECT (SELECT COUNT(*) FROM consumption_groups) AS group_count,
                EXISTS (
                    SELECT 1 FROM checked_applications WHERE inconsistent
                ) AS any_inconsistent
     )
-    SELECT a.property_id, a.medicine_id, a.unit,
+    SELECT a.property_id, a.medicine_id, a.medicine_name, a.active_ingredient, a.unit,
            EXTRACT(MONTH FROM a.application_date)::integer AS month,
            SUM(a.dose * a.head_count_applied) AS quantity,
            COUNT(*)::bigint AS application_events,
@@ -71,7 +80,7 @@ _CONSUMPTION_SQL = """
            s.group_count, s.any_inconsistent
     FROM checked_applications AS a
     CROSS JOIN summary AS s
-    GROUP BY a.property_id, a.medicine_id, a.unit,
+    GROUP BY a.property_id, a.medicine_id, a.medicine_name, a.active_ingredient, a.unit,
              EXTRACT(MONTH FROM a.application_date), s.group_count, s.any_inconsistent
     ORDER BY a.property_id, a.medicine_id, a.unit, month
     LIMIT $5
@@ -103,7 +112,7 @@ class PostgresConsumptionRepository(ConsumptionReadRepository):
         *,
         start: date,
         end: date,
-        medicine_ids: tuple[UUID, ...] | None = None,
+        medicine_names: tuple[str, ...] | None = None,
     ) -> tuple[MonthlyConsumptionRecord, ...]:
         self._validate_scope(scope)
         if (
@@ -114,20 +123,23 @@ class PostgresConsumptionRepository(ConsumptionReadRepository):
             or (end - start).days >= 366
         ):
             raise ValueError("janela histórica inválida: até 366 dias encerrados")
-        if medicine_ids is not None and (
-            not isinstance(medicine_ids, tuple)
-            or not 1 <= len(medicine_ids) <= 100
-            or any(not isinstance(value, UUID) for value in medicine_ids)
-            or len(set(medicine_ids)) != len(medicine_ids)
+        if medicine_names is not None and (
+            not isinstance(medicine_names, tuple)
+            or not 1 <= len(medicine_names) <= 100
+            or any(
+                not isinstance(value, str) or not 1 <= len(value.strip()) <= 80
+                for value in medicine_names
+            )
+            or len({value.strip().casefold() for value in medicine_names}) != len(medicine_names)
         ):
-            raise ValueError("filtro de medicamentos inválido")
+            raise ValueError("filtro por nome de medicamento inválido")
         try:
             rows = await self._sql_reader.fetch_all(
                 _CONSUMPTION_SQL,
                 list(scope.property_ids),
                 start,
                 end,
-                list(medicine_ids) if medicine_ids is not None else None,
+                list(medicine_names) if medicine_names is not None else None,
                 _MAX_MONTHLY_ROWS + 1,
             )
         except Exception as exc:
@@ -156,11 +168,24 @@ class PostgresConsumptionRepository(ConsumptionReadRepository):
                     UUID(str(row["property_id"])),
                     UUID(str(row["medicine_id"])),
                     ConsumptionUnit(row["unit"]),
+                    row["medicine_name"],
+                    row["active_ingredient"],
                 )
-                if group.property_id not in scope.property_ids or (
-                    medicine_ids is not None and group.medicine_id not in medicine_ids
-                ):
+                if group.property_id not in scope.property_ids:
                     raise ValueError("registro externo à seleção")
+                if (
+                    not isinstance(group.medicine_name, str)
+                    or not group.medicine_name.strip()
+                    or not isinstance(group.active_ingredient, str)
+                    or not group.active_ingredient.strip()
+                ):
+                    raise ValueError("identificação de medicamento inválida")
+                if medicine_names is not None and not any(
+                    name.strip().casefold() in group.medicine_name.casefold()
+                    or name.strip().casefold() in group.active_ingredient.casefold()
+                    for name in medicine_names
+                ):
+                    raise ValueError("repositório ignorou o filtro por nome de medicamento")
                 month, quantity = row["month"], row["quantity"]
                 events, heads = row["application_events"], row["head_administrations"]
                 if (

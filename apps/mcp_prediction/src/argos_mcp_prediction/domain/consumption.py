@@ -32,6 +32,8 @@ class ConsumptionGroup:
     property_id: UUID
     medicine_id: UUID
     unit: ConsumptionUnit
+    medicine_name: str
+    active_ingredient: str
 
 
 @dataclass(frozen=True, slots=True)

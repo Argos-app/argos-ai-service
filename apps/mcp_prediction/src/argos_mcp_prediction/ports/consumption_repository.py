@@ -2,7 +2,6 @@
 
 from datetime import date
 from typing import Protocol
-from uuid import UUID
 
 from argos_mcp_prediction.domain import MonthlyConsumptionRecord
 from packages.security.access import AuthorizedScope
@@ -15,12 +14,12 @@ class ConsumptionReadRepository(Protocol):
         *,
         start: date,
         end: date,
-        medicine_ids: tuple[UUID, ...] | None = None,
+        medicine_names: tuple[str, ...] | None = None,
     ) -> tuple[MonthlyConsumptionRecord, ...]:
         """Agrega toda a janela inclusiva por propriedade, medicamento, unidade e mês.
 
-        scope é obrigatório e fornece a única seleção de propriedades. medicine_ids
-        apenas restringe as aplicações desse escopo. Não usar uma página de eventos
+        scope é obrigatório e fornece a única seleção de propriedades. Nomes de
+        medicamento apenas restringem as aplicações desse escopo. Não usar uma página de eventos
         como base do agregado nem truncar silenciosamente os grupos do resultado.
 
         Ausência de aplicações retorna tupla vazia, sem provar consumo zero ou
