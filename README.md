@@ -84,6 +84,14 @@ documentos afetados no Qdrant. Os agentes acessam apenas arquivos atuais e
 informam a data do documento e sua última atualização conhecida. PDFs de teste
 ficam no repositório.
 
+O serviço tem build independente em `apps/a2a_agent/Dockerfile` e Compose
+operacional documentado em
+[`apps/a2a_agent/README.md`](apps/a2a_agent/README.md). O processo exige uma
+factory de adapters confiável (`A2A_RUNTIME_FACTORY`) para embeddings FAIIS,
+geração de respostas e autorização vigente; esses adapters externos ainda não
+estão disponíveis neste repositório e a imagem falha fechada sem eles. A origem
+cloud e a chamada real pelo principal seguem pendentes.
+
 ## Estrutura do projeto
 
 ```text
@@ -93,7 +101,7 @@ argos-ai-service/
 │   ├── mcp_data/          # Consultas aos dados de negócio
 │   ├── mcp_email/         # Relatórios e envio de e-mail
 │   ├── mcp_prediction/    # Cálculos, inferência e comandos de treino
-│   └── a2a_agent/         # Especialistas Documental e Legal, PDFs e Qdrant
+│   └── a2a_agent/         # Serviço isolado: especialistas, PDFs, Qdrant e imagem
 ├── packages/
 │   ├── contracts/        # Modelos Pydantic de comunicação
 │   ├── security/         # Validação de identidade e escopo

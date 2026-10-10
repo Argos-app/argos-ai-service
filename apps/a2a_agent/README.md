@@ -13,7 +13,7 @@ compartilhadas explicitamente:
 ```powershell
 docker build -f apps/a2a_agent/Dockerfile -t argos-a2a-agent:local .
 Copy-Item apps/a2a_agent/.env.example apps/a2a_agent/.env
-# Edite .env com URLs, credenciais e diretórios fornecidos pelo deployment.
+# Edite .env com URLs, credenciais e adapters fornecidos pelo deployment.
 docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml up --build -d
 ```
 
@@ -22,6 +22,14 @@ leitura, executa sem root, limita CPU/memória, monta PDFs e código de adapters
 como somente leitura e preserva o manifesto em volume separado. O Qdrant é
 externo ao Compose de produção e precisa expor chaves distintas de leitura e de
 escrita do índice.
+
+O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
+metadados sintéticos para demonstração e homologação; eles não são leis nem
+contratos reais e não devem embasar orientação jurídica. `A2A_DOCUMENTS_PATH`
+pode apontar para outro diretório local aprovado, sempre com `catalog.json` e
+arquivos PDF allowlisted. O Compose monta a origem como somente leitura. A
+origem cloud permanece fora desta entrega até a definição do provedor e de sua
+configuração de acesso.
 
 ## Adapters de runtime
 
@@ -45,9 +53,10 @@ credenciais Qdrant diferentes e não compartilhe a chave do writer com clientes.
   disponibilidade do Qdrant e exige Bearer de serviço.
 - Preserve o volume `a2a-state` em reinícios. O manifesto é estado técnico da
   sincronização; não edite seu conteúdo manualmente.
-- Fonte local é montada somente para leitura. A atualização do Qdrant acontece
-  pelo sincronizador, que mantém a credencial de escrita atrás da porta de
-  sincronização; consultas usam a credencial de leitura.
+- Fonte local (`data/documents` por padrão) é montada somente para leitura. A
+  atualização do Qdrant acontece pelo sincronizador, que mantém a credencial de
+  escrita atrás da porta de sincronização; consultas usam a credencial de
+  leitura.
 - O serviço rejeita configuração incompleta, dimensões incompatíveis e falhas de
   leitura do manifesto antes de aceitar tráfego. Em falha de Qdrant, deixe a
   prontidão indisponível, preserve o manifesto e recupere Qdrant conforme o
@@ -56,8 +65,8 @@ credenciais Qdrant diferentes e não compartilhe a chave do writer com clientes.
   por página, agregações limitadas a 10.000 documentos/100 grupos, trechos de
   até três páginas e timeout Qdrant de até 30 segundos. Os limites de container
   são 1 CPU e 1 GiB e devem ser revistos com medições do workload.
-- A etapa de cloud e a integração com Informações no principal ainda são
-  pendências separadas; este container não declara esses adapters como prontos.
+- A integração com Informações no principal e a escolha de uma origem cloud
+  ainda são pendências separadas; este container usa o corpus local configurado.
 
 ## Verificações
 

@@ -32,6 +32,7 @@ jobs:
                       apps/main_api/requirements.txt
                       apps/mcp_email/requirements.txt
                       apps/mcp_data/requirements.txt
+                      apps/a2a_agent/requirements.txt
 
             - name: Install Python tooling
               run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
@@ -57,6 +58,12 @@ jobs:
 
             - name: Audit Python dependencies
               run: pip-audit -r requirements-dev.txt
+
+            - name: Build standalone A2A image
+              run: docker build --file apps/a2a_agent/Dockerfile --tag argos-a2a-agent:ci .
+
+            - name: Validate standalone A2A Compose
+              run: docker compose --env-file apps/a2a_agent/.env.example --file apps/a2a_agent/compose.yaml config --quiet
 
             - name: Set up Node.js
               uses: actions/setup-node@v4
@@ -88,6 +95,7 @@ jobs:
                       apps/main_api/requirements.txt
                       apps/mcp_email/requirements.txt
                       apps/mcp_data/requirements.txt
+                      apps/a2a_agent/requirements.txt
 
             - name: Install Python tooling
               run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt

@@ -56,7 +56,7 @@ pytestmark = [
 
 ROOT = Path(__file__).resolve().parents[4]
 APP_SRC = ROOT / "apps/a2a_agent/src"
-FIXTURES = ROOT / "apps/a2a_agent/tests/fixtures/documents"
+FIXTURES = ROOT / "apps/a2a_agent/data/documents"
 SERVER_SCRIPT = ROOT / "apps/a2a_agent/tests/integration/a2a_runtime_server.py"
 QDRANT_URL = os.getenv("A2A_TEST_QDRANT_URL", "http://127.0.0.1:6338")
 WRITE_KEY = os.getenv("A2A_TEST_QDRANT_WRITE_KEY", "a2a-integration-write-key")

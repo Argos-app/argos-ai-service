@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from argos_a2a_agent.adapters.documents import PyPdfParser
 from argos_a2a_agent.adapters.storage import LocalDocumentSource, LocalManifestRepository
 from argos_a2a_agent.domain import (
     CorpusManifest,
@@ -17,7 +18,7 @@ from argos_a2a_agent.domain import (
 
 from packages.contracts.a2a import DocumentType, LegalValidityStatus
 
-FIXTURES = Path(__file__).parents[1] / "fixtures" / "documents"
+FIXTURES = Path(__file__).parents[2] / "data" / "documents"
 
 
 def run_immediate(coroutine):
@@ -67,6 +68,22 @@ def test_local_source_reads_pdf_and_does_not_mutate_fixture_files() -> None:
     assert source_document.metadata.document_type is DocumentType.LAW
     assert {path.name: path.read_bytes() for path in FIXTURES.iterdir() if path.is_file()} == before
     assert run_immediate(source.read_pdf(uuid4())) is None
+
+
+def test_bundled_demo_pdfs_are_extractable_and_disclaim_real_legal_authority() -> None:
+    source = LocalDocumentSource(FIXTURES)
+    parser = PyPdfParser()
+    documents = run_immediate(source.list_documents()).documents
+
+    extracted = [
+        run_immediate(parser.parse(run_immediate(source.read_pdf(item.document_id)).content, item))
+        for item in documents
+    ]
+    text = "\n".join(page.text for document in extracted for page in document.pages)
+
+    assert "SINTETICO" in text
+    assert "NAO E LEGISLACAO REAL" in text
+    assert "NAO E CONTRATO REAL" in text
 
 
 @pytest.mark.parametrize(

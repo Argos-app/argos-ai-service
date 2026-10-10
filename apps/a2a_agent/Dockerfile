@@ -12,6 +12,7 @@ RUN python -m pip install --no-cache-dir --disable-pip-version-check \
 
 # O artefato inclui apenas este serviço e os contratos/segurança compartilhados.
 COPY apps/a2a_agent/src/ /app/src/
+COPY apps/a2a_agent/data/documents/ /var/lib/argos/a2a/documents/
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/security/ /app/packages/security/
 

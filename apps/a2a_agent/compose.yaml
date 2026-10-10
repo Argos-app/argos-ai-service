@@ -20,7 +20,7 @@ services:
         ports:
             - "127.0.0.1:${A2A_PUBLISHED_PORT:-8000}:8000"
         volumes:
-            - ${A2A_DOCUMENTS_PATH:?configure A2A_DOCUMENTS_PATH in apps/a2a_agent/.env}:/var/lib/argos/a2a/documents:ro
+            - ${A2A_DOCUMENTS_PATH:-./data/documents}:/var/lib/argos/a2a/documents:ro
             - ${A2A_ADAPTERS_PATH:?configure A2A_ADAPTERS_PATH in apps/a2a_agent/.env}:/opt/argos/a2a-adapters:ro
             - a2a-state:/var/lib/argos/a2a/state
         read_only: true

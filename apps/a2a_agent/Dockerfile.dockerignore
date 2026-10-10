@@ -2,6 +2,8 @@
 !apps/
 !apps/a2a_agent/
 !apps/a2a_agent/requirements.txt
+!apps/a2a_agent/data/
+!apps/a2a_agent/data/**
 !apps/a2a_agent/src/
 !apps/a2a_agent/src/**
 !packages/

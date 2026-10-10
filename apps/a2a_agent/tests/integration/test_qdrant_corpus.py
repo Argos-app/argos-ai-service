@@ -31,7 +31,7 @@ pytestmark = [
 ]
 
 ROOT = Path(__file__).resolve().parents[4]
-FIXTURES = ROOT / "apps/a2a_agent/tests/fixtures/documents"
+FIXTURES = ROOT / "apps/a2a_agent/data/documents"
 QDRANT_URL = os.getenv("A2A_TEST_QDRANT_URL", "http://127.0.0.1:6338")
 WRITE_KEY = os.getenv("A2A_TEST_QDRANT_WRITE_KEY", "a2a-integration-write-key")
 READ_KEY = os.getenv("A2A_TEST_QDRANT_READ_KEY", "a2a-integration-read-key")
