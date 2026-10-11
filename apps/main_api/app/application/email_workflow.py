@@ -11,10 +11,15 @@ from uuid import UUID, uuid4
 from app.application.report_artifact_service import validate_report_source
 from app.domain.email_preparations import (
     EmailPreparation,
+    EmailSendAuthorization,
     PendingRecipientOption,
     PendingRecipientResolution,
+    SendAuthorizationOrigin,
 )
-from app.ports.email_preparation_repository import EmailPreparationRepository
+from app.ports.email_preparation_repository import (
+    EmailPreparationRepository,
+    EmailSendAuthorizationConflictError,
+)
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.session_config import CLARIFICATION_TTL_SECONDS
 from packages.contracts import (
@@ -69,6 +74,11 @@ def _minimal_result(prepared: PreparedReport, *, reused: bool) -> str:
 def _masked_email(value: str) -> str:
     local, separator, domain = value.partition("@")
     return f"{local[:1] or '*'}***@{domain}" if separator else "contato mascarado"
+
+
+def _fingerprint(value: Any) -> str:
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 async def _recipient_question_result(
@@ -176,19 +186,24 @@ class EmailWorkflow:
             )
             scopes = configurable["argos_report_artifact_scopes"]
             recipients_context = configurable["recipient_selectors"]
+            send_intent_requested = configurable.get("argos_send_intent_requested") is True
+            send_intent_source = configurable.get("argos_send_intent_source_interaction_id")
+            send_origin_interaction_id = (
+                UUID(str(send_intent_source)) if send_intent_source else None
+            )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("contexto confiável para preparação está ausente") from exc
 
         scope = scopes.get(str(report_artifact_ref)) if isinstance(scopes, dict) else None
         if not isinstance(scope, dict):
             raise ValueError("referência de relatório não pertence às dependências autorizadas")
-        source_interaction_id = UUID(str(scope["interaction_id"]))
+        report_source_interaction_id = UUID(str(scope["interaction_id"]))
         source_task_id = str(scope["task_id"])
         artifact = await self._report_artifacts.get(
             report_artifact_ref,
             principal_user_id=principal_user_id,
             session_id=session_id,
-            interaction_id=source_interaction_id,
+            interaction_id=report_source_interaction_id,
             task_id=source_task_id,
         )
         envelope = validate_report_source(
@@ -245,6 +260,14 @@ class EmailWorkflow:
                     repository=self._preparations,
                     now=now,
                 )
+            await self._authorize_explicit_send_if_requested(
+                preparation=existing,
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+                source_interaction_id=send_origin_interaction_id,
+                requested=send_intent_requested,
+                now=now,
+            )
             return _minimal_result(existing.prepared_report, reused=True)
 
         response = await self._email_client.call_tool(
@@ -265,6 +288,14 @@ class EmailWorkflow:
             created_at=now,
         )
         await self._preparations.save(record)
+        await self._authorize_explicit_send_if_requested(
+            preparation=record,
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            source_interaction_id=send_origin_interaction_id,
+            requested=send_intent_requested,
+            now=now,
+        )
         return await _recipient_question_result(
             prepared=prepared,
             principal_user_id=principal_user_id,
@@ -274,3 +305,47 @@ class EmailWorkflow:
             repository=self._preparations,
             now=now,
         )
+
+    async def _authorize_explicit_send_if_requested(
+        self,
+        *,
+        preparation: EmailPreparation,
+        principal_user_id: UUID,
+        session_id: UUID,
+        source_interaction_id: UUID | None,
+        requested: bool,
+        now: datetime,
+    ) -> None:
+        if not requested:
+            return
+        prepared = preparation.prepared_report
+        if prepared.status != PreparedReportStatus.PREPARED or now >= prepared.expires_at:
+            return
+        if source_interaction_id is None:
+            raise ValueError("origem do pedido explícito de envio está ausente")
+        if prepared.requested_by != principal_user_id:
+            raise ValueError("a preparação não pertence ao solicitante autenticado")
+        prepared_payload = prepared.model_dump(mode="json")
+        authorization = EmailSendAuthorization(
+            authorization_id=uuid4(),
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            source_interaction_id=source_interaction_id,
+            preparation_reference=preparation.reference,
+            report_id=prepared.report_id,
+            request_fingerprint=preparation.request_fingerprint,
+            prepared_fingerprint=_fingerprint(prepared_payload),
+            recipients_fingerprint=_fingerprint(
+                [recipient.model_dump(mode="json") for recipient in prepared.recipients]
+            ),
+            origin=SendAuthorizationOrigin.EXPLICIT_REQUEST,
+            idempotency_key=str(uuid4()),
+            authorized_at=now,
+            expires_at=prepared.expires_at,
+        )
+        try:
+            await self._preparations.reserve_send_authorization(authorization)
+        except EmailSendAuthorizationConflictError as exc:
+            raise ValueError(
+                "o pedido de envio já está vinculado a outra preparação; solicite novamente"
+            ) from exc

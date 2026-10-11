@@ -89,6 +89,10 @@ def build_agent_context(
         context["argos_report_artifact_scopes"] = report_artifact_scopes
     if recipient_selectors is not None:
         context["recipient_selectors"] = recipient_selectors
+        context["argos_send_intent_requested"] = bool(state.get("send_intent_requested"))
+        context["argos_send_intent_source_interaction_id"] = state.get(
+            "send_intent_source_interaction_id"
+        )
     return context
 
 

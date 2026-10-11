@@ -3,7 +3,15 @@
 from typing import Protocol
 from uuid import UUID
 
-from app.domain.email_preparations import EmailPreparation, PendingRecipientResolution
+from app.domain.email_preparations import (
+    EmailPreparation,
+    EmailSendAuthorization,
+    PendingRecipientResolution,
+)
+
+
+class EmailSendAuthorizationConflictError(RuntimeError):
+    """Uma interação já autorizou outra preparação ou outro conjunto de destinatários."""
 
 
 class EmailPreparationRepository(Protocol):
@@ -30,3 +38,15 @@ class EmailPreparationRepository(Protocol):
         interaction_id: UUID,
         question_id: UUID | None = None,
     ) -> PendingRecipientResolution | None: ...
+
+    async def reserve_send_authorization(
+        self, authorization: EmailSendAuthorization
+    ) -> EmailSendAuthorization: ...
+
+    async def get_send_authorization(
+        self,
+        *,
+        principal_user_id: UUID,
+        session_id: UUID,
+        source_interaction_id: UUID,
+    ) -> EmailSendAuthorization | None: ...

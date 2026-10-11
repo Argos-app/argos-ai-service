@@ -6,9 +6,12 @@ from uuid import UUID
 
 from app.domain.email_preparations import (
     EmailPreparation,
+    EmailSendAuthorization,
     PendingRecipientOption,
     PendingRecipientResolution,
+    SendAuthorizationOrigin,
 )
+from app.ports.email_preparation_repository import EmailSendAuthorizationConflictError
 
 
 def _document(preparation: EmailPreparation) -> dict[str, Any]:
@@ -90,12 +93,78 @@ def _pending_resolution(document: dict[str, Any]) -> PendingRecipientResolution:
     )
 
 
+def _send_authorization_document(authorization: EmailSendAuthorization) -> dict[str, Any]:
+    return {
+        "_id": str(authorization.authorization_id),
+        "principal_user_id": str(authorization.principal_user_id),
+        "session_id": str(authorization.session_id),
+        "source_interaction_id": str(authorization.source_interaction_id),
+        "preparation_reference": str(authorization.preparation_reference),
+        "report_id": str(authorization.report_id),
+        "request_fingerprint": authorization.request_fingerprint,
+        "prepared_fingerprint": authorization.prepared_fingerprint,
+        "recipients_fingerprint": authorization.recipients_fingerprint,
+        "origin": authorization.origin.value,
+        "idempotency_key": authorization.idempotency_key,
+        "authorized_at": authorization.authorized_at,
+        "expires_at": authorization.expires_at,
+        "question_id": str(authorization.question_id) if authorization.question_id else None,
+        "question_expires_at": authorization.question_expires_at,
+        "purge_at": authorization.expires_at + timedelta(days=1),
+    }
+
+
+def _send_authorization(document: dict[str, Any]) -> EmailSendAuthorization:
+    return EmailSendAuthorization(
+        authorization_id=UUID(document["_id"]),
+        principal_user_id=UUID(document["principal_user_id"]),
+        session_id=UUID(document["session_id"]),
+        source_interaction_id=UUID(document["source_interaction_id"]),
+        preparation_reference=UUID(document["preparation_reference"]),
+        report_id=UUID(document["report_id"]),
+        request_fingerprint=document["request_fingerprint"],
+        prepared_fingerprint=document["prepared_fingerprint"],
+        recipients_fingerprint=document["recipients_fingerprint"],
+        origin=SendAuthorizationOrigin(document["origin"]),
+        idempotency_key=document["idempotency_key"],
+        authorized_at=document["authorized_at"],
+        expires_at=document["expires_at"],
+        question_id=UUID(document["question_id"]) if document.get("question_id") else None,
+        question_expires_at=document.get("question_expires_at"),
+    )
+
+
+def _same_authorization(stored: EmailSendAuthorization, candidate: EmailSendAuthorization) -> bool:
+    return all(
+        getattr(stored, field) == getattr(candidate, field)
+        for field in (
+            "principal_user_id",
+            "session_id",
+            "source_interaction_id",
+            "preparation_reference",
+            "report_id",
+            "request_fingerprint",
+            "prepared_fingerprint",
+            "recipients_fingerprint",
+            "origin",
+            "question_id",
+            "question_expires_at",
+        )
+    )
+
+
 class MongoEmailPreparationRepository:
     """Armazena conteúdo e recibo completo com leitura vinculada ao principal."""
 
-    def __init__(self, collection: Any, pending_resolutions: Any = None) -> None:
+    def __init__(
+        self,
+        collection: Any,
+        pending_resolutions: Any = None,
+        send_authorizations: Any = None,
+    ) -> None:
         self._collection = collection
         self._pending_resolutions = pending_resolutions
+        self._send_authorizations = send_authorizations
 
     async def ensure_indexes(self) -> None:
         await self._collection.create_index(
@@ -122,6 +191,21 @@ class MongoEmailPreparationRepository:
             await self._pending_resolutions.create_index(
                 "purge_at",
                 name="ttl_pending_recipient_questions",
+                expireAfterSeconds=0,
+            )
+        if self._send_authorizations is not None:
+            await self._send_authorizations.create_index(
+                [
+                    ("principal_user_id", 1),
+                    ("session_id", 1),
+                    ("source_interaction_id", 1),
+                ],
+                unique=True,
+                name="uq_email_send_authorization_action",
+            )
+            await self._send_authorizations.create_index(
+                "purge_at",
+                name="ttl_email_send_authorizations",
                 expireAfterSeconds=0,
             )
 
@@ -190,6 +274,54 @@ class MongoEmailPreparationRepository:
             query["_id"] = str(question_id)
         document = await self._pending_resolutions.find_one(query)
         return _pending_resolution(document) if document is not None else None
+
+    async def reserve_send_authorization(
+        self, authorization: EmailSendAuthorization
+    ) -> EmailSendAuthorization:
+        if self._send_authorizations is None:
+            raise RuntimeError("armazenamento de autorizações de envio indisponível")
+        scope = {
+            "principal_user_id": str(authorization.principal_user_id),
+            "session_id": str(authorization.session_id),
+            "source_interaction_id": str(authorization.source_interaction_id),
+        }
+        document = _send_authorization_document(authorization)
+        try:
+            await self._send_authorizations.update_one(
+                scope,
+                {"$setOnInsert": document},
+                upsert=True,
+            )
+        except Exception as exc:
+            if not getattr(exc, "code", None) == 11000:
+                raise
+        stored_document = await self._send_authorizations.find_one(scope)
+        if stored_document is None:
+            raise RuntimeError("autorização de envio não foi persistida")
+        stored = _send_authorization(stored_document)
+        if not _same_authorization(stored, authorization):
+            raise EmailSendAuthorizationConflictError(
+                "a interação já está vinculada a outra preparação ou autorização"
+            )
+        return stored
+
+    async def get_send_authorization(
+        self,
+        *,
+        principal_user_id: UUID,
+        session_id: UUID,
+        source_interaction_id: UUID,
+    ) -> EmailSendAuthorization | None:
+        if self._send_authorizations is None:
+            return None
+        document = await self._send_authorizations.find_one(
+            {
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+                "source_interaction_id": str(source_interaction_id),
+            }
+        )
+        return _send_authorization(document) if document is not None else None
 
 
 __all__ = ["MongoEmailPreparationRepository"]
