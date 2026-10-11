@@ -18,13 +18,17 @@ class FakeConversations:
     def __init__(self, messages):
         self.messages = messages
 
-    async def list_before_sequence(self, session_id, user_id, *, before_sequence, limit):
-        assert before_sequence == 6
+    async def list_after_sequence(
+        self, session_id, user_id, *, after_sequence, through_sequence, limit
+    ):
+        assert after_sequence == 2
+        assert through_sequence == 5
         assert limit == 100
         return tuple(
             message
-            for message in sorted(self.messages, key=lambda item: item.sequence, reverse=True)
-            if message.session_id == session_id and message.sequence < before_sequence
+            for message in sorted(self.messages, key=lambda item: item.sequence)
+            if message.session_id == session_id
+            and after_sequence < message.sequence <= through_sequence
         )
 
 

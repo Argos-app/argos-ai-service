@@ -10,6 +10,7 @@ from app.agent_schemas.inputs import QuestionFormattingRequest
 from app.api.v1.dependencies.auth import Principal
 from app.api.v1.models.interactions import AnswerInteraction, AnswerText, MessageInteraction
 from app.application.session_service import MongoSessionService
+from app.domain.memory import SessionSummary
 from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
@@ -139,6 +140,23 @@ class FakeConversationRepository:
     async def list_before_sequence(self, *args, **kwargs) -> tuple[ConversationMessage, ...]:
         return ()
 
+    async def list_after_sequence(
+        self,
+        session_id,
+        user_id,
+        *,
+        after_sequence,
+        through_sequence,
+        limit,
+    ) -> tuple[ConversationMessage, ...]:
+        del user_id
+        return tuple(
+            message
+            for message in sorted(self.messages, key=lambda item: item.sequence)
+            if message.session_id == session_id
+            and after_sequence < message.sequence <= through_sequence
+        )[:limit]
+
 
 class FakeSessionWorkRepository:
     def __init__(self, sessions, interactions, conversations) -> None:
@@ -220,7 +238,7 @@ def _principal() -> Principal:
     )
 
 
-def _service(graph=None):
+def _service(graph=None, **options):
     sessions = FakeSessionRepository()
     interactions = FakeInteractionRepository()
     conversations = FakeConversationRepository()
@@ -232,6 +250,7 @@ def _service(graph=None):
         session_work=work,
         graph_provider=lambda: graph,
         renew_seconds=60,
+        **options,
     )
     return service, sessions, interactions, conversations
 
@@ -308,3 +327,89 @@ async def test_answer_is_counted_once_and_conflicting_replay_is_rejected():
         await service.create_interaction(principal, session.session_id, conflicting)
     assert error.value.status_code == 409
     assert graph.calls == 2
+
+
+class FakeSummaryRepository:
+    def __init__(self):
+        self.current = None
+        self.saved = []
+
+    async def get_current(self, session_id):
+        return self.current if self.current and self.current.session_id == session_id else None
+
+    async def save_if_current(self, summary, *, expected_revision):
+        current_revision = self.current.revision if self.current else None
+        if current_revision != expected_revision:
+            return False
+        self.current = summary
+        self.saved.append(summary)
+        return True
+
+
+class FakeExecutionEvents:
+    async def list_for_interactions(self, session_id, user_id, interaction_ids):
+        del session_id, user_id, interaction_ids
+        return ()
+
+
+class FakeSummaryGenerator:
+    def __init__(self):
+        self.calls = []
+
+    async def generate(
+        self,
+        *,
+        session_id,
+        previous,
+        messages,
+        events,
+        through_user_message_number,
+        max_tokens,
+    ):
+        self.calls.append((tuple(messages), tuple(events), through_user_message_number))
+        return SessionSummary(
+            session_id=session_id,
+            revision=previous.revision + 1 if previous else 1,
+            through_sequence=max(message.sequence for message in messages),
+            through_user_message_number=through_user_message_number,
+            activity="Continuar consulta.",
+            important_facts=(),
+            decisions=(),
+            pending_activity=None,
+            limitations=(),
+            summary_text='{"activity":"Continuar consulta."}',
+            token_count=5,
+            updated_at=_utcnow(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_service_summarizes_only_after_the_fifteenth_completed_user_entry():
+    graph = FakeGraph()
+    summaries = FakeSummaryRepository()
+    generator = FakeSummaryGenerator()
+    service, _, _, _ = _service(
+        graph,
+        summaries=summaries,
+        execution_events=FakeExecutionEvents(),
+        summary_generator_provider=lambda: generator,
+    )
+    principal = _principal()
+    session = await service.create_session(principal)
+
+    for _ in range(15):
+        await service.create_interaction(
+            principal,
+            session.session_id,
+            MessageInteraction(
+                kind="message",
+                client_message_id=uuid4(),
+                message="Quero continuar a consulta.",
+            ),
+        )
+
+    assert len(generator.calls) == 1
+    assert generator.calls[0][2] == 15
+    assert len(generator.calls[0][0]) == 30
+    assert summaries.current.through_user_message_number == 15
+    assert summaries.current.through_sequence == 30
