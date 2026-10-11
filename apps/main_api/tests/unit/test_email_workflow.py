@@ -17,6 +17,9 @@ from packages.contracts import (
     PreparedReport,
     PreparedReportStatus,
     RecipientRef,
+    RecipientResolution,
+    RecipientResolutionStatus,
+    RecipientSelector,
 )
 
 
@@ -35,6 +38,7 @@ class _Artifacts:
 class _Preparations:
     def __init__(self):
         self.records = {}
+        self.pending = []
 
     async def find_matching(self, **key):
         identity = (
@@ -53,6 +57,22 @@ class _Preparations:
             preparation.request_fingerprint,
         )
         self.records[key] = preparation
+
+    async def save_pending_recipient_resolution(self, resolution):
+        self.pending.append(resolution)
+
+    async def get_pending_recipient_resolution(self, **scope):
+        return next(
+            (
+                item
+                for item in reversed(self.pending)
+                if item.principal_user_id == scope["principal_user_id"]
+                and item.session_id == scope["session_id"]
+                and item.interaction_id == scope["interaction_id"]
+                and (scope.get("question_id") is None or item.question_id == scope["question_id"])
+            ),
+            None,
+        )
 
 
 class _EmailClient:
@@ -174,3 +194,68 @@ def test_prepare_report_uses_protected_context_persists_full_response_and_reuses
     assert "Sensitive generated report body" not in json.dumps(result)
     assert next(iter(preparations.records.values())).prepared_report == prepared
     assert artifacts.scope[1]["task_id"] == artifact.task_id
+
+
+def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_protected():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.NEEDS_RECIPIENTS,
+        requested_by=artifact.principal_user_id,
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        unresolved=(
+            RecipientResolution(
+                selector=RecipientSelector(kind="name", value="Alex"),
+                status=RecipientResolutionStatus.AMBIGUOUS,
+                matches=(
+                    RecipientRef(
+                        recipient_id=uuid4(), name="Alex Silva", email="alex1@example.com"
+                    ),
+                    RecipientRef(
+                        recipient_id=uuid4(), name="Alex Souza", email="alex2@example.com"
+                    ),
+                ),
+            ),
+        ),
+    )
+    email_client = _EmailClient(prepared)
+    preparations = _Preparations()
+    workflow = EmailWorkflow(
+        email_client=email_client,
+        report_artifacts=_Artifacts(artifact),
+        preparations=preparations,
+    )
+    context = {
+        "argos_user_id": str(artifact.principal_user_id),
+        "session_id": str(artifact.session_id),
+        "interaction_id": str(uuid4()),
+        "argos_authorized_property_ids": (str(property_id),),
+        "argos_report_artifact_scopes": {
+            str(artifact.reference): {
+                "interaction_id": str(artifact.interaction_id),
+                "task_id": artifact.task_id,
+            }
+        },
+        "recipient_selectors": {"[DESTINATARIO_1]": {"kind": "name", "value": "Alex"}},
+    }
+
+    async def prepare():
+        return await workflow.prepare(
+            report_artifact_ref=artifact.reference,
+            report_title="Relatório do lote L-1",
+            configurable=context,
+        )
+
+    result_text = asyncio.run(prepare())
+    result = json.loads(result_text)
+    pending = preparations.pending[0]
+
+    assert result["status"] == "needs_recipients"
+    assert result["recipient_question_id"] == str(pending.question_id)
+    assert pending.input_type == "single_choice"
+    assert len(pending.options) == 2
+    assert "alex1@example.com" not in result_text
+    assert "alex2@example.com" not in result_text
+    assert pending.options[0].selector.value == "alex1@example.com"
+    assert "a***@example.com" in pending.options[0].label
