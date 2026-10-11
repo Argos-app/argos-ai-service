@@ -7,7 +7,11 @@ from fastapi import Depends, HTTPException, Request
 
 from app.api.v1.dependencies.auth import Principal
 from app.api.v1.models.interactions import InteractionInput, InteractionResult
+from app.api.v1.models.messages import SessionMessagesPage
 from app.api.v1.models.sessions import Session
+from app.application.message_history_service import (
+    MessageHistoryService as MongoMessageHistoryService,
+)
 from app.application.session_service import MongoSessionService
 
 
@@ -19,6 +23,17 @@ class SessionService(Protocol):
     async def create_interaction(
         self, principal: Principal, session_id: UUID, body: InteractionInput
     ) -> InteractionResult: ...
+
+
+class MessageHistoryQueryService(Protocol):
+    async def list_messages(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> SessionMessagesPage: ...
 
 
 def _graph_provider(request: Request):
@@ -137,3 +152,19 @@ def get_session_service(request: Request) -> SessionService:
 
 
 SessionServiceDep = Annotated[SessionService, Depends(get_session_service)]
+
+
+def get_message_history_service(request: Request) -> MessageHistoryQueryService:
+    persistence = getattr(request.app.state, "persistence", None)
+    if persistence is None:
+        raise HTTPException(status_code=503, detail="Sessões indisponíveis")
+    return MongoMessageHistoryService(
+        sessions=persistence.sessions,
+        conversations=persistence.conversations,
+    )
+
+
+MessageHistoryServiceDep = Annotated[
+    MessageHistoryQueryService,
+    Depends(get_message_history_service),
+]

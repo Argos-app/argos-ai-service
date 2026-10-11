@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from app.api.v1.models.base import StrictModel
+from app.api.v1.models.interactions import AnswerValue, ResponseValue
 from app.session_config import DEFAULT_MESSAGES_PAGE_SIZE, MAX_MESSAGES_PAGE_SIZE
 
 
@@ -31,6 +32,10 @@ class SessionMessage(StrictModel):
     kind: Literal["user_input", "assistant_answer", "clarification_question"]
     content: str = Field(min_length=1, max_length=32_000)
     created_at: datetime
+    question_id: UUID | None = None
+    answer: AnswerValue | None = None
+    response: ResponseValue | None = None
+    redacted: bool = False
 
     @field_validator("created_at")
     @classmethod
@@ -49,6 +54,10 @@ class SessionMessage(StrictModel):
             raise ValueError("user_input deve pertencer ao usuário")
         if self.kind != "user_input" and self.role != "assistant":
             raise ValueError("resposta e pergunta de esclarecimento devem pertencer ao assistente")
+        if self.role == "user" and self.response is not None:
+            raise ValueError("mensagem do usuário não pode conter response")
+        if self.role == "assistant" and (self.question_id is not None or self.answer is not None):
+            raise ValueError("mensagem do assistente não pode conter resposta do usuário")
         return self
 
 

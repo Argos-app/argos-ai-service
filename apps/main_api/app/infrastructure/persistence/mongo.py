@@ -395,8 +395,9 @@ class MongoConversationRepository:
         before_sequence: int | None,
         limit: int,
     ) -> tuple[ConversationMessage, ...]:
-        if not 1 <= limit <= 100:
-            raise ValueError("limit deve estar entre 1 e 100")
+        # A API solicita uma linha extra para calcular has_more sem contagem.
+        if not 1 <= limit <= 101:
+            raise ValueError("limit deve estar entre 1 e 101")
         query: dict[str, Any] = {"session_id": str(session_id), "user_id": str(user_id)}
         if before_sequence is not None:
             query["sequence"] = {"$lt": before_sequence}
