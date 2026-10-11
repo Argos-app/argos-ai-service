@@ -25,9 +25,11 @@ from app.graph.workflow import (
     executar_fluxo,
     executar_resposta,
     initial_state,
+    no_guardrail_entrada,
 )
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventWriteError
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -58,6 +60,7 @@ def request_state(message: str = "Quais aplicações existem?") -> dict:
         user_id="user-demo",
         farm_id="farm-demo",
         session_id="session-demo",
+        interaction_id="interaction-origin",
     )
 
 
@@ -92,6 +95,52 @@ def test_judge_cannot_approve_with_unsupported_claims() -> None:
             reason="Há uma afirmação sem fonte",
             unsupported_claims=("Afirmação sem fonte",),
         )
+
+
+def test_initial_state_sanitizes_recipient_but_keeps_private_selector():
+    state = initial_state(
+        "Envie para ana@example.com",
+        user_id="user-demo",
+        farm_id="farm-demo",
+        session_id="session-demo",
+        interaction_id="interaction-origin",
+    )
+
+    assert state["messages"][0].content == "Envie para [DESTINATARIO_1]"
+    assert state["recipient_selectors"] == {
+        "[DESTINATARIO_1]": {"kind": "email", "value": "ana@example.com"}
+    }
+    assert state["send_intent_requested"] is True
+    assert state["send_intent_source_interaction_id"] == "interaction-origin"
+
+
+def test_clarification_guardrail_preserves_recipients_and_source_intent():
+    state = {
+        **request_state("Use [DESTINATARIO_1]"),
+        "input_kind": "answer",
+        "answer_question_id": "question-1",
+        "question_id": "question-1",
+        "clarification_request": QuestionFormattingRequest(
+            reason_code="missing_recipient",
+            input_type="free_text",
+            question_goal="Informe o destinatário",
+        ),
+        "sanitized_message": "Envie o relatório para [DESTINATARIO_1]",
+        "recipient_selectors": {"[DESTINATARIO_1]": {"kind": "email", "value": "ana@example.com"}},
+        "send_intent_requested": True,
+        "send_intent_source_interaction_id": "interaction-origin",
+    }
+    state["messages"] = [HumanMessage(content="para Bruno Lima")]
+
+    result = no_guardrail_entrada(state)
+
+    assert "Bruno Lima" not in result["sanitized_message"]
+    assert "[DESTINATARIO_1]" in result["sanitized_message"]
+    assert "[DESTINATARIO_2]" in result["sanitized_message"]
+    assert result["recipient_selectors"]["[DESTINATARIO_1]"]["value"] == "ana@example.com"
+    assert result["recipient_selectors"]["[DESTINATARIO_2]"]["value"] == "Bruno Lima"
+    assert result["send_intent_requested"] is True
+    assert result["send_intent_source_interaction_id"] == "interaction-origin"
 
 
 @pytest.mark.asyncio
