@@ -7,12 +7,14 @@ aplicativo Kotlin apresenta respostas e perguntas de esclarecimento.
 Este README distingue o código atual das integrações planejadas. Backend e
 mobile ficam em outros repositórios.
 
-O principal já tem contratos HTTP, grafo de agentes, Factory e Registry, mas usa
-tools simuladas e ainda não conecta autenticação real nem armazenamento de
-sessões. O MCP de e-mail já implementa preparação, envio e consulta de estado,
-com testes isolados pelo SDK MCP real, Mongo, PostgreSQL e SMTP de teste.
-`apps/mcp_data` ainda não tem implementação; seu papel futuro está descrito
-abaixo. A integração completa principal → dados → e-mail permanece planejada.
+O principal tem contratos HTTP, grafo de agentes, Factory e Registry. Ele usa
+Mongo para sessões, mensagens, eventos de execução, checkpoints, resumos e
+preferências limitadas do usuário; as tools de negócio ainda são simuladas e a
+autenticação externa continua pendente. O MCP de e-mail já implementa
+preparação, envio e consulta de estado, com testes isolados pelo SDK MCP real,
+Mongo, PostgreSQL e SMTP de teste. `apps/mcp_data` ainda não tem implementação;
+seu papel futuro está descrito abaixo. A integração completa principal → dados →
+e-mail permanece planejada.
 
 ## Agentes
 
@@ -47,6 +49,35 @@ uma aplicação separada e valida o acesso aos dados solicitados.
 | Dados — planejado                    | Resolve propriedades, rebanhos e lotes autorizados usando a modelagem relacional; consulta documentos de histórico e medicamentos no Mongo. Para relatório, entrega uma projeção de um lote em `LotReportEnvelope`, assinada e vinculada ao solicitante, escopo e validade. Não aceita SQL ou pipelines arbitrários do agente. |
 | E-mail — implementado isoladamente   | Verifica o envelope recebido, resolve destinatários cadastrados no PostgreSQL, renderiza o relatório e envia pelo no-reply configurado. Guarda preparações e operações no Mongo; não relê o documento Mongo de negócio.                                                                                                        |
 | Predição — implementado isoladamente | Estima consumo de medicamentos por propriedade e unidade, repetindo a média diária mensal de um histórico anual por até 28 dias. Não usa modelo treinado nem prevê produção, doenças ou mortes; acesso exige Bearer interno e delegação de propriedades.                                                                       |
+
+## Sessões e memória do principal
+
+O `main_api` grava sessões e interações no Mongo, sem armazenar as mensagens
+originais em paralelo. O conteúdo persistido é sanitizado. A cada 15 entradas
+únicas do usuário, o serviço publica um resumo progressivo com teto de 2.000
+tokens; o perfil entre sessões é restrito ao tom de comunicação e ao objetivo
+geral declarado. Sessões e preferências não expiram automaticamente.
+
+As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
+`POST /v1/sessions/{session_id}/interactions` e
+`GET /v1/sessions/{session_id}/messages`. A consulta de mensagens não chama o
+LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
+(padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
+público.
+
+O serviço precisa de Mongo em replica set para transações e checkpointer. As
+configurações principais são `MAIN_API_MONGO_URI` e `MAIN_API_MONGO_DATABASE`;
+veja [`apps/main_api/.env.example`](apps/main_api/.env.example). Em testes
+locais executados no host contra o Compose, use o URI de conexão direta
+documentado no README dos testes de integração. O stub de identidade continua
+disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
+desse modo, autenticação real ainda não foi ligada ao contrato do backend.
+
+Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
+persistência e retomada com Mongo replica set descartável: siga
+[`apps/main_api/tests/integration/README.md`](apps/main_api/tests/integration/README.md).
+O job `Main API Mongo integration tests` da CI executa esses testes e publica o
+relatório JUnit.
 
 ### Fluxo planejado de relatório de lote
 

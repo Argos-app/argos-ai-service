@@ -402,7 +402,7 @@ class MongoConversationRepository:
         if before_sequence is not None:
             query["sequence"] = {"$lt": before_sequence}
         cursor = self._collection.find(query).sort("sequence", -1).limit(limit)
-        return tuple(_message_from_document(item) async for item in cursor)
+        return tuple([_message_from_document(item) async for item in cursor])
 
     async def list_after_sequence(
         self,
@@ -426,7 +426,7 @@ class MongoConversationRepository:
             .sort("sequence", 1)
             .limit(limit)
         )
-        return tuple(_message_from_document(item) async for item in cursor)
+        return tuple([_message_from_document(item) async for item in cursor])
 
 
 def _event_document(event: ExecutionEvent, user_id: UUID) -> dict[str, Any]:
@@ -529,7 +529,7 @@ class MongoExecutionEventRepository:
                 "status": {"$in": [ExecutionStatus.SUCCEEDED.value, ExecutionStatus.FAILED.value]},
             }
         ).sort([("created_at", 1), ("_id", 1)])
-        return tuple(_event_from_document(item) async for item in cursor)
+        return tuple([_event_from_document(item) async for item in cursor])
 
 
 def _summary_document(summary: SessionSummary) -> dict[str, Any]:

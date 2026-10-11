@@ -118,3 +118,58 @@ jobs:
                   name: python-test-reports
                   path: reports/
                   if-no-files-found: ignore
+
+    main-api-integration:
+        name: Main API Mongo integration tests
+        runs-on: ubuntu-latest
+        needs: [quality, unit-tests]
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Python 3.14.3
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.14.3"
+                  cache: pip
+                  cache-dependency-path: |
+                      requirements-dev.txt
+                      apps/main_api/requirements.txt
+
+            - name: Install Python tooling and main API dependencies
+              run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+
+            - name: Start disposable Mongo replica set
+              run: |
+                  docker compose --file apps/main_api/tests/integration/compose.yaml up -d --wait mongo
+                  docker compose --file apps/main_api/tests/integration/compose.yaml run --rm mongo-init
+
+            - name: Wait for Mongo primary election
+              run: |
+                  docker compose --file apps/main_api/tests/integration/compose.yaml exec -T mongo mongosh --quiet --eval '
+                    let primary = false;
+                    for (let attempt = 0; attempt < 60; attempt++) {
+                      try { if (rs.status().myState === 1) { primary = true; break; } } catch (e) {}
+                      sleep(500);
+                    }
+                    if (!primary) quit(1);
+                  '
+
+            - name: Run main API integration tests
+              env:
+                  MAIN_API_MONGO_TEST_URI: mongodb://127.0.0.1:27027/?directConnection=true
+              run: |
+                  mkdir -p reports
+                  pytest apps/main_api/tests/integration -v --junitxml=reports/main-api-integration.xml
+
+            - name: Stop disposable Mongo replica set
+              if: always()
+              run: docker compose --file apps/main_api/tests/integration/compose.yaml down --volumes --remove-orphans
+
+            - name: Publish integration test report
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: main-api-integration-report
+                  path: reports/main-api-integration.xml
+                  if-no-files-found: ignore

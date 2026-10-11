@@ -88,3 +88,4 @@ Thumbs.db
 *.md
 !README.md
 !docs/agent-integration-handoff.md
+!docs/plano-persistencia-sessoes-memoria.md
