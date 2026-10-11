@@ -27,6 +27,7 @@ from app.graph.workflow import (
     initial_state,
 )
 from app.ports.agent import AgentId
+from app.ports.execution_event_repository import ExecutionEventWriteError
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -171,6 +172,14 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         "session_id": "session-demo",
     }
     assert judge.calls[0][0].sources == (source,)
+
+
+@pytest.mark.asyncio
+async def test_event_persistence_failure_is_not_converted_to_safe_success() -> None:
+    graph = build_graph(FakeFactory(router=FakeAgent(ExecutionEventWriteError("event write"))))
+
+    with pytest.raises(ExecutionEventWriteError):
+        await graph.ainvoke(request_state())
 
 
 @pytest.mark.asyncio

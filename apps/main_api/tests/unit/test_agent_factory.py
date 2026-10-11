@@ -15,6 +15,7 @@ from app.agents import specialists
 from app.agents.mock_tools import mock_consultar_fazenda
 from app.agents.registry import ModelPolicyId
 from app.agents.specialists import build_agent_factory
+from app.domain.sessions import ExecutionStatus
 from app.infrastructure.agents import langchain_factory
 from app.ports.agent import AgentId
 
@@ -170,6 +171,45 @@ async def test_agent_passes_context_to_runnable(monkeypatch) -> None:
             "session_id": "session-demo",
         }
     }
+
+
+@pytest.mark.asyncio
+async def test_agent_persists_correlated_events_when_interaction_context_exists(
+    monkeypatch,
+) -> None:
+    class FakeEventRepository:
+        def __init__(self) -> None:
+            self.events = []
+
+        async def append(self, event) -> None:
+            self.events.append(event)
+
+    runnable = _FakeRunnable()
+    repository = FakeEventRepository()
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: runnable)
+    factory = build_agent_factory(_models(), execution_events=repository)
+
+    await factory.create(AgentId.FARM).run(
+        SpecialistInput(
+            task_id="task-1",
+            goal="Consultar registros",
+            brief_sanitized="Contato user@example.invalid",
+        ),
+        context={
+            "user_id": "user-demo",
+            "farm_id": "farm-demo",
+            "session_id": "a2d9c507-180a-45ac-a975-972cb303d279",
+            "interaction_id": "8c613626-1a3e-43f0-a8a0-dc3591d734a4",
+        },
+    )
+
+    assert [event.status for event in repository.events] == [
+        ExecutionStatus.STARTED,
+        ExecutionStatus.SUCCEEDED,
+    ]
+    assert repository.events[0].invocation_id == repository.events[1].invocation_id
+    assert "user@example.invalid" not in repository.events[0].sanitized_input
+    assert runnable.last_config["callbacks"]
 
 
 @pytest.mark.asyncio
