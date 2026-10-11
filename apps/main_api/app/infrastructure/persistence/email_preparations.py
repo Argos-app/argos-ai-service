@@ -7,6 +7,7 @@ from uuid import UUID
 from app.domain.email_preparations import (
     EmailPreparation,
     EmailSendAuthorization,
+    EmailSendReceipt,
     PendingRecipientOption,
     PendingRecipientResolution,
     SendAuthorizationOrigin,
@@ -134,6 +135,29 @@ def _send_authorization(document: dict[str, Any]) -> EmailSendAuthorization:
     )
 
 
+def _send_receipt_document(receipt: EmailSendReceipt) -> dict[str, Any]:
+    return {
+        "_id": str(receipt.authorization_id),
+        "principal_user_id": str(receipt.principal_user_id),
+        "session_id": str(receipt.session_id),
+        "result": receipt.result.model_dump(mode="json"),
+        "recorded_at": receipt.recorded_at,
+        "purge_at": receipt.recorded_at + timedelta(days=31),
+    }
+
+
+def _send_receipt(document: dict[str, Any]) -> EmailSendReceipt:
+    from packages.contracts import SendReportResult
+
+    return EmailSendReceipt(
+        authorization_id=UUID(document["_id"]),
+        principal_user_id=UUID(document["principal_user_id"]),
+        session_id=UUID(document["session_id"]),
+        result=SendReportResult.model_validate(document["result"]),
+        recorded_at=document["recorded_at"],
+    )
+
+
 def _same_authorization(stored: EmailSendAuthorization, candidate: EmailSendAuthorization) -> bool:
     return all(
         getattr(stored, field) == getattr(candidate, field)
@@ -161,10 +185,12 @@ class MongoEmailPreparationRepository:
         collection: Any,
         pending_resolutions: Any = None,
         send_authorizations: Any = None,
+        send_receipts: Any = None,
     ) -> None:
         self._collection = collection
         self._pending_resolutions = pending_resolutions
         self._send_authorizations = send_authorizations
+        self._send_receipts = send_receipts
 
     async def ensure_indexes(self) -> None:
         await self._collection.create_index(
@@ -208,6 +234,15 @@ class MongoEmailPreparationRepository:
                 name="ttl_email_send_authorizations",
                 expireAfterSeconds=0,
             )
+        if self._send_receipts is not None:
+            await self._send_receipts.create_index(
+                [("principal_user_id", 1), ("session_id", 1), ("_id", 1)],
+                unique=True,
+                name="uq_email_send_receipt_scope",
+            )
+            await self._send_receipts.create_index(
+                "purge_at", name="ttl_email_send_receipts", expireAfterSeconds=0
+            )
 
     async def find_matching(
         self,
@@ -238,6 +273,18 @@ class MongoEmailPreparationRepository:
             _document(preparation),
             upsert=True,
         )
+
+    async def get_by_reference(
+        self, *, reference: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> EmailPreparation | None:
+        document = await self._collection.find_one(
+            {
+                "_id": str(reference),
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+            }
+        )
+        return _preparation(document) if document is not None else None
 
     async def save_pending_recipient_resolution(
         self, resolution: PendingRecipientResolution
@@ -322,6 +369,92 @@ class MongoEmailPreparationRepository:
             }
         )
         return _send_authorization(document) if document is not None else None
+
+    async def list_send_authorizations(
+        self, *, principal_user_id: UUID, session_id: UUID, limit: int = 20
+    ) -> tuple[EmailSendAuthorization, ...]:
+        if self._send_authorizations is None:
+            return ()
+        cursor = self._send_authorizations.find(
+            {
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+            }
+        )
+        if hasattr(cursor, "sort"):
+            cursor = cursor.sort("authorized_at", -1)
+        if hasattr(cursor, "limit"):
+            cursor = cursor.limit(max(1, min(limit, 100)))
+        return tuple(_send_authorization(document) async for document in cursor)
+
+    async def get_send_authorization_by_id(
+        self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> EmailSendAuthorization | None:
+        if self._send_authorizations is None:
+            return None
+        document = await self._send_authorizations.find_one(
+            {
+                "_id": str(authorization_id),
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+            }
+        )
+        return _send_authorization(document) if document is not None else None
+
+    async def get_send_receipt(
+        self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> EmailSendReceipt | None:
+        if self._send_receipts is None:
+            return None
+        document = await self._send_receipts.find_one(
+            {
+                "_id": str(authorization_id),
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+            }
+        )
+        return _send_receipt(document) if document is not None else None
+
+    async def save_send_receipt(self, receipt: EmailSendReceipt) -> EmailSendReceipt:
+        if self._send_receipts is None:
+            raise RuntimeError("armazenamento de recibos de envio indisponível")
+        scope = {
+            "_id": str(receipt.authorization_id),
+            "principal_user_id": str(receipt.principal_user_id),
+            "session_id": str(receipt.session_id),
+        }
+        existing = await self._send_receipts.find_one(scope)
+        if existing is not None:
+            stored = _send_receipt(existing)
+            if stored.result.operation_id != receipt.result.operation_id:
+                raise EmailSendAuthorizationConflictError(
+                    "a autorização já possui recibo para outra operação"
+                )
+            await self._send_receipts.update_one(
+                scope,
+                {
+                    "$set": {
+                        "result": receipt.result.model_dump(mode="json"),
+                        "recorded_at": receipt.recorded_at,
+                        "purge_at": receipt.recorded_at + timedelta(days=31),
+                    }
+                },
+            )
+        else:
+            await self._send_receipts.update_one(
+                scope,
+                {"$setOnInsert": _send_receipt_document(receipt)},
+                upsert=True,
+            )
+        document = await self._send_receipts.find_one(scope)
+        if document is None:
+            raise RuntimeError("recibo de envio não foi persistido")
+        stored = _send_receipt(document)
+        if stored.result.operation_id != receipt.result.operation_id:
+            raise EmailSendAuthorizationConflictError(
+                "a autorização já possui recibo para outra operação"
+            )
+        return stored
 
 
 __all__ = ["MongoEmailPreparationRepository"]

@@ -110,5 +110,22 @@ class MongoReportArtifactRepository:
             raise ReportArtifactExpiredError("origem de relatório expirada")
         return artifact
 
+    async def get_owned(
+        self, *, reference: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> ReportArtifact:
+        document = await self._collection.find_one(
+            {
+                "_id": str(reference),
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+            }
+        )
+        if document is None:
+            raise ReportArtifactNotFoundError("referência de relatório inválida")
+        artifact = _artifact(document)
+        if datetime.now(UTC) >= artifact.expires_at:
+            raise ReportArtifactExpiredError("origem de relatório expirada")
+        return artifact
+
 
 __all__ = ["MongoReportArtifactRepository"]

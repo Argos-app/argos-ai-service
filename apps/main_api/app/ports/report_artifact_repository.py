@@ -28,3 +28,7 @@ class ReportArtifactRepository(Protocol):
         interaction_id: UUID,
         task_id: str,
     ) -> ReportArtifact: ...
+
+    async def get_owned(
+        self, *, reference: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> ReportArtifact: ...

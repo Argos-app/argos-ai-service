@@ -6,6 +6,7 @@ from uuid import UUID
 from app.domain.email_preparations import (
     EmailPreparation,
     EmailSendAuthorization,
+    EmailSendReceipt,
     PendingRecipientResolution,
 )
 
@@ -25,6 +26,10 @@ class EmailPreparationRepository(Protocol):
     ) -> EmailPreparation | None: ...
 
     async def save(self, preparation: EmailPreparation) -> None: ...
+
+    async def get_by_reference(
+        self, *, reference: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> EmailPreparation | None: ...
 
     async def save_pending_recipient_resolution(
         self, resolution: PendingRecipientResolution
@@ -50,3 +55,17 @@ class EmailPreparationRepository(Protocol):
         session_id: UUID,
         source_interaction_id: UUID,
     ) -> EmailSendAuthorization | None: ...
+
+    async def list_send_authorizations(
+        self, *, principal_user_id: UUID, session_id: UUID, limit: int = 20
+    ) -> tuple[EmailSendAuthorization, ...]: ...
+
+    async def get_send_authorization_by_id(
+        self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> EmailSendAuthorization | None: ...
+
+    async def get_send_receipt(
+        self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
+    ) -> EmailSendReceipt | None: ...
+
+    async def save_send_receipt(self, receipt: EmailSendReceipt) -> EmailSendReceipt: ...

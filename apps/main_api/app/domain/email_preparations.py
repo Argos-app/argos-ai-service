@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from packages.contracts import PreparedReport, RecipientSelector
+from packages.contracts import PreparedReport, RecipientSelector, SendReportResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +79,17 @@ class EmailSendAuthorization:
             raise ValueError("pedido explícito não pode carregar vínculo de confirmação")
         if self.expires_at <= self.authorized_at:
             raise ValueError("autorização deve expirar após ser criada")
+
+
+@dataclass(frozen=True, slots=True)
+class EmailSendReceipt:
+    """Recibo validado do MCP, isolado do contexto conversacional do agente."""
+
+    authorization_id: UUID
+    principal_user_id: UUID
+    session_id: UUID
+    result: SendReportResult
+    recorded_at: datetime
 
 
 class EmailPreparationNotFoundError(LookupError):

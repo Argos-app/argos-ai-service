@@ -57,11 +57,6 @@ _ANALYST_TOOLS = {
         "Informe os filtros e o horizonte solicitados no payload."
     ),
 }
-_EMAIL_TOOLS = {
-    "get_report_status": (
-        "Consulta o estado de uma operação de e-mail pertencente ao usuário autenticado."
-    ),
-}
 _CATTLE_OPERATIONS = frozenset(
     {
         "list_properties",
@@ -132,7 +127,6 @@ def _make_tool(
     issuer: McpDelegationTokenIssuer | None,
     agent: str | None = None,
     operation: str | None = None,
-    bind_requester: bool = False,
 ) -> StructuredTool:
     args_schema = create_model(
         f"{name.title().replace('_', '')}Input",
@@ -154,11 +148,6 @@ def _make_tool(
                 config=config,
                 issuer=issuer,
             )
-        if bind_requester:
-            user_id = _trusted_config(config).get("argos_user_id")
-            if not user_id:
-                raise ValueError("usuário autenticado é obrigatório para a tool MCP de e-mail")
-            request_payload["requested_by"] = user_id
         result = await client.call_tool(
             name,
             {"payload": request_payload},
@@ -253,17 +242,7 @@ def build_mcp_tool_bindings(
             )
         }
     if clients.email is not None:
-        email_tools = tuple(
-            _make_tool(
-                clients.email,
-                name=name,
-                description=description,
-                issuer=None,
-                bind_requester=True,
-            )
-            for name, description in _EMAIL_TOOLS.items()
-            if name in clients.email.allowed_tools
-        )
+        email_tools: tuple[StructuredTool, ...] = ()
         if "prepare_report" in clients.email.allowed_tools:
             if report_artifacts is not None and email_preparations is not None:
                 workflow = EmailWorkflow(
