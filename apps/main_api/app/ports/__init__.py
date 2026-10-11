@@ -1,6 +1,12 @@
 """Portas de entrada/saída do núcleo da API principal."""
 
 from app.ports.conversation_repository import ConversationRepository
+from app.ports.data_client import (
+    DataClient,
+    DataReportSourceUnavailable,
+    ReportLotCandidate,
+    ReportLotResolution,
+)
 from app.ports.execution_event_repository import (
     ExecutionEventRepository,
     ExecutionEventWriteError,
@@ -14,6 +20,8 @@ from app.ports.user_memory_repository import UserMemoryRepository
 
 __all__ = [
     "ConversationRepository",
+    "DataClient",
+    "DataReportSourceUnavailable",
     "ExecutionEventRepository",
     "ExecutionEventWriteError",
     "InteractionRepository",
@@ -23,4 +31,6 @@ __all__ = [
     "SessionWorkRepository",
     "UserMemoryExtractor",
     "UserMemoryRepository",
+    "ReportLotCandidate",
+    "ReportLotResolution",
 ]

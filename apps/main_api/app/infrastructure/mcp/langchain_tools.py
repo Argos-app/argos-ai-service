@@ -8,7 +8,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from app.agents.tools.farm_reports import build_farm_report_tool
 from app.infrastructure.mcp.client import McpClients, McpToolServerClient
+from app.infrastructure.mcp.data_client import McpDataClient
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.ports.agent import AgentId
 
@@ -209,6 +211,11 @@ def build_mcp_tool_bindings(
             for name, description in _FARM_TOOLS.items()
             if name in clients.data.allowed_tools
         )
+        if "list_lots" in clients.data.allowed_tools:
+            farm_tools = (
+                *farm_tools,
+                build_farm_report_tool(McpDataClient(clients.data, delegation_issuer)),
+            )
         if farm_tools:
             bindings[AgentId.FARM] = {"farm_data": farm_tools}
         doctor_tools = tuple(
