@@ -21,6 +21,7 @@ from app.agent_schemas.synthesis import OrchestratorResult
 from app.graph.workflow import (
     SAFE_ANSWER,
     answer_state,
+    build_agent_context,
     build_graph,
     executar_fluxo,
     executar_resposta,
@@ -112,6 +113,25 @@ def test_initial_state_sanitizes_recipient_but_keeps_private_selector():
     }
     assert state["send_intent_requested"] is True
     assert state["send_intent_source_interaction_id"] == "interaction-origin"
+
+
+def test_send_intent_is_only_added_to_secretary_tool_context():
+    state = {
+        "user_id": "user-demo",
+        "farm_id": "farm-demo",
+        "session_id": "session-demo",
+        "interaction_id": "interaction-origin",
+        "send_intent_requested": True,
+        "send_intent_source_interaction_id": "interaction-origin",
+    }
+    config = {"configurable": {"argos_user_id": "user-demo"}}
+
+    secretary_context = build_agent_context(state, config=config, recipient_selectors={})
+    farm_context = build_agent_context(state, config=config)
+
+    assert secretary_context["argos_send_intent_requested"] is True
+    assert secretary_context["argos_send_intent_source_interaction_id"] == "interaction-origin"
+    assert "argos_send_intent_requested" not in farm_context
 
 
 def test_clarification_guardrail_preserves_recipients_and_source_intent():
@@ -257,6 +277,7 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         "user_id": "user-demo",
         "farm_id": "farm-demo",
         "session_id": "session-demo",
+        "interaction_id": "interaction-origin",
         "argos_task_id": "t1",
     }
     assert judge.calls[0][0].sources == (source,)

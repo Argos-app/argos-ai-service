@@ -7,8 +7,10 @@ from hashlib import sha256
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from app.application.email_workflow import EmailWorkflow
 from app.domain.report_artifacts import ReportArtifact
+from app.ports.email_preparation_repository import EmailSendAuthorizationConflictError
 
 from packages.contracts import (
     LotReportData,
@@ -39,6 +41,7 @@ class _Preparations:
     def __init__(self):
         self.records = {}
         self.pending = []
+        self.authorizations = {}
 
     async def find_matching(self, **key):
         identity = (
@@ -72,6 +75,37 @@ class _Preparations:
                 and (scope.get("question_id") is None or item.question_id == scope["question_id"])
             ),
             None,
+        )
+
+    async def reserve_send_authorization(self, authorization):
+        key = (
+            authorization.principal_user_id,
+            authorization.session_id,
+            authorization.source_interaction_id,
+        )
+        existing = self.authorizations.get(key)
+        if existing is not None:
+            fields = (
+                "preparation_reference",
+                "report_id",
+                "request_fingerprint",
+                "prepared_fingerprint",
+                "recipients_fingerprint",
+                "origin",
+            )
+            if any(getattr(existing, field) != getattr(authorization, field) for field in fields):
+                raise EmailSendAuthorizationConflictError("authorization conflict")
+            return existing
+        self.authorizations[key] = authorization
+        return authorization
+
+    async def get_send_authorization(self, **scope):
+        return self.authorizations.get(
+            (
+                scope["principal_user_id"],
+                scope["session_id"],
+                scope["source_interaction_id"],
+            )
         )
 
 
@@ -193,7 +227,78 @@ def test_prepare_report_uses_protected_context_persists_full_response_and_reuses
     assert "ana@example.com" not in json.dumps(result)
     assert "Sensitive generated report body" not in json.dumps(result)
     assert next(iter(preparations.records.values())).prepared_report == prepared
+    assert preparations.authorizations == {}
     assert artifacts.scope[1]["task_id"] == artifact.task_id
+
+
+def test_explicit_send_reserves_one_authorization_and_stable_idempotency_key():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório do lote L-1",
+        body="Resumo do lote.",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    email_client = _EmailClient(prepared)
+    preparations = _Preparations()
+    workflow = EmailWorkflow(
+        email_client=email_client,
+        report_artifacts=_Artifacts(artifact),
+        preparations=preparations,
+    )
+    source_interaction_id = uuid4()
+    context = {
+        "argos_user_id": str(artifact.principal_user_id),
+        "session_id": str(artifact.session_id),
+        "interaction_id": str(uuid4()),
+        "argos_authorized_property_ids": (str(property_id),),
+        "argos_report_artifact_scopes": {
+            str(artifact.reference): {
+                "interaction_id": str(artifact.interaction_id),
+                "task_id": artifact.task_id,
+            }
+        },
+        "recipient_selectors": {"[DESTINATARIO_1]": {"kind": "name", "value": "Ana"}},
+        "argos_send_intent_requested": True,
+        "argos_send_intent_source_interaction_id": str(source_interaction_id),
+    }
+
+    async def prepare_twice():
+        for _ in range(2):
+            await workflow.prepare(
+                report_artifact_ref=artifact.reference,
+                report_title="Relatório do lote L-1",
+                configurable=context,
+            )
+
+    asyncio.run(prepare_twice())
+
+    assert len(preparations.authorizations) == 1
+    authorization = next(iter(preparations.authorizations.values()))
+    assert authorization.source_interaction_id == source_interaction_id
+    assert authorization.report_id == prepared.report_id
+    assert authorization.origin == "explicit_request"
+    assert authorization.idempotency_key
+    original_key = authorization.idempotency_key
+
+    email_client.prepared = prepared.model_copy(
+        update={"report_id": uuid4(), "body": "Conteúdo alterado."}
+    )
+
+    async def prepare_changed_report():
+        await workflow.prepare(
+            report_artifact_ref=artifact.reference,
+            report_title="Relatório atualizado",
+            configurable=context,
+        )
+
+    with pytest.raises(ValueError, match="já está vinculado a outra preparação"):
+        asyncio.run(prepare_changed_report())
+    assert next(iter(preparations.authorizations.values())).idempotency_key == original_key
 
 
 def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_protected():
@@ -238,6 +343,8 @@ def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_pr
             }
         },
         "recipient_selectors": {"[DESTINATARIO_1]": {"kind": "name", "value": "Alex"}},
+        "argos_send_intent_requested": True,
+        "argos_send_intent_source_interaction_id": str(uuid4()),
     }
 
     async def prepare():
@@ -259,3 +366,4 @@ def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_pr
     assert "alex2@example.com" not in result_text
     assert pending.options[0].selector.value == "alex1@example.com"
     assert "a***@example.com" in pending.options[0].label
+    assert preparations.authorizations == {}
