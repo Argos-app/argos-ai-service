@@ -2,10 +2,6 @@
 
 from typing import Literal
 
-from app.session_config import (
-    SESSION_CONTEXT_MAX_MESSAGES,
-    SESSION_CONTEXT_MESSAGE_MAX_CHARS,
-)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -17,16 +13,14 @@ class ContextMessage(_AgentInput):
     """Mensagem pública anterior, incluída apenas para continuidade da conversa."""
 
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=SESSION_CONTEXT_MESSAGE_MAX_CHARS)
+    content: str = Field(min_length=1)
 
 
 class SessionContext(_AgentInput):
     """Contexto persistido da sessão e preferências permitidas do usuário."""
 
     session_summary: str | None = Field(default=None, max_length=12_000)
-    recent_messages: tuple[ContextMessage, ...] = Field(
-        default=(), max_length=SESSION_CONTEXT_MAX_MESSAGES
-    )
+    recent_messages: tuple[ContextMessage, ...] = ()
     user_tone: str | None = Field(default=None, max_length=256)
     user_general_goal: str | None = Field(default=None, max_length=1_000)
 

@@ -24,3 +24,14 @@ class ConversationRepository(Protocol):
         de devolvê-los para apresentação cronológica. Sem fronteira, seleciona
         as mensagens mais recentes; user_id sempre restringe titularidade.
         """
+
+    async def list_after_sequence(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        *,
+        after_sequence: int,
+        through_sequence: int,
+        limit: int,
+    ) -> tuple[ConversationMessage, ...]:
+        """Lê mensagens posteriores em ordem crescente dentro de uma faixa."""

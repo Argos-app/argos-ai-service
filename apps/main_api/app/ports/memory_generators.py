@@ -5,15 +5,18 @@ from typing import Protocol
 from uuid import UUID
 
 from app.domain.memory import SessionSummary, UserMemory
-from app.domain.sessions import ConversationMessage
+from app.domain.sessions import ConversationMessage, ExecutionEvent
 
 
 class SessionSummaryGenerator(Protocol):
     async def generate(
         self,
         *,
+        session_id: UUID,
         previous: SessionSummary | None,
         messages: Sequence[ConversationMessage],
+        events: Sequence[ExecutionEvent],
+        through_user_message_number: int,
         max_tokens: int,
     ) -> SessionSummary:
         """Gera resumo incremental estruturado dentro do orçamento informado."""

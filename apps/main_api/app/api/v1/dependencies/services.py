@@ -46,6 +46,7 @@ def _graph_provider(request: Request):
             ModelPolicyId.JUDGE: llm_rapido,
             ModelPolicyId.QUESTION_FORMATTER: llm_rapido,
         }
+    app_state.models = models
     try:
         persistence = getattr(app_state, "persistence", None)
         execution_events = persistence.execution_events if persistence is not None else None
@@ -62,6 +63,39 @@ def _graph_provider(request: Request):
     return graph
 
 
+def _summary_generator_provider(request: Request):
+    app_state = request.app.state
+    existing = getattr(app_state, "session_summary_generator", None)
+    if existing is not None:
+        return existing
+    from app.agents.registry import ModelPolicyId
+
+    models = getattr(app_state, "models", None)
+    model = models.get(ModelPolicyId.ROUTER) if models is not None else None
+    if model is None:
+        from app.llms import llm_rapido
+
+        model = llm_rapido
+    if model is None:
+        return None
+    from app.infrastructure.agents.session_summary_generator import (
+        LangChainSessionSummaryGenerator,
+    )
+    from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
+
+    settings = getattr(app_state, "settings", None)
+    generator = LangChainSessionSummaryGenerator(
+        model,
+        input_token_limit=(
+            settings.session_summary_input_max_tokens
+            if settings is not None
+            else SESSION_SUMMARY_INPUT_MAX_TOKENS
+        ),
+    )
+    app_state.session_summary_generator = generator
+    return generator
+
+
 def get_session_service(request: Request) -> SessionService:
     persistence = getattr(request.app.state, "persistence", None)
     if persistence is None:
@@ -73,6 +107,8 @@ def get_session_service(request: Request) -> SessionService:
         session_work=persistence.session_work,
         summaries=persistence.session_summaries,
         user_memory=persistence.user_memory,
+        execution_events=persistence.execution_events,
+        summary_generator_provider=lambda: _summary_generator_provider(request),
         graph_provider=lambda: _graph_provider(request),
     )
 

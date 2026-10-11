@@ -18,6 +18,7 @@ def create_app(
     agent_graph: Any = None,
     models: dict[Any, Any] | None = None,
     checkpointer: Any = None,
+    session_summary_generator: Any = None,
 ) -> FastAPI:
     configured = settings or Settings.from_env()
 
@@ -43,6 +44,8 @@ def create_app(
     app.state.agent_graph = agent_graph
     app.state.models = models
     app.state.checkpointer = checkpointer
+    app.state.session_summary_generator = session_summary_generator
+    app.state.settings = configured
 
     @app.middleware("http")
     async def limit_body(request: Request, call_next):

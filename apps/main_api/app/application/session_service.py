@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -28,6 +29,7 @@ from app.api.v1.models.interactions import (
 )
 from app.api.v1.models.sessions import Session
 from app.application.context_builder import build_session_context
+from app.application.session_summary_service import SessionSummaryService
 from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
@@ -39,7 +41,9 @@ from app.domain.sessions import (
     SessionRecord,
 )
 from app.ports.conversation_repository import ConversationRepository
+from app.ports.execution_event_repository import ExecutionEventRepository
 from app.ports.interaction_repository import InteractionRepository
+from app.ports.memory_generators import SessionSummaryGenerator
 from app.ports.session_repository import SessionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.session_work_repository import SessionWorkRepository
@@ -52,7 +56,9 @@ from app.session_config import (
 )
 
 GraphProvider = Callable[[], Any]
+SummaryGeneratorProvider = Callable[[], SessionSummaryGenerator | None]
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
+logger = logging.getLogger(__name__)
 
 
 class MongoSessionService:
@@ -68,6 +74,8 @@ class MongoSessionService:
         graph_provider: GraphProvider,
         summaries: SessionSummaryRepository | None = None,
         user_memory: UserMemoryRepository | None = None,
+        execution_events: ExecutionEventRepository | None = None,
+        summary_generator_provider: SummaryGeneratorProvider | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
         renew_seconds: int = SESSION_LEASE_RENEW_SECONDS,
     ) -> None:
@@ -78,6 +86,19 @@ class MongoSessionService:
         self._graph_provider = graph_provider
         self._summaries = summaries
         self._user_memory = user_memory
+        self._summary_service = (
+            SessionSummaryService(
+                summaries=summaries,
+                conversations=conversations,
+                interactions=interactions,
+                execution_events=execution_events,
+                generator_provider=summary_generator_provider,
+            )
+            if summaries is not None
+            and execution_events is not None
+            and summary_generator_provider is not None
+            else None
+        )
         self._lease_seconds = lease_seconds
         self._renew_seconds = renew_seconds
 
@@ -243,6 +264,12 @@ class MongoSessionService:
 
             failed = False
             try:
+                await self._publish_due_summary(
+                    session_id=session_id,
+                    user_id=principal.user_id,
+                    user_message_count=(accepted_message.user_message_number or 1) - 1,
+                    through_sequence=accepted_message.sequence - 1,
+                )
                 session_context = await build_session_context(
                     session_id=session_id,
                     user_id=principal.user_id,
@@ -321,12 +348,41 @@ class MongoSessionService:
                     status_code=status.HTTP_409_CONFLICT,
                     detail="A posse da sessão mudou antes da finalização",
                 )
+            await self._publish_due_summary(
+                session_id=session_id,
+                user_id=principal.user_id,
+                user_message_count=accepted_message.user_message_number or 0,
+                through_sequence=committed_message.sequence,
+            )
             return response
         finally:
             stop_renewal.set()
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
             await self._sessions.release_lease(session_id, lease)
+
+    async def _publish_due_summary(
+        self,
+        *,
+        session_id: UUID,
+        user_id: UUID,
+        user_message_count: int,
+        through_sequence: int,
+    ) -> None:
+        if self._summary_service is None:
+            return
+        try:
+            await self._summary_service.publish_due(
+                session_id=session_id,
+                user_id=user_id,
+                user_message_count=user_message_count,
+                through_sequence=through_sequence,
+            )
+        except Exception:
+            logger.exception(
+                "falha ao resumir sessão %s; resumo anterior e cobertura foram mantidos",
+                session_id,
+            )
 
     async def _find_existing(
         self,

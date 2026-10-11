@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -11,6 +12,10 @@ from app.domain.memory import SessionSummary, SummaryFact, UserMemory
 from app.domain.sessions import (
     ConversationMessage,
     ExecutionEvent,
+    ExecutionMessage,
+    ExecutionMessageRole,
+    ExecutionStatus,
+    ExecutionTarget,
     InteractionKind,
     InteractionRecord,
     InteractionStatus,
@@ -398,6 +403,30 @@ class MongoConversationRepository:
         cursor = self._collection.find(query).sort("sequence", -1).limit(limit)
         return tuple(_message_from_document(item) async for item in cursor)
 
+    async def list_after_sequence(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        *,
+        after_sequence: int,
+        through_sequence: int,
+        limit: int,
+    ) -> tuple[ConversationMessage, ...]:
+        if after_sequence < 0 or through_sequence < after_sequence or not 1 <= limit <= 100:
+            raise ValueError("intervalo ou limit inválido")
+        cursor = (
+            self._collection.find(
+                {
+                    "session_id": str(session_id),
+                    "user_id": str(user_id),
+                    "sequence": {"$gt": after_sequence, "$lte": through_sequence},
+                }
+            )
+            .sort("sequence", 1)
+            .limit(limit)
+        )
+        return tuple(_message_from_document(item) async for item in cursor)
+
 
 def _event_document(event: ExecutionEvent, user_id: UUID) -> dict[str, Any]:
     return {
@@ -425,6 +454,33 @@ def _event_document(event: ExecutionEvent, user_id: UUID) -> dict[str, Any]:
         "safe_error_code": event.safe_error_code,
         "completed_at": event.completed_at,
     }
+
+
+def _event_from_document(document: dict[str, Any]) -> ExecutionEvent:
+    return ExecutionEvent(
+        event_id=UUID(document["_id"]),
+        invocation_id=UUID(document["invocation_id"]),
+        session_id=UUID(document["session_id"]),
+        interaction_id=UUID(document["interaction_id"]),
+        target=ExecutionTarget(document["target"]),
+        target_name=document["target_name"],
+        status=ExecutionStatus(document["status"]),
+        created_at=document["created_at"],
+        attempt=document.get("attempt", 1),
+        sanitized_input=document.get("sanitized_input"),
+        sanitized_output=document.get("sanitized_output"),
+        messages=tuple(
+            ExecutionMessage(
+                role=ExecutionMessageRole(item["role"]),
+                sanitized_content=item["sanitized_content"],
+                tool_name=item.get("tool_name"),
+                tool_call_id=item.get("tool_call_id"),
+            )
+            for item in document.get("messages", [])
+        ),
+        safe_error_code=document.get("safe_error_code"),
+        completed_at=document.get("completed_at"),
+    )
 
 
 class MongoExecutionEventRepository:
@@ -455,6 +511,24 @@ class MongoExecutionEventRepository:
             existing = await self._collection.find_one({"_id": str(event.event_id)})
             if existing != document:
                 raise PersistenceConflictError("event_id já usado com outro evento") from exc
+
+    async def list_for_interactions(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        interaction_ids: Sequence[UUID],
+    ) -> tuple[ExecutionEvent, ...]:
+        if not interaction_ids:
+            return ()
+        cursor = self._collection.find(
+            {
+                "session_id": str(session_id),
+                "user_id": str(user_id),
+                "interaction_id": {"$in": [str(item) for item in interaction_ids]},
+                "status": {"$in": [ExecutionStatus.SUCCEEDED.value, ExecutionStatus.FAILED.value]},
+            }
+        ).sort([("created_at", 1), ("_id", 1)])
+        return tuple(_event_from_document(item) async for item in cursor)
 
 
 def _summary_document(summary: SessionSummary) -> dict[str, Any]:

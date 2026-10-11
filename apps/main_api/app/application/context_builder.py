@@ -11,10 +11,6 @@ from app.ports.conversation_repository import ConversationRepository
 from app.ports.interaction_repository import InteractionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.user_memory_repository import UserMemoryRepository
-from app.session_config import (
-    SESSION_CONTEXT_MAX_MESSAGES,
-    SESSION_CONTEXT_MESSAGE_MAX_CHARS,
-)
 
 
 async def build_session_context(
@@ -38,16 +34,27 @@ async def build_session_context(
         summaries.get_current(session_id) if summaries else _none(),
         user_memory.get(user_id) if user_memory else _none(),
     )
-    messages = await conversations.list_before_sequence(
-        session_id,
-        user_id,
-        before_sequence=before_sequence,
-        limit=100,
-    )
-    if summary is not None:
-        messages = tuple(
-            message for message in messages if message.sequence > summary.through_sequence
+    after_sequence = summary.through_sequence if summary else 0
+    through_sequence = before_sequence - 1
+    collected: list[ConversationMessage] = []
+    cursor = after_sequence
+    while cursor < through_sequence:
+        page = await conversations.list_after_sequence(
+            session_id,
+            user_id,
+            after_sequence=cursor,
+            through_sequence=through_sequence,
+            limit=100,
         )
+        if not page:
+            break
+        collected.extend(page)
+        if page[-1].sequence <= cursor:
+            raise ValueError("repositório não avançou a sequência de mensagens")
+        cursor = page[-1].sequence
+        if len(page) < 100:
+            break
+    messages = tuple(collected)
 
     interaction_ids = {message.interaction_id for message in messages}
     interaction_records = await asyncio.gather(
@@ -69,7 +76,7 @@ async def build_session_context(
             and message.sanitized_content.strip()
         ),
         key=lambda message: message.sequence,
-    )[-SESSION_CONTEXT_MAX_MESSAGES:]
+    )
 
     return SessionContext(
         session_summary=summary.summary_text if summary else None,
@@ -80,10 +87,7 @@ async def build_session_context(
 
 
 def _context_message(message: ConversationMessage) -> ContextMessage:
-    content = message.sanitized_content.strip()
-    if len(content) > SESSION_CONTEXT_MESSAGE_MAX_CHARS:
-        content = content[: SESSION_CONTEXT_MESSAGE_MAX_CHARS - 1].rstrip() + "…"
-    return ContextMessage(role=message.role.value, content=content)
+    return ContextMessage(role=message.role.value, content=message.sanitized_content.strip())
 
 
 async def _none() -> None:
