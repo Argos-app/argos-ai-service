@@ -74,6 +74,9 @@ def _graph_provider(request: Request):
                 report_artifacts=(
                     persistence.report_artifacts if persistence is not None else None
                 ),
+                email_preparations=(
+                    persistence.email_preparations if persistence is not None else None
+                ),
             ),
             checkpointer=app_state.checkpointer,
             report_artifacts=(persistence.report_artifacts if persistence is not None else None),

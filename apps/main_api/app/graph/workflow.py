@@ -61,6 +61,8 @@ def build_agent_context(
     state: AgentState,
     *,
     config: RunnableConfig | None = None,
+    report_artifact_scopes: dict[str, dict[str, str]] | None = None,
+    recipient_selectors: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     context = {
         "user_id": state["user_id"],
@@ -80,6 +82,10 @@ def build_agent_context(
         context["argos_authorized_property_ids"] = configurable["argos_authorized_property_ids"]
     if configurable.get("argos_request_id"):
         context["argos_request_id"] = configurable["argos_request_id"]
+    if report_artifact_scopes:
+        context["argos_report_artifact_scopes"] = report_artifact_scopes
+    if recipient_selectors is not None:
+        context["recipient_selectors"] = recipient_selectors
     return context
 
 
@@ -441,6 +447,7 @@ async def no_especialista(
     )
     errors = list(state.get("errors", []))
     report_refs_by_dependency: dict[str, tuple[str, ...]] = {}
+    report_artifact_scopes: dict[str, dict[str, str]] = {}
     farm_dependencies = tuple(
         outcome for outcome in dependencies if outcome.task.agent.value == AgentId.FARM.value
     )
@@ -480,6 +487,10 @@ async def no_especialista(
                         lot_id=artifact.envelope.report.requested_lot.lot_id,
                         authorized_property_ids=authorized_property_ids,
                     )
+                    report_artifact_scopes[reference] = {
+                        "interaction_id": str(origin_interaction_id),
+                        "task_id": dependency.task.task_id,
+                    }
                 report_refs_by_dependency[dependency.task.task_id] = refs
         except ReportArtifactExpiredError, ReportSourceExpiredError:
             if state.get("report_source_renewal_count", 0) < 1:
@@ -552,9 +563,15 @@ async def no_especialista(
         )
         called.append(agent_id.value)
         try:
-            response = await factory.create(agent_id).run(
-                agent_input, context=build_agent_context(state, config=config)
+            context = build_agent_context(
+                state,
+                config=config,
+                report_artifact_scopes=report_artifact_scopes,
+                recipient_selectors=(
+                    state.get("recipient_selectors", {}) if agent_id == AgentId.SECRETARY else None
+                ),
             )
+            response = await factory.create(agent_id).run(agent_input, context=context)
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")

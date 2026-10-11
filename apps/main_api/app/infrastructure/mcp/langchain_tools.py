@@ -8,11 +8,14 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from app.agents.tools.email import build_email_prepare_tool
 from app.agents.tools.farm_reports import build_farm_report_tool
+from app.application.email_workflow import EmailWorkflow
 from app.infrastructure.mcp.client import McpClients, McpToolServerClient
 from app.infrastructure.mcp.data_client import McpDataClient
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.ports.agent import AgentId
+from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
 
 
@@ -55,11 +58,6 @@ _ANALYST_TOOLS = {
     ),
 }
 _EMAIL_TOOLS = {
-    "prepare_report": (
-        "Prepara um relatório a partir de um envelope LotReportEnvelope assinado "
-        "pelo MCP de dados. "
-        "Não envia e-mail. O usuário solicitante é definido pelo contexto autenticado."
-    ),
     "get_report_status": (
         "Consulta o estado de uma operação de e-mail pertencente ao usuário autenticado."
     ),
@@ -191,6 +189,7 @@ def build_mcp_tool_bindings(
     clients: McpClients,
     delegation_issuer: McpDelegationTokenIssuer | None,
     report_artifacts: ReportArtifactRepository | None = None,
+    email_preparations: EmailPreparationRepository | None = None,
 ) -> dict[AgentId, dict[str, tuple[StructuredTool, ...]]]:
     """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação."""
     if (clients.data is not None or clients.prediction is not None) and delegation_issuer is None:
@@ -265,6 +264,16 @@ def build_mcp_tool_bindings(
             for name, description in _EMAIL_TOOLS.items()
             if name in clients.email.allowed_tools
         )
+        if "prepare_report" in clients.email.allowed_tools:
+            if report_artifacts is not None and email_preparations is not None:
+                workflow = EmailWorkflow(
+                    email_client=clients.email,
+                    report_artifacts=report_artifacts,
+                    preparations=email_preparations,
+                )
+            else:
+                workflow = None
+            email_tools = (*email_tools, build_email_prepare_tool(workflow))
         if email_tools:
             bindings[AgentId.SECRETARY] = {"report_delivery": email_tools}
     if mcp_configured:

@@ -120,6 +120,12 @@ use-os sem expor nem reconstruir o nome ou endereço original.
 Quando uma dependência trouxer report_artifact_refs, eles são referências opacas
 criadas pelo executor; nunca invente, altere nem substitua essas referências.
 Não inclua referências internas na resposta ao usuário ou em sources.
+Para preparar um relatório, use prepare_report com uma referência recebida da
+dependência Fazenda e um título de uma linha com até 200 caracteres. Não envie
+envelope, destinatários, requested_by, assunto ou corpo na chamada; o runtime
+recupera os dados protegidos e o MCP monta assunto e corpo. A ferramenta prepara,
+mas não envia. Se retornar needs_recipients, peça os dados faltantes e não afirme
+que o relatório pode ser enviado.
 
 Exemplo:
 Pergunta: "Prepare um relatório das aplicações para eu conferir."

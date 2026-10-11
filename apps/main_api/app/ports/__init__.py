@@ -7,6 +7,7 @@ from app.ports.data_client import (
     ReportLotCandidate,
     ReportLotResolution,
 )
+from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import (
     ExecutionEventRepository,
     ExecutionEventWriteError,
@@ -25,6 +26,7 @@ __all__ = [
     "DataReportSourceUnavailable",
     "ExecutionEventRepository",
     "ExecutionEventWriteError",
+    "EmailPreparationRepository",
     "InteractionRepository",
     "SessionRepository",
     "SessionSummaryGenerator",

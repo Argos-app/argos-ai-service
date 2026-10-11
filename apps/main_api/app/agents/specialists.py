@@ -19,6 +19,7 @@ from app.infrastructure.mcp.client import McpClients
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.infrastructure.mcp.langchain_tools import build_mcp_tool_bindings
 from app.ports.agent import AgentId
+from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.prompts.judge import JUDGE_SYSTEM_PROMPT
@@ -91,6 +92,7 @@ def build_agent_factory(
     mcp_clients: McpClients | None = None,
     delegation_issuer: McpDelegationTokenIssuer | None = None,
     report_artifacts: ReportArtifactRepository | None = None,
+    email_preparations: EmailPreparationRepository | None = None,
 ) -> LangChainAgentFactory:
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
     if mcp_clients is not None:
@@ -99,6 +101,7 @@ def build_agent_factory(
                 mcp_clients,
                 delegation_issuer,
                 report_artifacts=report_artifacts,
+                email_preparations=email_preparations,
             )
         )
     for agent_id, slots in (tool_bindings or {}).items():

@@ -24,6 +24,7 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
+from app.infrastructure.persistence.email_preparations import MongoEmailPreparationRepository
 from app.infrastructure.persistence.errors import PersistenceConflictError
 from app.infrastructure.persistence.report_artifacts import MongoReportArtifactRepository
 
@@ -821,6 +822,7 @@ class MongoPersistence:
         self.session_summaries = MongoSessionSummaryRepository(database["ai_session_summaries"])
         self.user_memory = MongoUserMemoryRepository(database["ai_user_memory"])
         self.report_artifacts = MongoReportArtifactRepository(database["ai_report_artifacts"])
+        self.email_preparations = MongoEmailPreparationRepository(database["ai_email_preparations"])
         self.session_work = MongoSessionWorkRepository(
             database,
             sessions,
@@ -837,5 +839,6 @@ class MongoPersistence:
             self.session_summaries,
             self.user_memory,
             self.report_artifacts,
+            self.email_preparations,
         ):
             await repository.ensure_indexes()
