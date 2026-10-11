@@ -8,6 +8,7 @@ class AgentState(MessagesState):
     user_id: str
     farm_id: str
     session_id: str
+    interaction_id: str | None
     input_kind: str
     answer_question_id: str | None
 

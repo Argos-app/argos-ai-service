@@ -28,6 +28,7 @@ from app.agent_schemas.synthesis import (
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
+from app.ports.execution_event_repository import ExecutionEventWriteError
 from app.privacy import minimize_pii
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
@@ -46,11 +47,14 @@ SECRET_REQUEST_PATTERN = re.compile(
 
 
 def build_agent_context(state: AgentState) -> dict[str, str]:
-    return {
+    context = {
         "user_id": state["user_id"],
         "farm_id": state["farm_id"],
         "session_id": state["session_id"],
     }
+    if state.get("interaction_id"):
+        context["interaction_id"] = state["interaction_id"]
+    return context
 
 
 def reset_turn_state() -> dict:
@@ -87,23 +91,32 @@ def reject_input(state: AgentState, answer: str, error: str) -> dict:
     return {**reset_turn_state(), "final_answer": answer, "errors": [error]}
 
 
-def initial_state(message: str, *, user_id: str, farm_id: str, session_id: str) -> dict:
+def initial_state(
+    message: str,
+    *,
+    user_id: str,
+    farm_id: str,
+    session_id: str,
+    interaction_id: str | None = None,
+) -> dict:
     return {
         "messages": [HumanMessage(content=minimize_pii(message))],
         "user_id": user_id,
         "farm_id": farm_id,
         "session_id": session_id,
+        "interaction_id": interaction_id,
         "input_kind": "message",
         "answer_question_id": None,
         "pii_map": {},
     }
 
 
-def answer_state(answer: str, *, question_id: str) -> dict:
+def answer_state(answer: str, *, question_id: str, interaction_id: str | None = None) -> dict:
     return {
         "messages": [HumanMessage(content=minimize_pii(answer))],
         "input_kind": "answer",
         "answer_question_id": question_id,
+        "interaction_id": interaction_id,
     }
 
 
@@ -240,6 +253,8 @@ async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
         )
         plan = RoutePlan.model_validate(response)
         ordered = order_tasks(plan)
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         return {
             "called_agents": called,
@@ -325,6 +340,8 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")
+        except ExecutionEventWriteError:
+            raise
         except Exception:
             result = SpecialistResult(
                 agent=task.agent,
@@ -381,6 +398,8 @@ async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
         trusted_sources = state.get("sources", [])
         if any(source not in trusted_sources for source in draft.sources):
             raise ValueError("unknown_source")
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         return {
             "called_agents": called,
@@ -410,6 +429,8 @@ async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
             context=build_agent_context(state),
         )
         review = JudgeResult.model_validate(response)
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         return {
             "called_agents": called,
@@ -438,6 +459,8 @@ async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
         question = response.prompt.strip()
         if not question:
             raise ValueError("empty_question")
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         question = request.question_goal
         return {
@@ -607,9 +630,16 @@ async def executar_fluxo(
     user_id: str,
     farm_id: str,
     session_id: str,
+    interaction_id: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    state = initial_state(message, user_id=user_id, farm_id=farm_id, session_id=session_id)
+    state = initial_state(
+        message,
+        user_id=user_id,
+        farm_id=farm_id,
+        session_id=session_id,
+        interaction_id=interaction_id,
+    )
     return await graph.ainvoke(state, config=build_session_config(session_id, config))
 
 
@@ -619,9 +649,10 @@ async def executar_resposta(
     *,
     question_id: str,
     session_id: str,
+    interaction_id: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    state = answer_state(answer, question_id=question_id)
+    state = answer_state(answer, question_id=question_id, interaction_id=interaction_id)
     return await graph.ainvoke(state, config=build_session_config(session_id, config))
 
 

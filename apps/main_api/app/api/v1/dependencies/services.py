@@ -47,7 +47,12 @@ def _graph_provider(request: Request):
             ModelPolicyId.QUESTION_FORMATTER: llm_rapido,
         }
     try:
-        graph = build_graph(build_agent_factory(models), checkpointer=app_state.checkpointer)
+        persistence = getattr(app_state, "persistence", None)
+        execution_events = persistence.execution_events if persistence is not None else None
+        graph = build_graph(
+            build_agent_factory(models, execution_events=execution_events),
+            checkpointer=app_state.checkpointer,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=503,

@@ -248,6 +248,7 @@ class MongoSessionService:
                         user_id=str(principal.user_id),
                         farm_id=str(authorized_farms[0]),
                         session_id=str(session_id),
+                        interaction_id=str(interaction_id),
                     )
                 else:
                     state = await executar_resposta(
@@ -255,6 +256,7 @@ class MongoSessionService:
                         answer_text or sanitized_input,
                         question_id=str(body.question_id),
                         session_id=str(session_id),
+                        interaction_id=str(interaction_id),
                     )
             except Exception:
                 failed = True

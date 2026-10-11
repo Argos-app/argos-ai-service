@@ -437,6 +437,10 @@ class MongoExecutionEventRepository:
             [("session_id", 1), ("interaction_id", 1), ("created_at", 1)],
             name="ix_execution_session_interaction",
         )
+        await self._collection.create_index(
+            [("session_id", 1), ("interaction_id", 1), ("invocation_id", 1)],
+            name="ix_execution_invocation_correlation",
+        )
 
     async def append(self, event: ExecutionEvent) -> None:
         session = await self._sessions.find_one({"_id": str(event.session_id)})
