@@ -313,6 +313,15 @@ class MongoSessionService:
                         session_id=str(session_id),
                         interaction_id=str(interaction_id),
                         session_context=session_context,
+                        config={
+                            "configurable": {
+                                "argos_user_id": str(principal.user_id),
+                                "argos_authorized_property_ids": tuple(
+                                    str(farm_id) for farm_id in authorized_farms
+                                ),
+                                "argos_request_id": str(interaction_id),
+                            }
+                        },
                     )
                 else:
                     state = await executar_resposta(
@@ -323,6 +332,15 @@ class MongoSessionService:
                         interaction_id=str(interaction_id),
                         checkpoint_namespace=str(body.interaction_id),
                         session_context=session_context,
+                        config={
+                            "configurable": {
+                                "argos_user_id": str(principal.user_id),
+                                "argos_authorized_property_ids": tuple(
+                                    str(farm_id) for farm_id in authorized_farms
+                                ),
+                                "argos_request_id": str(interaction_id),
+                            }
+                        },
                     )
             except Exception:
                 failed = True

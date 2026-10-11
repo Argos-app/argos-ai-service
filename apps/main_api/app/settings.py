@@ -27,6 +27,10 @@ class Settings:
     mcp_email_token: str | None = field(default=None, repr=False)
     mcp_timeout_seconds: float = 10.0
     mcp_response_max_bytes: int = 1_000_000
+    mcp_delegation_issuer: str = "argos-main-service"
+    mcp_delegation_key_id: str | None = None
+    mcp_delegation_private_key: str | None = field(default=None, repr=False)
+    mcp_delegation_ttl_seconds: int = 240
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,6 +72,10 @@ class Settings:
             mcp_email_token=os.getenv("MAIN_API_MCP_EMAIL_TOKEN") or None,
             mcp_timeout_seconds=float(os.getenv("MAIN_API_MCP_TIMEOUT_SECONDS", "10")),
             mcp_response_max_bytes=int(os.getenv("MAIN_API_MCP_RESPONSE_MAX_BYTES", "1000000")),
+            mcp_delegation_issuer=os.getenv("MAIN_API_MCP_DELEGATION_ISSUER", "argos-main-service"),
+            mcp_delegation_key_id=os.getenv("MAIN_API_MCP_DELEGATION_KEY_ID") or None,
+            mcp_delegation_private_key=os.getenv("MAIN_API_MCP_DELEGATION_PRIVATE_KEY") or None,
+            mcp_delegation_ttl_seconds=int(os.getenv("MAIN_API_MCP_DELEGATION_TTL_SECONDS", "240")),
         )
 
     def __post_init__(self) -> None:
@@ -83,5 +91,12 @@ class Settings:
             or not self.auth_audience.strip()
             or not 1 <= self.auth_token_max_ttl_seconds <= 300
             or not 0 <= self.auth_clock_skew_seconds <= 60
+            or not self.mcp_delegation_issuer.strip()
+            or not 1 <= self.mcp_delegation_ttl_seconds <= 300
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if bool(self.mcp_delegation_key_id) != bool(self.mcp_delegation_private_key):
+            raise ValueError(
+                "MAIN_API_MCP_DELEGATION_KEY_ID e "
+                "MAIN_API_MCP_DELEGATION_PRIVATE_KEY devem ser configurados juntos"
+            )

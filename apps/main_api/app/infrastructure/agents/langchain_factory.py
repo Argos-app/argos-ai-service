@@ -81,7 +81,7 @@ class _LangChainAgent(Agent[Any, BaseModel]):
         self,
         input: Any,
         *,
-        context: Mapping[str, str] | None = None,
+        context: Mapping[str, Any] | None = None,
     ) -> BaseModel:
         validated_input = self._input_schema.model_validate(input)
         observer = _observer_for_context(self._execution_events, context)
@@ -131,7 +131,7 @@ class _LangChainAgent(Agent[Any, BaseModel]):
 
 def _observer_for_context(
     repository: ExecutionEventRepository | None,
-    context: Mapping[str, str] | None,
+    context: Mapping[str, Any] | None,
 ) -> ExecutionObserver | None:
     if repository is None or context is None:
         return None

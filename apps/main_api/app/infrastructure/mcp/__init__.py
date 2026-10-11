@@ -11,6 +11,11 @@ from app.infrastructure.mcp.client import (
     McpToolServerClient,
     create_mcp_clients,
 )
+from app.infrastructure.mcp.delegation import (
+    DelegationRequestError,
+    DelegationTokenConfigurationError,
+    McpDelegationTokenIssuer,
+)
 
 __all__ = [
     "MCP_TOOL_ALLOWLISTS",
@@ -21,5 +26,8 @@ __all__ = [
     "McpToolExecutionError",
     "McpToolNotAllowedError",
     "McpToolServerClient",
+    "DelegationRequestError",
+    "DelegationTokenConfigurationError",
+    "McpDelegationTokenIssuer",
     "create_mcp_clients",
 ]

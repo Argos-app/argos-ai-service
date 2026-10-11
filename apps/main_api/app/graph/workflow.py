@@ -47,7 +47,11 @@ SECRET_REQUEST_PATTERN = re.compile(
 )
 
 
-def build_agent_context(state: AgentState) -> dict[str, str]:
+def build_agent_context(
+    state: AgentState,
+    *,
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
     context = {
         "user_id": state["user_id"],
         "farm_id": state["farm_id"],
@@ -55,6 +59,13 @@ def build_agent_context(state: AgentState) -> dict[str, str]:
     }
     if state.get("interaction_id"):
         context["interaction_id"] = state["interaction_id"]
+    configurable = (config or {}).get("configurable") or {}
+    if configurable.get("argos_user_id"):
+        context["argos_user_id"] = configurable["argos_user_id"]
+    if configurable.get("argos_authorized_property_ids"):
+        context["argos_authorized_property_ids"] = configurable["argos_authorized_property_ids"]
+    if configurable.get("argos_request_id"):
+        context["argos_request_id"] = configurable["argos_request_id"]
     return context
 
 
@@ -271,7 +282,12 @@ def no_guardrail_entrada(state: AgentState) -> dict:
     }
 
 
-async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
+async def no_roteador(
+    state: AgentState,
+    *,
+    factory: AgentFactory,
+    config: RunnableConfig | None = None,
+) -> dict:
     called = [*state.get("called_agents", []), AgentId.ROUTER.value]
     try:
         response = await factory.create(AgentId.ROUTER).run(
@@ -279,7 +295,7 @@ async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
                 message=state["sanitized_message"],
                 session_context=_history_context(state),
             ),
-            context=build_agent_context(state),
+            context=build_agent_context(state, config=config),
         )
         plan = RoutePlan.model_validate(response)
         ordered = order_tasks(plan)
@@ -313,7 +329,13 @@ async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
     return update
 
 
-async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id: AgentId) -> dict:
+async def no_especialista(
+    state: AgentState,
+    *,
+    factory: AgentFactory,
+    agent_id: AgentId,
+    config: RunnableConfig | None = None,
+) -> dict:
     tasks = state["ordered_tasks"]
     index = state["current_task_index"]
     if index >= len(tasks) or tasks[index].agent.value != agent_id.value:
@@ -366,7 +388,7 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
         called.append(agent_id.value)
         try:
             response = await factory.create(agent_id).run(
-                agent_input, context=build_agent_context(state)
+                agent_input, context=build_agent_context(state, config=config)
             )
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
@@ -408,7 +430,12 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
     return update
 
 
-async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
+async def no_orquestrador(
+    state: AgentState,
+    *,
+    factory: AgentFactory,
+    config: RunnableConfig | None = None,
+) -> dict:
     called = [*state.get("called_agents", []), AgentId.ORCHESTRATOR.value]
     previous_review = state.get("judge_result")
     feedback = (
@@ -424,7 +451,7 @@ async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
                 revision_feedback=feedback,
                 session_context=_preference_context(state),
             ),
-            context=build_agent_context(state),
+            context=build_agent_context(state, config=config),
         )
         draft = OrchestratorResult.model_validate(response)
         trusted_sources = state.get("sources", [])
@@ -441,7 +468,12 @@ async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
     return {"called_agents": called, "draft_result": draft}
 
 
-async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
+async def no_juiz(
+    state: AgentState,
+    *,
+    factory: AgentFactory,
+    config: RunnableConfig | None = None,
+) -> dict:
     called = [*state.get("called_agents", []), AgentId.JUDGE.value]
     draft = state.get("draft_result")
     if draft is None:
@@ -458,7 +490,7 @@ async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
                 sources=draft.sources,
                 outcomes=state["task_outcomes"],
             ),
-            context=build_agent_context(state),
+            context=build_agent_context(state, config=config),
         )
         review = JudgeResult.model_validate(response)
     except ExecutionEventWriteError:
@@ -475,7 +507,12 @@ async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
     return {"called_agents": called, "judge_result": review, "retry_count": retry_count}
 
 
-async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
+async def no_formatador(
+    state: AgentState,
+    *,
+    factory: AgentFactory,
+    config: RunnableConfig | None = None,
+) -> dict:
     called = [*state.get("called_agents", []), AgentId.QUESTION_FORMATTER.value]
     request = state.get("clarification_request")
     if request is None:
@@ -486,7 +523,8 @@ async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
         }
     try:
         response = await factory.create(AgentId.QUESTION_FORMATTER).run(
-            QuestionFormatterInput(request=request), context=build_agent_context(state)
+            QuestionFormatterInput(request=request),
+            context=build_agent_context(state, config=config),
         )
         question = response.prompt.strip()
         if not question:
