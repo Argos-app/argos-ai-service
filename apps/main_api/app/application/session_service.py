@@ -42,6 +42,7 @@ from app.domain.sessions import (
     SessionRecord,
 )
 from app.ports.conversation_repository import ConversationRepository
+from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
 from app.ports.interaction_repository import InteractionRepository
 from app.ports.memory_generators import SessionSummaryGenerator, UserMemoryExtractor
@@ -55,6 +56,7 @@ from app.session_config import (
     SESSION_LEASE_RENEW_SECONDS,
     SESSION_LEASE_SECONDS,
 )
+from packages.contracts import RecipientSelector
 
 GraphProvider = Callable[[], Any]
 SummaryGeneratorProvider = Callable[[], SessionSummaryGenerator | None]
@@ -77,6 +79,7 @@ class MongoSessionService:
         summaries: SessionSummaryRepository | None = None,
         user_memory: UserMemoryRepository | None = None,
         execution_events: ExecutionEventRepository | None = None,
+        email_preparations: EmailPreparationRepository | None = None,
         summary_generator_provider: SummaryGeneratorProvider | None = None,
         user_memory_extractor_provider: MemoryExtractorProvider | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
@@ -87,6 +90,7 @@ class MongoSessionService:
         self._conversations = conversations
         self._session_work = session_work
         self._graph_provider = graph_provider
+        self._email_preparations = email_preparations
         self._summaries = summaries
         self._user_memory = user_memory
         self._user_memory_service = (
@@ -549,14 +553,60 @@ class MongoSessionService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A pergunta não está mais pendente",
             )
+        pending_recipient_resolution = None
+        if question.reason_code in {"RECIPIENT_AMBIGUOUS", "RECIPIENT_NOT_FOUND"}:
+            if self._email_preparations is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A resolução de destinatário não está disponível",
+                )
+            try:
+                pending_recipient_resolution = (
+                    await self._email_preparations.get_pending_recipient_resolution(
+                        principal_user_id=session.user_id,
+                        session_id=session.session_id,
+                        interaction_id=body.interaction_id,
+                        question_id=body.question_id,
+                    )
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="A resolução de destinatário está indisponível",
+                ) from exc
+            if (
+                pending_recipient_resolution is None
+                or pending_recipient_resolution.reason_code != question.reason_code
+                or pending_recipient_resolution.input_type != question.input_type
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A resolução de destinatário expirou ou não corresponde à pergunta",
+                )
+        recipient_update: dict[str, dict[str, str]] = new_recipient_selectors
         if isinstance(body.answer, AnswerText):
             if question.input_type != "free_text":
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Tipo de resposta incompatível",
                 )
-            protected_answer = protect_user_input(body.answer.text)
-            graph_answer = protected_answer.sanitized_text
+            if pending_recipient_resolution is not None:
+                value = body.answer.text.strip()
+                try:
+                    selector = RecipientSelector(
+                        kind="email" if "@" in value else "name",
+                        value=value,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Destinatário inválido",
+                    ) from exc
+                graph_answer = "[DESTINATARIO_1]"
+                recipient_update = {"[DESTINATARIO_1]": selector.model_dump(mode="json")}
+            else:
+                protected_answer = protect_user_input(body.answer.text)
+                graph_answer = protected_answer.sanitized_text
         elif isinstance(body.answer, AnswerChoice):
             if question.input_type != "single_choice":
                 raise HTTPException(
@@ -570,7 +620,24 @@ class MongoSessionService:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Opção inválida"
                 )
-            graph_answer = option.label
+            if pending_recipient_resolution is not None:
+                selected = next(
+                    (
+                        item
+                        for item in pending_recipient_resolution.options
+                        if item.option_id == body.answer.option_id
+                    ),
+                    None,
+                )
+                if selected is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Opção de destinatário inválida",
+                    )
+                graph_answer = "[DESTINATARIO_1]"
+                recipient_update = {"[DESTINATARIO_1]": selected.selector.model_dump(mode="json")}
+            else:
+                graph_answer = option.label
         elif isinstance(body.answer, AnswerConfirmation):
             if question.input_type != "confirmation":
                 raise HTTPException(
@@ -603,9 +670,21 @@ class MongoSessionService:
                 detail="A pergunta não corresponde ao estado atual da sessão",
             )
         values = getattr(snapshot, "values", {})
+        saved_recipient_selectors = dict(values.get("recipient_selectors") or {})
+        if pending_recipient_resolution is not None:
+            unresolved = pending_recipient_resolution.unresolved_selector
+            saved_recipient_selectors = {
+                reference: selector
+                for reference, selector in saved_recipient_selectors.items()
+                if not (
+                    selector.get("kind") == unresolved.kind
+                    and selector.get("value", "").strip().casefold()
+                    == unresolved.value.strip().casefold()
+                )
+            }
         recipient_selectors, graph_answer = merge_recipient_selectors(
-            dict(values.get("recipient_selectors") or {}),
-            new_recipient_selectors,
+            saved_recipient_selectors,
+            recipient_update,
             graph_answer,
         )
         send_intent_requested = bool(values.get("send_intent_requested"))
@@ -768,15 +847,30 @@ def _response_from_state(
     prompt = state.get("clarification_question")
     question_id = state.get("question_id")
     if request is not None and prompt and question_id:
-        response = QuestionResponse(
-            kind="question",
-            question_id=UUID(str(question_id)),
-            input_type=request.input_type,
-            prompt=minimize_pii(prompt),
-            reason_code=request.reason_code,
-            options=[QuestionOption.model_validate(item.model_dump()) for item in request.options],
-            expires_at=now + timedelta(seconds=CLARIFICATION_TTL_SECONDS),
-        )
+        expires_at = now + timedelta(seconds=CLARIFICATION_TTL_SECONDS)
+        pending_expiry = state.get("clarification_expires_at")
+        if pending_expiry:
+            try:
+                expires_at = min(expires_at, datetime.fromisoformat(pending_expiry))
+            except TypeError, ValueError:
+                expires_at = now
+        if expires_at <= now:
+            response = AnswerResponse(
+                kind="answer",
+                text="A pergunta expirou. Inicie uma nova solicitação para continuar.",
+            )
+        else:
+            response = QuestionResponse(
+                kind="question",
+                question_id=UUID(str(question_id)),
+                input_type=request.input_type,
+                prompt=minimize_pii(prompt),
+                reason_code=request.reason_code,
+                options=[
+                    QuestionOption.model_validate(item.model_dump()) for item in request.options
+                ],
+                expires_at=expires_at,
+            )
     else:
         response = AnswerResponse(
             kind="answer",

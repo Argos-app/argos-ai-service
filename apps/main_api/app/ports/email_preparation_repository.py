@@ -3,7 +3,7 @@
 from typing import Protocol
 from uuid import UUID
 
-from app.domain.email_preparations import EmailPreparation
+from app.domain.email_preparations import EmailPreparation, PendingRecipientResolution
 
 
 class EmailPreparationRepository(Protocol):
@@ -17,3 +17,16 @@ class EmailPreparationRepository(Protocol):
     ) -> EmailPreparation | None: ...
 
     async def save(self, preparation: EmailPreparation) -> None: ...
+
+    async def save_pending_recipient_resolution(
+        self, resolution: PendingRecipientResolution
+    ) -> None: ...
+
+    async def get_pending_recipient_resolution(
+        self,
+        *,
+        principal_user_id: UUID,
+        session_id: UUID,
+        interaction_id: UUID,
+        question_id: UUID | None = None,
+    ) -> PendingRecipientResolution | None: ...

@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from app.application.report_artifact_service import validate_report_source
-from app.domain.email_preparations import EmailPreparation
+from app.domain.email_preparations import (
+    EmailPreparation,
+    PendingRecipientOption,
+    PendingRecipientResolution,
+)
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
+from app.session_config import CLARIFICATION_TTL_SECONDS
 from packages.contracts import (
     PreparedReport,
     PreparedReportStatus,
     PrepareReportRequest,
+    RecipientResolutionStatus,
     RecipientSelector,
 )
 
@@ -55,6 +61,84 @@ def _minimal_result(prepared: PreparedReport, *, reused: bool) -> str:
             "recipient_count": len(prepared.recipients),
             "reused": reused,
             "message": message,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _masked_email(value: str) -> str:
+    local, separator, domain = value.partition("@")
+    return f"{local[:1] or '*'}***@{domain}" if separator else "contato mascarado"
+
+
+async def _recipient_question_result(
+    *,
+    prepared: PreparedReport,
+    principal_user_id: UUID,
+    session_id: UUID,
+    interaction_id: UUID,
+    report_artifact_ref: UUID,
+    repository: EmailPreparationRepository,
+    now: datetime,
+) -> str:
+    if prepared.status != PreparedReportStatus.NEEDS_RECIPIENTS:
+        return _minimal_result(prepared, reused=False)
+    if not prepared.unresolved:
+        raise ValueError("MCP informou destinatários pendentes sem detalhar a resolução")
+
+    existing = await repository.get_pending_recipient_resolution(
+        principal_user_id=principal_user_id,
+        session_id=session_id,
+        interaction_id=interaction_id,
+    )
+    if existing is not None and existing.report_artifact_ref == report_artifact_ref:
+        question_id = existing.question_id
+    else:
+        resolution = next(
+            (
+                item
+                for item in prepared.unresolved
+                if item.status == RecipientResolutionStatus.AMBIGUOUS
+            ),
+            prepared.unresolved[0],
+        )
+        options = tuple(
+            PendingRecipientOption(
+                option_id=str(uuid4()),
+                label=f"{match.name} ({_masked_email(match.email)})",
+                selector=RecipientSelector(kind="email", value=match.email),
+            )
+            for match in resolution.matches
+        )
+        ambiguous = resolution.status == RecipientResolutionStatus.AMBIGUOUS
+        question_id = uuid4()
+        pending = PendingRecipientResolution(
+            question_id=question_id,
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            interaction_id=interaction_id,
+            report_artifact_ref=report_artifact_ref,
+            input_type="single_choice" if ambiguous else "free_text",
+            reason_code="RECIPIENT_AMBIGUOUS" if ambiguous else "RECIPIENT_NOT_FOUND",
+            question_goal=(
+                "Escolha o destinatário correto para o relatório."
+                if ambiguous
+                else "Informe outro nome ou e-mail cadastrado para o destinatário."
+            ),
+            unresolved_selector=resolution.selector,
+            options=options,
+            expires_at=min(
+                prepared.expires_at,
+                now + timedelta(seconds=CLARIFICATION_TTL_SECONDS),
+            ),
+        )
+        await repository.save_pending_recipient_resolution(pending)
+    return json.dumps(
+        {
+            "status": "needs_recipients",
+            "report_id": str(prepared.report_id),
+            "recipient_question_id": str(question_id),
+            "message": "Destinatários precisam ser resolvidos; nenhum envio foi feito.",
         },
         ensure_ascii=False,
     )
@@ -151,6 +235,16 @@ class EmailWorkflow:
         )
         now = datetime.now(UTC)
         if existing is not None and now < existing.prepared_report.expires_at:
+            if existing.prepared_report.status == PreparedReportStatus.NEEDS_RECIPIENTS:
+                return await _recipient_question_result(
+                    prepared=existing.prepared_report,
+                    principal_user_id=principal_user_id,
+                    session_id=session_id,
+                    interaction_id=interaction_id,
+                    report_artifact_ref=report_artifact_ref,
+                    repository=self._preparations,
+                    now=now,
+                )
             return _minimal_result(existing.prepared_report, reused=True)
 
         response = await self._email_client.call_tool(
@@ -171,4 +265,12 @@ class EmailWorkflow:
             created_at=now,
         )
         await self._preparations.save(record)
-        return _minimal_result(prepared, reused=False)
+        return await _recipient_question_result(
+            prepared=prepared,
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            interaction_id=interaction_id,
+            report_artifact_ref=report_artifact_ref,
+            repository=self._preparations,
+            now=now,
+        )

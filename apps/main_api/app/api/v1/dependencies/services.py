@@ -80,6 +80,9 @@ def _graph_provider(request: Request):
             ),
             checkpointer=app_state.checkpointer,
             report_artifacts=(persistence.report_artifacts if persistence is not None else None),
+            email_preparations=(
+                persistence.email_preparations if persistence is not None else None
+            ),
         )
     except Exception as exc:
         raise HTTPException(
@@ -157,6 +160,7 @@ def get_session_service(request: Request) -> SessionService:
         summaries=persistence.session_summaries,
         user_memory=persistence.user_memory,
         execution_events=persistence.execution_events,
+        email_preparations=persistence.email_preparations,
         summary_generator_provider=lambda: _summary_generator_provider(request),
         user_memory_extractor_provider=lambda: _user_memory_extractor_provider(request),
         graph_provider=lambda: _graph_provider(request),

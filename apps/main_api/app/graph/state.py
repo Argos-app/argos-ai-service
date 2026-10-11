@@ -34,6 +34,7 @@ class AgentState(MessagesState):
     clarification_request: QuestionFormattingRequest | None
     clarification_question: str | None
     question_id: str | None
+    clarification_expires_at: str | None
     pending_task_id: str | None
     resume_target: str | None
 

@@ -7,6 +7,7 @@ from app.agent_schemas.inputs import (
     DependencyResult,
     QuestionFormatterInput,
     QuestionFormattingRequest,
+    QuestionOption,
     RouterInput,
     SessionContext,
     SpecialistInput,
@@ -31,6 +32,7 @@ from app.application.report_artifact_service import (
     ReportSourceValidationError,
     validate_report_source,
 )
+from app.domain.email_preparations import PendingRecipientResolution
 from app.domain.report_artifacts import (
     ReportArtifactExpiredError,
     ReportArtifactNotFoundError,
@@ -38,6 +40,7 @@ from app.domain.report_artifacts import (
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
+from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventWriteError
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
@@ -126,6 +129,7 @@ def reset_turn_state() -> dict:
         "clarification_request": None,
         "clarification_question": None,
         "question_id": None,
+        "clarification_expires_at": None,
         "pending_task_id": None,
         "resume_target": None,
         "draft_result": None,
@@ -423,6 +427,7 @@ async def no_especialista(
     factory: AgentFactory,
     agent_id: AgentId,
     report_artifacts: ReportArtifactRepository | None = None,
+    email_preparations: EmailPreparationRepository | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
     tasks = state["ordered_tasks"]
@@ -446,6 +451,7 @@ async def no_especialista(
         for outcome in dependencies
     )
     errors = list(state.get("errors", []))
+    trusted_recipient_question: PendingRecipientResolution | None = None
     report_refs_by_dependency: dict[str, tuple[str, ...]] = {}
     report_artifact_scopes: dict[str, dict[str, str]] = {}
     farm_dependencies = tuple(
@@ -585,6 +591,29 @@ async def no_especialista(
             )
             errors.append(f"{agent_id.value}_failed")
 
+    if agent_id == AgentId.SECRETARY and email_preparations is not None:
+        configurable = (config or {}).get("configurable") or {}
+        try:
+            trusted_recipient_question = await email_preparations.get_pending_recipient_resolution(
+                principal_user_id=UUID(str(configurable["argos_user_id"])),
+                session_id=UUID(state["session_id"]),
+                interaction_id=UUID(state["interaction_id"]),
+            )
+        except Exception:
+            result = SpecialistResult(
+                agent=task.agent,
+                status=SpecialistStatus.ERROR,
+                error="recipient_resolution_storage_unavailable",
+            )
+            errors.append("recipient_resolution_storage_unavailable")
+        if trusted_recipient_question is not None:
+            result = SpecialistResult(
+                agent=task.agent,
+                status=SpecialistStatus.NEEDS_CLARIFICATION,
+                answer="É necessário resolver um destinatário antes de preparar o relatório.",
+                missing_fields=("recipient",),
+            )
+
     outcome = TaskOutcome(task=task, result=result)
     if result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE):
         errors.append(f"{agent_id.value}_{result.status.value}")
@@ -645,6 +674,19 @@ async def no_especialista(
             input_type="free_text",
             question_goal=f"Esclareça: {goal}.",
         )
+        update["pending_task_id"] = task.task_id
+    if trusted_recipient_question is not None:
+        update["clarification_request"] = QuestionFormattingRequest(
+            reason_code=trusted_recipient_question.reason_code,
+            input_type=trusted_recipient_question.input_type,
+            question_goal=trusted_recipient_question.question_goal,
+            options=tuple(
+                QuestionOption(option_id=option.option_id, label=option.label)
+                for option in trusted_recipient_question.options
+            ),
+        )
+        update["question_id"] = str(trusted_recipient_question.question_id)
+        update["clarification_expires_at"] = trusted_recipient_question.expires_at.isoformat()
         update["pending_task_id"] = task.task_id
     return update
 
@@ -756,12 +798,12 @@ async def no_formatador(
             "called_agents": called,
             "errors": [*state.get("errors", []), "question_formatter_failed"],
             "clarification_question": question,
-            "question_id": str(uuid4()),
+            "question_id": state.get("question_id") or str(uuid4()),
         }
     return {
         "called_agents": called,
         "clarification_question": question,
-        "question_id": str(uuid4()),
+        "question_id": state.get("question_id") or str(uuid4()),
     }
 
 
@@ -845,6 +887,7 @@ def build_graph(
     *,
     checkpointer: Any = None,
     report_artifacts: ReportArtifactRepository | None = None,
+    email_preparations: EmailPreparationRepository | None = None,
 ):
     graph = StateGraph(AgentState)
     graph.add_node("guardrail_input", no_guardrail_entrada)
@@ -863,6 +906,7 @@ def build_graph(
                 factory=factory,
                 agent_id=agent_id,
                 report_artifacts=report_artifacts,
+                email_preparations=email_preparations,
             ),
         )
     graph.add_node("orchestrator", partial(no_orquestrador, factory=factory))

@@ -822,7 +822,10 @@ class MongoPersistence:
         self.session_summaries = MongoSessionSummaryRepository(database["ai_session_summaries"])
         self.user_memory = MongoUserMemoryRepository(database["ai_user_memory"])
         self.report_artifacts = MongoReportArtifactRepository(database["ai_report_artifacts"])
-        self.email_preparations = MongoEmailPreparationRepository(database["ai_email_preparations"])
+        self.email_preparations = MongoEmailPreparationRepository(
+            database["ai_email_preparations"],
+            database["ai_pending_recipient_resolutions"],
+        )
         self.session_work = MongoSessionWorkRepository(
             database,
             sessions,
