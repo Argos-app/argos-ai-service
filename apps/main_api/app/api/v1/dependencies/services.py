@@ -66,7 +66,12 @@ def _graph_provider(request: Request):
         persistence = getattr(app_state, "persistence", None)
         execution_events = persistence.execution_events if persistence is not None else None
         graph = build_graph(
-            build_agent_factory(models, execution_events=execution_events),
+            build_agent_factory(
+                models,
+                execution_events=execution_events,
+                mcp_clients=getattr(app_state, "mcp_clients", None),
+                delegation_issuer=getattr(app_state, "mcp_delegation_token_issuer", None),
+            ),
             checkpointer=app_state.checkpointer,
         )
     except Exception as exc:

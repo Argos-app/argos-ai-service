@@ -16,6 +16,11 @@ from app.infrastructure.mcp.delegation import (
     DelegationTokenConfigurationError,
     McpDelegationTokenIssuer,
 )
+from app.infrastructure.mcp.langchain_tools import (
+    McpToolBindingConfigurationError,
+    McpToolInput,
+    build_mcp_tool_bindings,
+)
 
 __all__ = [
     "MCP_TOOL_ALLOWLISTS",
@@ -29,5 +34,8 @@ __all__ = [
     "DelegationRequestError",
     "DelegationTokenConfigurationError",
     "McpDelegationTokenIssuer",
+    "McpToolBindingConfigurationError",
+    "McpToolInput",
+    "build_mcp_tool_bindings",
     "create_mcp_clients",
 ]

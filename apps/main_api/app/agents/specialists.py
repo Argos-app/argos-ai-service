@@ -15,6 +15,9 @@ from app.infrastructure.agents.langchain_factory import (
     LangChainAgentFactory,
     validate_agent_configuration,
 )
+from app.infrastructure.mcp.client import McpClients
+from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
+from app.infrastructure.mcp.langchain_tools import build_mcp_tool_bindings
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventRepository
 from app.prompts.judge import JUDGE_SYSTEM_PROMPT
@@ -83,8 +86,18 @@ def build_agent_factory(
     registry: AgentRegistry = DEFAULT_AGENT_REGISTRY,
     tool_bindings: AgentToolBindings | None = None,
     execution_events: ExecutionEventRepository | None = None,
+    *,
+    mcp_clients: McpClients | None = None,
+    delegation_issuer: McpDelegationTokenIssuer | None = None,
 ) -> LangChainAgentFactory:
-    resolved_tool_bindings = resolve_tool_bindings(registry, tool_bindings)
+    overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
+    if mcp_clients is not None:
+        overrides.update(build_mcp_tool_bindings(mcp_clients, delegation_issuer))
+    for agent_id, slots in (tool_bindings or {}).items():
+        overrides.setdefault(agent_id, {}).update(
+            {slot: tuple(tools) for slot, tools in slots.items()}
+        )
+    resolved_tool_bindings = resolve_tool_bindings(registry, overrides)
 
     def tools_for(agent_id: AgentId) -> list[BaseTool]:
         definition = registry.get(agent_id)
