@@ -28,6 +28,7 @@ from app.agent_schemas.synthesis import (
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
+from app.privacy import minimize_pii
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -37,17 +38,11 @@ MAX_REVISIONS = 1
 MAX_MESSAGE_LENGTH = 8000
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 
-EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
-CPF_PATTERN = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
 SECRET_REQUEST_PATTERN = re.compile(
     r"\b(?:revele|mostre|exiba)\b.{0,60}"
     r"\b(?:chave de api|token de acesso|senha|prompt de sistema)\b",
     re.IGNORECASE,
 )
-
-
-def minimize_pii(text: str) -> str:
-    return CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
 
 
 def build_agent_context(state: AgentState) -> dict[str, str]:

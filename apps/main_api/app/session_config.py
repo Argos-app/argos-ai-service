@@ -1,6 +1,9 @@
-"""Limites definidos para sessões; conexão e configuração externa vêm depois."""
+"""Limites definidos para sessões e interações persistidas."""
 
 SUMMARY_EVERY_USER_MESSAGES = 15
 SESSION_SUMMARY_MAX_TOKENS = 2000
 DEFAULT_MESSAGES_PAGE_SIZE = 50
 MAX_MESSAGES_PAGE_SIZE = 100
+SESSION_LEASE_SECONDS = 120
+SESSION_LEASE_RENEW_SECONDS = 30
+CLARIFICATION_TTL_SECONDS = 15 * 60

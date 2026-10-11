@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -11,7 +12,13 @@ from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
 from app.settings import Settings
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    agent_graph: Any = None,
+    models: dict[Any, Any] | None = None,
+    checkpointer: Any = None,
+) -> FastAPI:
     configured = settings or Settings.from_env()
 
     @asynccontextmanager
@@ -28,6 +35,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await runtime.close()
 
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
+    app.state.agent_graph = agent_graph
+    app.state.models = models
+    app.state.checkpointer = checkpointer
 
     @app.middleware("http")
     async def limit_body(request: Request, call_next):

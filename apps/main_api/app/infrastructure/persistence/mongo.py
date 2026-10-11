@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -124,15 +125,25 @@ class MongoSessionRepository:
                     {"processing_lease.expires_at": {"$lte": now}},
                 ],
             },
-            {
-                "$inc": {"lease_fencing_token": 1, "version": 1},
-                "$set": {
-                    "processing_lease.owner_id": str(owner_id),
-                    "processing_lease.acquired_at": now,
-                    "processing_lease.expires_at": expires_at,
-                    "updated_at": now,
-                },
-            },
+            [
+                {
+                    "$set": {
+                        "lease_fencing_token": {
+                            "$add": [{"$ifNull": ["$lease_fencing_token", 0]}, 1]
+                        },
+                        "processing_lease": {
+                            "owner_id": str(owner_id),
+                            "fencing_token": {
+                                "$add": [{"$ifNull": ["$lease_fencing_token", 0]}, 1]
+                            },
+                            "acquired_at": now,
+                            "expires_at": expires_at,
+                        },
+                        "updated_at": now,
+                        "version": {"$add": ["$version", 1]},
+                    }
+                }
+            ],
             return_document=ReturnDocument.AFTER,
         )
         if document is None:
@@ -273,6 +284,24 @@ class MongoInteractionRepository:
         )
         return _interaction_from_document(document) if document else None
 
+    async def find_by_deduplication_key(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        *,
+        kind: InteractionKind,
+        deduplication_key: str,
+    ) -> InteractionRecord | None:
+        document = await self._collection.find_one(
+            {
+                "session_id": str(session_id),
+                "user_id": str(user_id),
+                "kind": kind.value,
+                "deduplication_key": deduplication_key,
+            }
+        )
+        return _interaction_from_document(document) if document else None
+
     async def save_result(self, interaction: InteractionRecord, *, expected_version: int) -> bool:
         if interaction.version != expected_version + 1:
             raise ValueError("version da interação deve avançar exatamente uma unidade")
@@ -350,7 +379,7 @@ class MongoConversationRepository:
             existing = await self._collection.find_one(
                 {"session_id": str(message.session_id), "sequence": message.sequence}
             )
-            if existing is None or existing["_id"] != str(message.message_id):
+            if existing != document:
                 raise PersistenceConflictError("sequência de mensagem já ocupada") from exc
 
     async def list_before_sequence(
@@ -569,6 +598,127 @@ class MongoUserMemoryRepository:
         return result.matched_count == 1
 
 
+class MongoSessionWorkRepository:
+    """Unidade de trabalho transacional para aceitar/finalizar interações."""
+
+    def __init__(
+        self,
+        database: Any,
+        sessions: Any,
+        interactions: Any,
+        messages: Any,
+    ) -> None:
+        self._client = database.client
+        self._sessions = sessions
+        self._interactions = interactions
+        self._messages = messages
+
+    async def accept_user_interaction(
+        self,
+        interaction: InteractionRecord,
+        message: ConversationMessage,
+        lease: ProcessingLease,
+        *,
+        now: datetime,
+    ) -> ConversationMessage | None:
+        from pymongo import ReturnDocument
+
+        query = _current_lease_filter(interaction.session_id, interaction.user_id, lease, now)
+        async with await self._client.start_session() as mongo_session:
+            async with mongo_session.start_transaction():
+                session = await self._sessions.find_one_and_update(
+                    query,
+                    {
+                        "$inc": {
+                            "next_message_sequence": 1,
+                            "user_message_count": 1,
+                            "version": 1,
+                        },
+                        "$set": {"updated_at": now},
+                    },
+                    return_document=ReturnDocument.BEFORE,
+                    session=mongo_session,
+                )
+                if session is None:
+                    return None
+                assigned_message = replace(
+                    message,
+                    sequence=session["next_message_sequence"],
+                    user_message_number=session["user_message_count"] + 1,
+                )
+                await self._interactions.insert_one(
+                    _interaction_document(interaction), session=mongo_session
+                )
+                await self._messages.insert_one(
+                    _message_document(assigned_message, interaction.user_id),
+                    session=mongo_session,
+                )
+        return assigned_message
+
+    async def finalize_interaction(
+        self,
+        interaction: InteractionRecord,
+        message: ConversationMessage,
+        lease: ProcessingLease,
+        *,
+        expected_version: int,
+        now: datetime,
+    ) -> ConversationMessage | None:
+        from pymongo import ReturnDocument
+
+        query = _current_lease_filter(interaction.session_id, interaction.user_id, lease, now)
+        async with await self._client.start_session() as mongo_session:
+            async with mongo_session.start_transaction():
+                session = await self._sessions.find_one_and_update(
+                    query,
+                    {
+                        "$inc": {"next_message_sequence": 1, "version": 1},
+                        "$set": {"updated_at": now},
+                    },
+                    return_document=ReturnDocument.BEFORE,
+                    session=mongo_session,
+                )
+                if session is None:
+                    return None
+                result = await self._interactions.update_one(
+                    {
+                        "_id": str(interaction.interaction_id),
+                        "user_id": str(interaction.user_id),
+                        "version": expected_version,
+                    },
+                    {
+                        "$set": {
+                            "status": interaction.status.value,
+                            "result_json": interaction.result_json,
+                            "updated_at": interaction.updated_at,
+                            "version": interaction.version,
+                        }
+                    },
+                    session=mongo_session,
+                )
+                if result.matched_count != 1:
+                    raise PersistenceConflictError("interação mudou durante a finalização")
+                assigned_message = replace(message, sequence=session["next_message_sequence"])
+                await self._messages.insert_one(
+                    _message_document(assigned_message, interaction.user_id),
+                    session=mongo_session,
+                )
+        return assigned_message
+
+
+def _current_lease_filter(
+    session_id: UUID,
+    user_id: UUID,
+    lease: ProcessingLease,
+    now: datetime,
+) -> dict[str, Any]:
+    return {
+        **_lease_filter(session_id, lease),
+        "user_id": str(user_id),
+        "processing_lease.expires_at": {"$gt": now},
+    }
+
+
 class MongoPersistence:
     """Conjunto injetável dos repositórios e coleções Mongo do serviço."""
 
@@ -582,6 +732,12 @@ class MongoPersistence:
         )
         self.session_summaries = MongoSessionSummaryRepository(database["ai_session_summaries"])
         self.user_memory = MongoUserMemoryRepository(database["ai_user_memory"])
+        self.session_work = MongoSessionWorkRepository(
+            database,
+            sessions,
+            database["ai_interactions"],
+            database["ai_messages"],
+        )
 
     async def ensure_indexes(self) -> None:
         for repository in (
