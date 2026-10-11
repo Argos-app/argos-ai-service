@@ -30,7 +30,7 @@ from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.execution_event_repository import ExecutionEventWriteError
-from app.privacy import minimize_pii
+from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -88,6 +88,9 @@ def _preference_context(state: AgentState) -> SessionContext:
 def reset_turn_state() -> dict:
     return {
         "pii_map": {},
+        "recipient_selectors": {},
+        "send_intent_requested": False,
+        "send_intent_source_interaction_id": None,
         "sanitized_message": "",
         "route": [],
         "route_plan": None,
@@ -127,9 +130,17 @@ def initial_state(
     session_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
+    recipient_selectors: dict[str, dict[str, str]] | None = None,
+    send_intent_requested: bool = False,
 ) -> dict:
+    protected = protect_user_input(message)
+    protected_recipients, sanitized_message = merge_recipient_selectors(
+        dict(recipient_selectors or {}),
+        protected.recipient_selectors,
+        protected.sanitized_text,
+    )
     return {
-        "messages": [HumanMessage(content=minimize_pii(message))],
+        "messages": [HumanMessage(content=sanitized_message)],
         "user_id": user_id,
         "farm_id": farm_id,
         "session_id": session_id,
@@ -138,6 +149,11 @@ def initial_state(
         "answer_question_id": None,
         "session_context": session_context or SessionContext(),
         "pii_map": {},
+        "recipient_selectors": protected_recipients,
+        "send_intent_requested": send_intent_requested or protected.send_intent_requested,
+        "send_intent_source_interaction_id": (
+            interaction_id if send_intent_requested or protected.send_intent_requested else None
+        ),
     }
 
 
@@ -147,13 +163,25 @@ def answer_state(
     question_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
+    recipient_selectors: dict[str, dict[str, str]] | None = None,
+    send_intent_requested: bool = False,
+    send_intent_source_interaction_id: str | None = None,
 ) -> dict:
+    protected = protect_user_input(answer)
+    protected_recipients, sanitized_answer = merge_recipient_selectors(
+        dict(recipient_selectors or {}),
+        protected.recipient_selectors,
+        protected.sanitized_text,
+    )
     return {
-        "messages": [HumanMessage(content=minimize_pii(answer))],
+        "messages": [HumanMessage(content=sanitized_answer)],
         "input_kind": "answer",
         "answer_question_id": question_id,
         "interaction_id": interaction_id,
         "session_context": session_context or SessionContext(),
+        "recipient_selectors": protected_recipients,
+        "send_intent_requested": send_intent_requested,
+        "send_intent_source_interaction_id": send_intent_source_interaction_id,
     }
 
 
@@ -206,7 +234,22 @@ def no_guardrail_entrada(state: AgentState) -> dict:
             "blocked_secret_request",
         )
 
-    sanitized = minimize_pii(raw_text)
+    protected = protect_user_input(raw_text)
+    recipient_selectors, sanitized = merge_recipient_selectors(
+        dict(state.get("recipient_selectors") or {}),
+        protected.recipient_selectors,
+        protected.sanitized_text,
+    )
+    send_intent_requested = bool(state.get("send_intent_requested")) or (
+        state.get("input_kind") != "answer" and protected.send_intent_requested
+    )
+    send_intent_source_interaction_id = state.get("send_intent_source_interaction_id")
+    if (
+        send_intent_source_interaction_id is None
+        and state.get("input_kind") != "answer"
+        and send_intent_requested
+    ):
+        send_intent_source_interaction_id = state.get("interaction_id")
     replacement = [HumanMessage(content=sanitized)]
     if message.id:
         replacement.insert(0, RemoveMessage(id=message.id))
@@ -215,6 +258,9 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         return {
             **reset_turn_state(),
             "sanitized_message": sanitized,
+            "recipient_selectors": recipient_selectors,
+            "send_intent_requested": send_intent_requested,
+            "send_intent_source_interaction_id": send_intent_source_interaction_id,
             "messages": replacement,
         }
 
@@ -236,6 +282,9 @@ def no_guardrail_entrada(state: AgentState) -> dict:
             "called_agents": list(state.get("called_agents", [])),
             "errors": list(state.get("errors", [])),
             "sanitized_message": resumed_message,
+            "recipient_selectors": recipient_selectors,
+            "send_intent_requested": send_intent_requested,
+            "send_intent_source_interaction_id": send_intent_source_interaction_id,
             "resume_target": "router",
             "messages": replacement,
         }
@@ -247,6 +296,9 @@ def no_guardrail_entrada(state: AgentState) -> dict:
             **reset_turn_state(),
             "called_agents": list(state.get("called_agents", [])),
             "final_answer": SAFE_ANSWER,
+            "recipient_selectors": recipient_selectors,
+            "send_intent_requested": send_intent_requested,
+            "send_intent_source_interaction_id": send_intent_source_interaction_id,
             "errors": [*state.get("errors", []), "missing_pending_task"],
         }
 
@@ -271,6 +323,9 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         "called_agents": list(state.get("called_agents", [])),
         "errors": list(state.get("errors", [])),
         "sanitized_message": resumed_message,
+        "recipient_selectors": recipient_selectors,
+        "send_intent_requested": send_intent_requested,
+        "send_intent_source_interaction_id": send_intent_source_interaction_id,
         "route_plan": state.get("route_plan"),
         "ordered_tasks": updated_tasks,
         "current_task_index": index,
@@ -702,6 +757,8 @@ async def executar_fluxo(
     session_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
+    recipient_selectors: dict[str, dict[str, str]] | None = None,
+    send_intent_requested: bool = False,
     config: RunnableConfig | None = None,
 ) -> dict:
     state = initial_state(
@@ -711,6 +768,8 @@ async def executar_fluxo(
         session_id=session_id,
         interaction_id=interaction_id,
         session_context=session_context,
+        recipient_selectors=recipient_selectors,
+        send_intent_requested=send_intent_requested,
     )
     return await graph.ainvoke(
         state,
@@ -730,6 +789,9 @@ async def executar_resposta(
     session_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
+    recipient_selectors: dict[str, dict[str, str]] | None = None,
+    send_intent_requested: bool = False,
+    send_intent_source_interaction_id: str | None = None,
     checkpoint_namespace: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
@@ -738,6 +800,9 @@ async def executar_resposta(
         question_id=question_id,
         interaction_id=interaction_id,
         session_context=session_context,
+        recipient_selectors=recipient_selectors,
+        send_intent_requested=send_intent_requested,
+        send_intent_source_interaction_id=send_intent_source_interaction_id,
     )
     return await graph.ainvoke(
         state,

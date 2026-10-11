@@ -15,6 +15,9 @@ class AgentState(MessagesState):
 
     pii_map: dict[str, str]
     sanitized_message: str
+    recipient_selectors: dict[str, dict[str, str]]
+    send_intent_requested: bool
+    send_intent_source_interaction_id: str | None
 
     route: list[str]
     route_plan: RoutePlan | None

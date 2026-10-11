@@ -49,7 +49,7 @@ from app.ports.session_repository import SessionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.session_work_repository import SessionWorkRepository
 from app.ports.user_memory_repository import UserMemoryRepository
-from app.privacy import minimize_pii
+from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 from app.session_config import (
     CLARIFICATION_TTL_SECONDS,
     SESSION_LEASE_RENEW_SECONDS,
@@ -157,9 +157,16 @@ class MongoSessionService:
                 detail="Nenhuma fazenda desta sessão segue autorizada",
             )
 
-        kind, deduplication_key, sanitized_input, payload_json, input_hash, public_request_id = (
-            _normalize_input(body)
-        )
+        (
+            kind,
+            deduplication_key,
+            sanitized_input,
+            payload_json,
+            input_hash,
+            public_request_id,
+            recipient_selectors,
+            send_intent_requested,
+        ) = _normalize_input(body)
         existing = await self._find_existing(
             session_id,
             principal.user_id,
@@ -178,8 +185,16 @@ class MongoSessionService:
             )
 
         answer_text: str | None = None
+        send_intent_source_interaction_id: str | None = None
         if isinstance(body, AnswerInteraction):
-            answer_text = await self._validate_answer(session, body, graph)
+            (
+                answer_text,
+                recipient_selectors,
+                send_intent_requested,
+                send_intent_source_interaction_id,
+            ) = await self._validate_answer(
+                session, body, graph, new_recipient_selectors=recipient_selectors
+            )
 
         lease_owner = uuid4()
         now = _utcnow()
@@ -313,6 +328,8 @@ class MongoSessionService:
                         session_id=str(session_id),
                         interaction_id=str(interaction_id),
                         session_context=session_context,
+                        recipient_selectors=recipient_selectors,
+                        send_intent_requested=send_intent_requested,
                         config={
                             "configurable": {
                                 "argos_user_id": str(principal.user_id),
@@ -332,6 +349,9 @@ class MongoSessionService:
                         interaction_id=str(interaction_id),
                         checkpoint_namespace=str(body.interaction_id),
                         session_context=session_context,
+                        recipient_selectors=recipient_selectors,
+                        send_intent_requested=send_intent_requested,
+                        send_intent_source_interaction_id=send_intent_source_interaction_id,
                         config={
                             "configurable": {
                                 "argos_user_id": str(principal.user_id),
@@ -497,8 +517,13 @@ class MongoSessionService:
         )
 
     async def _validate_answer(
-        self, session: SessionRecord, body: AnswerInteraction, graph: Any
-    ) -> str:
+        self,
+        session: SessionRecord,
+        body: AnswerInteraction,
+        graph: Any,
+        *,
+        new_recipient_selectors: dict[str, dict[str, str]],
+    ) -> tuple[str, dict[str, dict[str, str]], bool, str | None]:
         source = await self._interactions.get_owned(body.interaction_id, session.user_id)
         if (
             source is None
@@ -530,7 +555,8 @@ class MongoSessionService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Tipo de resposta incompatível",
                 )
-            graph_answer = minimize_pii(body.answer.text)
+            protected_answer = protect_user_input(body.answer.text)
+            graph_answer = protected_answer.sanitized_text
         elif isinstance(body.answer, AnswerChoice):
             if question.input_type != "single_choice":
                 raise HTTPException(
@@ -576,7 +602,22 @@ class MongoSessionService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A pergunta não corresponde ao estado atual da sessão",
             )
-        return graph_answer
+        values = getattr(snapshot, "values", {})
+        recipient_selectors, graph_answer = merge_recipient_selectors(
+            dict(values.get("recipient_selectors") or {}),
+            new_recipient_selectors,
+            graph_answer,
+        )
+        send_intent_requested = bool(values.get("send_intent_requested"))
+        source_interaction_id = values.get("send_intent_source_interaction_id")
+        if send_intent_requested and source_interaction_id is None:
+            source_interaction_id = str(body.interaction_id)
+        return (
+            graph_answer,
+            recipient_selectors,
+            send_intent_requested,
+            source_interaction_id,
+        )
 
     async def _renew_lease(
         self,
@@ -624,9 +665,23 @@ def _session_response(session: SessionRecord, current_farms: list[UUID]) -> Sess
 
 def _normalize_input(
     body: InteractionInput,
-) -> tuple[InteractionKind, str, str, str, str, UUID]:
+) -> tuple[
+    InteractionKind,
+    str,
+    str,
+    str,
+    str,
+    UUID,
+    dict[str, dict[str, str]],
+    bool,
+]:
+    recipient_selectors: dict[str, dict[str, str]] = {}
+    send_intent_requested = False
     if isinstance(body, MessageInteraction):
-        sanitized = minimize_pii(body.message)
+        protected = protect_user_input(body.message)
+        sanitized = protected.sanitized_text
+        recipient_selectors = protected.recipient_selectors
+        send_intent_requested = protected.send_intent_requested
         if not sanitized.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -640,7 +695,9 @@ def _normalize_input(
     else:
         answer = body.answer.model_dump(mode="json")
         if isinstance(body.answer, AnswerText):
-            answer["text"] = minimize_pii(body.answer.text)
+            protected = protect_user_input(body.answer.text)
+            answer["text"] = protected.sanitized_text
+            recipient_selectors = protected.recipient_selectors
             content = answer["text"]
         elif isinstance(body.answer, AnswerChoice):
             content = f"Opção selecionada: {body.answer.option_id}"
@@ -661,8 +718,21 @@ def _normalize_input(
         public_id = body.question_id
         kind = InteractionKind.ANSWER
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
-    return kind, key, content, payload_json, digest, public_id
+    protected_digest = hashlib.sha256(
+        json.dumps(recipient_selectors, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    hash_payload = f"{payload_json}:{protected_digest}:{send_intent_requested}"
+    digest = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
+    return (
+        kind,
+        key,
+        content,
+        payload_json,
+        digest,
+        public_id,
+        recipient_selectors,
+        send_intent_requested,
+    )
 
 
 def _memory_input(

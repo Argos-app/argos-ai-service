@@ -35,6 +35,9 @@ Em cada RouteTask, preencha:
   fornecidas na solicitação; não invente fontes nem registros.
 
 Se uma informação essencial impede definir a tarefa, liste-a em missing_slots.
+Marcadores no formato [DESTINATARIO_n] representam seletores protegidos do
+usuário. Preserve o marcador literalmente quando necessário para a tarefa;
+nunca tente adivinhar o nome ou endereço por trás dele, nem o trate como ID.
 Se a tarefa já pode ser encaminhada e só o especialista precisará esclarecer
 um detalhe, crie a tarefa normalmente. Para pedido fora do escopo, use tasks
 e missing_slots vazios; não fabrique uma rota.
