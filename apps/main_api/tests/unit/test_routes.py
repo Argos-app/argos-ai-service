@@ -29,6 +29,7 @@ def test_planned_routes_are_present() -> None:
     expected = {
         ("/v1/sessions", "post"),
         ("/v1/sessions", "get"),
+        ("/v1/sessions/{session_id}/messages", "get"),
         ("/v1/sessions/{session_id}/interactions", "post"),
     }
     assert all(method in paths[path] for path, method in expected)
