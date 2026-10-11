@@ -186,10 +186,13 @@ class FakeSessionWorkRepository:
 class FakeGraph:
     def __init__(self) -> None:
         self.calls = 0
+        self.invocations = []
+        self.state_configs = []
         self.question_id = str(uuid4())
 
     async def ainvoke(self, state, *, config):
         self.calls += 1
+        self.invocations.append((state, config))
         if state.get("input_kind") == "answer":
             return {"final_answer": "Esclarecimento recebido."}
         return {
@@ -203,6 +206,7 @@ class FakeGraph:
         }
 
     async def aget_state(self, config):
+        self.state_configs.append(config)
         return SimpleNamespace(values={"question_id": self.question_id})
 
 
@@ -296,6 +300,9 @@ async def test_answer_is_counted_once_and_conflicting_replay_is_rejected():
     assert sessions.records[session.session_id].user_message_count == 2
     assert sessions.records[session.session_id].next_message_sequence == 5
     assert len(conversations.messages) == 4
+    checkpoint_ns = f"interaction-{question.interaction_id}"
+    assert graph.state_configs[0]["configurable"]["checkpoint_ns"] == checkpoint_ns
+    assert graph.invocations[1][1]["configurable"]["checkpoint_ns"] == checkpoint_ns
     conflicting = answer.model_copy(update={"answer": AnswerText(kind="text", text="Setembro")})
     with pytest.raises(HTTPException) as error:
         await service.create_interaction(principal, session.session_id, conflicting)
