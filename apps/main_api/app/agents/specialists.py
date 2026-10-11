@@ -20,6 +20,7 @@ from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.infrastructure.mcp.langchain_tools import build_mcp_tool_bindings
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventRepository
+from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.prompts.judge import JUDGE_SYSTEM_PROMPT
 from app.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from app.prompts.question_formatter import QUESTION_FORMATTER_SYSTEM_PROMPT
@@ -89,10 +90,17 @@ def build_agent_factory(
     *,
     mcp_clients: McpClients | None = None,
     delegation_issuer: McpDelegationTokenIssuer | None = None,
+    report_artifacts: ReportArtifactRepository | None = None,
 ) -> LangChainAgentFactory:
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
     if mcp_clients is not None:
-        overrides.update(build_mcp_tool_bindings(mcp_clients, delegation_issuer))
+        overrides.update(
+            build_mcp_tool_bindings(
+                mcp_clients,
+                delegation_issuer,
+                report_artifacts=report_artifacts,
+            )
+        )
     for agent_id, slots in (tool_bindings or {}).items():
         overrides.setdefault(agent_id, {}).update(
             {slot: tuple(tools) for slot, tools in slots.items()}

@@ -13,6 +13,7 @@ from app.ports.execution_event_repository import (
 )
 from app.ports.interaction_repository import InteractionRepository
 from app.ports.memory_generators import SessionSummaryGenerator, UserMemoryExtractor
+from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.ports.session_repository import SessionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.session_work_repository import SessionWorkRepository
@@ -33,4 +34,5 @@ __all__ = [
     "UserMemoryRepository",
     "ReportLotCandidate",
     "ReportLotResolution",
+    "ReportArtifactRepository",
 ]

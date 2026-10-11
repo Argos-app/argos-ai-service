@@ -3,19 +3,15 @@
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from hashlib import sha256
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from app.application.report_artifact_service import validate_report_source
+from app.domain.report_artifacts import ReportArtifact
 from app.ports.data_client import DataClient, DataReportSourceUnavailable
+from app.ports.report_artifact_repository import ReportArtifactRepository
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
-
-from packages.contracts import LotReportEnvelope
-
-
-class ReportSourceValidationError(ValueError):
-    """A origem não corresponde à identidade, ao lote ou ao prazo confiável."""
 
 
 class ReportLotInput(BaseModel):
@@ -26,46 +22,10 @@ class ReportLotInput(BaseModel):
     property_id: UUID | None = Field(default=None, description="Use somente se já identificada.")
 
 
-def validate_report_source(
-    value: object,
-    *,
-    principal_user_id: UUID,
-    lot_id: UUID,
-    authorized_property_ids: tuple[UUID, ...],
-    now: datetime | None = None,
-) -> LotReportEnvelope:
-    """Valida claims, escopo, validade e hash antes de qualquer uso da origem."""
-    try:
-        envelope = (
-            value
-            if isinstance(value, LotReportEnvelope)
-            else LotReportEnvelope.model_validate(value)
-        )
-    except (TypeError, ValueError) as exc:
-        raise ReportSourceValidationError("schema do envelope de origem inválido") from exc
-    if envelope.principal_user_id != principal_user_id:
-        raise ReportSourceValidationError("solicitante da origem não corresponde ao usuário")
-    if envelope.report.requested_lot.lot_id != lot_id:
-        raise ReportSourceValidationError("a origem não corresponde ao lote selecionado")
-    selected_property_id = envelope.report.requested_lot.property_id
-    if (
-        selected_property_id not in authorized_property_ids
-        or selected_property_id not in envelope.authorized_property_ids
-    ):
-        raise ReportSourceValidationError("propriedade da origem fora do escopo autorizado")
-    if envelope.valid_until.tzinfo is None:
-        raise ReportSourceValidationError("validade do envelope deve incluir timezone")
-    current_time = now or datetime.now(UTC)
-    if current_time.tzinfo is None or current_time >= envelope.valid_until:
-        raise ReportSourceValidationError("envelope expirado ou relógio sem timezone")
-    canonical = envelope.model_dump_json(exclude={"payload_hash", "signature"}).encode("utf-8")
-    expected_hash = f"sha256:{sha256(canonical).hexdigest()}"
-    if envelope.payload_hash != expected_hash:
-        raise ReportSourceValidationError("hash do envelope não corresponde ao conteúdo")
-    return envelope
-
-
-def build_farm_report_tool(data_client: DataClient) -> StructuredTool:
+def build_farm_report_tool(
+    data_client: DataClient,
+    artifact_repository: ReportArtifactRepository | None = None,
+) -> StructuredTool:
     async def resolve_report_source(
         lot_code: str,
         config: RunnableConfig,
@@ -78,6 +38,9 @@ def build_farm_report_tool(data_client: DataClient) -> StructuredTool:
         try:
             principal_user_id = UUID(str(configurable["argos_user_id"]))
             request_id = UUID(str(configurable["argos_request_id"]))
+            session_id = UUID(str(configurable["session_id"]))
+            interaction_id = UUID(str(configurable["interaction_id"]))
+            task_id = str(configurable["argos_task_id"])
             authorized_property_ids = tuple(
                 UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
             )
@@ -140,13 +103,28 @@ def build_farm_report_tool(data_client: DataClient) -> StructuredTool:
             lot_id=candidate.lot_id,
             authorized_property_ids=authorized_property_ids,
         )
+        if artifact_repository is None:
+            return json.dumps(
+                {
+                    "status": "report_source_storage_unavailable",
+                    "message": "Não foi possível armazenar a origem em contexto confiável.",
+                },
+                ensure_ascii=False,
+            )
+        artifact = ReportArtifact(
+            reference=uuid4(),
+            envelope=envelope,
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            interaction_id=interaction_id,
+            task_id=task_id,
+            created_at=datetime.now(UTC),
+        )
+        await artifact_repository.save(artifact)
         return json.dumps(
             {
-                "status": "report_source_storage_unavailable",
-                "message": (
-                    "A origem não foi entregue ao agente: o armazenamento confiável "
-                    "de artefatos ainda não está disponível."
-                ),
+                "status": "report_source_ready",
+                "report_artifact_ref": str(artifact.reference),
             },
             ensure_ascii=False,
         )
@@ -165,7 +143,6 @@ def build_farm_report_tool(data_client: DataClient) -> StructuredTool:
 
 __all__ = [
     "ReportLotInput",
-    "ReportSourceValidationError",
     "build_farm_report_tool",
     "validate_report_source",
 ]

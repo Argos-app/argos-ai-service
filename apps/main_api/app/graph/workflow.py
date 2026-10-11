@@ -1,7 +1,7 @@
 import re
 from functools import partial
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.agent_schemas.inputs import (
     DependencyResult,
@@ -26,10 +26,20 @@ from app.agent_schemas.synthesis import (
     OrchestratorResult,
     TaskOutcome,
 )
+from app.application.report_artifact_service import (
+    ReportSourceExpiredError,
+    ReportSourceValidationError,
+    validate_report_source,
+)
+from app.domain.report_artifacts import (
+    ReportArtifactExpiredError,
+    ReportArtifactNotFoundError,
+)
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.execution_event_repository import ExecutionEventWriteError
+from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
@@ -59,6 +69,10 @@ def build_agent_context(
     }
     if state.get("interaction_id"):
         context["interaction_id"] = state["interaction_id"]
+    task_index = state.get("current_task_index", 0)
+    tasks = state.get("ordered_tasks", ())
+    if 0 <= task_index < len(tasks):
+        context["argos_task_id"] = tasks[task_index].task_id
     configurable = (config or {}).get("configurable") or {}
     if configurable.get("argos_user_id"):
         context["argos_user_id"] = configurable["argos_user_id"]
@@ -99,6 +113,9 @@ def reset_turn_state() -> dict:
         "called_agents": [],
         "task_outcomes": (),
         "sources": [],
+        "report_artifact_refs": {},
+        "report_artifact_origin_interaction_id": None,
+        "report_source_renewal_count": 0,
         "missing_fields": [],
         "clarification_request": None,
         "clarification_question": None,
@@ -149,6 +166,9 @@ def initial_state(
         "answer_question_id": None,
         "session_context": session_context or SessionContext(),
         "pii_map": {},
+        "report_artifact_refs": {},
+        "report_artifact_origin_interaction_id": interaction_id,
+        "report_source_renewal_count": 0,
         "recipient_selectors": protected_recipients,
         "send_intent_requested": send_intent_requested or protected.send_intent_requested,
         "send_intent_source_interaction_id": (
@@ -331,6 +351,13 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         "current_task_index": index,
         "task_outcomes": prior_outcomes,
         "sources": prior_sources,
+        "report_artifact_refs": {
+            task_id: references
+            for task_id, references in state.get("report_artifact_refs", {}).items()
+            if task_id in {outcome.task.task_id for outcome in prior_outcomes}
+        },
+        "report_artifact_origin_interaction_id": state.get("report_artifact_origin_interaction_id"),
+        "report_source_renewal_count": state.get("report_source_renewal_count", 0),
         "route": state.get("route", []),
         "resume_target": updated_task.agent.value,
         "messages": replacement,
@@ -389,6 +416,7 @@ async def no_especialista(
     *,
     factory: AgentFactory,
     agent_id: AgentId,
+    report_artifacts: ReportArtifactRepository | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
     tasks = state["ordered_tasks"]
@@ -411,8 +439,89 @@ async def no_especialista(
         outcome.result.status not in (SpecialistStatus.SUCCESS, SpecialistStatus.PARTIAL)
         for outcome in dependencies
     )
-    called = list(state.get("called_agents", []))
     errors = list(state.get("errors", []))
+    report_refs_by_dependency: dict[str, tuple[str, ...]] = {}
+    farm_dependencies = tuple(
+        outcome for outcome in dependencies if outcome.task.agent.value == AgentId.FARM.value
+    )
+    if task.agent.value == AgentId.SECRETARY.value and farm_dependencies and not blocked:
+        configurable = (config or {}).get("configurable") or {}
+        try:
+            principal_user_id = UUID(str(configurable["argos_user_id"]))
+            authorized_property_ids = tuple(
+                UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
+            )
+            origin_interaction_id = UUID(
+                str(
+                    state.get("report_artifact_origin_interaction_id")
+                    or state.get("interaction_id")
+                )
+            )
+            session_id = UUID(state["session_id"])
+            if principal_user_id != UUID(state["user_id"]):
+                raise ValueError("principal_mismatch")
+            if report_artifacts is None:
+                raise ReportArtifactNotFoundError("artifact_store_unavailable")
+            for dependency in farm_dependencies:
+                refs = tuple(state.get("report_artifact_refs", {}).get(dependency.task.task_id, ()))
+                if not refs:
+                    raise ReportArtifactNotFoundError("missing_report_artifact")
+                for reference in refs:
+                    artifact = await report_artifacts.get(
+                        UUID(reference),
+                        principal_user_id=principal_user_id,
+                        session_id=session_id,
+                        interaction_id=origin_interaction_id,
+                        task_id=dependency.task.task_id,
+                    )
+                    validate_report_source(
+                        artifact.envelope,
+                        principal_user_id=principal_user_id,
+                        lot_id=artifact.envelope.report.requested_lot.lot_id,
+                        authorized_property_ids=authorized_property_ids,
+                    )
+                report_refs_by_dependency[dependency.task.task_id] = refs
+        except ReportArtifactExpiredError, ReportSourceExpiredError:
+            if state.get("report_source_renewal_count", 0) < 1:
+                source_index = next(
+                    index
+                    for index, candidate_task in enumerate(state["ordered_tasks"])
+                    if candidate_task.task_id == farm_dependencies[0].task.task_id
+                )
+                prior_outcomes = tuple(
+                    outcome
+                    for outcome in state.get("task_outcomes", ())
+                    if outcome.task.task_id
+                    in {candidate.task_id for candidate in state["ordered_tasks"][:source_index]}
+                )
+                prior_task_ids = {outcome.task.task_id for outcome in prior_outcomes}
+                prior_sources = unique_sources(
+                    [source for outcome in prior_outcomes for source in outcome.result.sources]
+                )
+                return {
+                    "current_task_index": source_index,
+                    "task_outcomes": prior_outcomes,
+                    "sources": prior_sources,
+                    "report_artifact_refs": {
+                        key: value
+                        for key, value in state.get("report_artifact_refs", {}).items()
+                        if key in prior_task_ids
+                    },
+                    "report_source_renewal_count": (
+                        state.get("report_source_renewal_count", 0) + 1
+                    ),
+                    "errors": [
+                        *state.get("errors", []),
+                        "expired_report_source_renewed_by_farm",
+                    ],
+                }
+            blocked = True
+            errors = [*state.get("errors", []), "report_source_expired_after_renewal"]
+        except ReportArtifactNotFoundError, ReportSourceValidationError, ValueError:
+            blocked = True
+            errors.append("invalid_or_missing_report_artifact")
+
+    called = list(state.get("called_agents", []))
 
     if blocked:
         result = SpecialistResult(
@@ -427,6 +536,7 @@ async def no_especialista(
                 task_id=outcome.task.task_id,
                 answer=outcome.result.answer,
                 source_references=tuple(source.reference for source in outcome.result.sources),
+                report_artifact_refs=report_refs_by_dependency.get(outcome.task.task_id, ()),
             )
             for outcome in dependencies
         )
@@ -469,6 +579,43 @@ async def no_especialista(
         "task_outcomes": (*state.get("task_outcomes", ()), outcome),
         "sources": sources,
     }
+    if agent_id == AgentId.FARM and report_artifacts is not None:
+        configurable = (config or {}).get("configurable") or {}
+        try:
+            principal_user_id = UUID(str(configurable["argos_user_id"]))
+            session_id = UUID(state["session_id"])
+            interaction_id = UUID(state["interaction_id"])
+            artifacts = await report_artifacts.list_for_task(
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+                interaction_id=interaction_id,
+                task_id=task.task_id,
+            )
+            for artifact in artifacts:
+                validate_report_source(
+                    artifact.envelope,
+                    principal_user_id=principal_user_id,
+                    lot_id=artifact.envelope.report.requested_lot.lot_id,
+                    authorized_property_ids=tuple(
+                        UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
+                    ),
+                    now=artifact.created_at,
+                )
+            refs = tuple(str(artifact.reference) for artifact in artifacts)
+            refs_by_task = dict(state.get("report_artifact_refs", {}))
+            if refs:
+                refs_by_task[task.task_id] = refs
+                update["report_artifact_origin_interaction_id"] = str(interaction_id)
+            else:
+                refs_by_task.pop(task.task_id, None)
+            update["report_artifact_refs"] = refs_by_task
+        except Exception:
+            update["report_artifact_refs"] = {
+                key: value
+                for key, value in state.get("report_artifact_refs", {}).items()
+                if key != task.task_id
+            }
+            update["errors"] = [*update["errors"], "invalid_report_artifact_created"]
     if (
         result.status in (SpecialistStatus.NEEDS_CLARIFICATION, SpecialistStatus.NEEDS_INPUT)
         or result.missing_fields
@@ -676,7 +823,12 @@ def decidir_pos_formatador(state: AgentState) -> str:
     return "safe" if state.get("final_answer") else "question_guardrail"
 
 
-def build_graph(factory: AgentFactory, *, checkpointer: Any = None):
+def build_graph(
+    factory: AgentFactory,
+    *,
+    checkpointer: Any = None,
+    report_artifacts: ReportArtifactRepository | None = None,
+):
     graph = StateGraph(AgentState)
     graph.add_node("guardrail_input", no_guardrail_entrada)
     graph.add_node("router", partial(no_roteador, factory=factory))
@@ -689,7 +841,12 @@ def build_graph(factory: AgentFactory, *, checkpointer: Any = None):
     ):
         graph.add_node(
             agent_id.value,
-            partial(no_especialista, factory=factory, agent_id=agent_id),
+            partial(
+                no_especialista,
+                factory=factory,
+                agent_id=agent_id,
+                report_artifacts=report_artifacts,
+            ),
         )
     graph.add_node("orchestrator", partial(no_orquestrador, factory=factory))
     graph.add_node("judge", partial(no_juiz, factory=factory))

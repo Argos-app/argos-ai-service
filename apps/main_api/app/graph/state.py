@@ -26,6 +26,9 @@ class AgentState(MessagesState):
     called_agents: list[str]
     task_outcomes: tuple[TaskOutcome, ...]
     sources: list[SourceReference]
+    report_artifact_refs: dict[str, tuple[str, ...]]
+    report_artifact_origin_interaction_id: str | None
+    report_source_renewal_count: int
 
     missing_fields: list[str]
     clarification_request: QuestionFormattingRequest | None

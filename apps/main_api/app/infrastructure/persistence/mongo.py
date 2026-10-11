@@ -25,6 +25,7 @@ from app.domain.sessions import (
     SessionRecord,
 )
 from app.infrastructure.persistence.errors import PersistenceConflictError
+from app.infrastructure.persistence.report_artifacts import MongoReportArtifactRepository
 
 
 def _is_duplicate(exc: Exception) -> bool:
@@ -819,6 +820,7 @@ class MongoPersistence:
         )
         self.session_summaries = MongoSessionSummaryRepository(database["ai_session_summaries"])
         self.user_memory = MongoUserMemoryRepository(database["ai_user_memory"])
+        self.report_artifacts = MongoReportArtifactRepository(database["ai_report_artifacts"])
         self.session_work = MongoSessionWorkRepository(
             database,
             sessions,
@@ -834,5 +836,6 @@ class MongoPersistence:
             self.execution_events,
             self.session_summaries,
             self.user_memory,
+            self.report_artifacts,
         ):
             await repository.ensure_indexes()

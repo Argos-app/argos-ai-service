@@ -13,6 +13,7 @@ from app.infrastructure.mcp.client import McpClients, McpToolServerClient
 from app.infrastructure.mcp.data_client import McpDataClient
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.ports.agent import AgentId
+from app.ports.report_artifact_repository import ReportArtifactRepository
 
 
 class McpToolBindingConfigurationError(ValueError):
@@ -189,6 +190,7 @@ def _unavailable_tool(name: str, description: str, message: str) -> StructuredTo
 def build_mcp_tool_bindings(
     clients: McpClients,
     delegation_issuer: McpDelegationTokenIssuer | None,
+    report_artifacts: ReportArtifactRepository | None = None,
 ) -> dict[AgentId, dict[str, tuple[StructuredTool, ...]]]:
     """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação."""
     if (clients.data is not None or clients.prediction is not None) and delegation_issuer is None:
@@ -214,7 +216,10 @@ def build_mcp_tool_bindings(
         if "list_lots" in clients.data.allowed_tools:
             farm_tools = (
                 *farm_tools,
-                build_farm_report_tool(McpDataClient(clients.data, delegation_issuer)),
+                build_farm_report_tool(
+                    McpDataClient(clients.data, delegation_issuer),
+                    artifact_repository=report_artifacts,
+                ),
             )
         if farm_tools:
             bindings[AgentId.FARM] = {"farm_data": farm_tools}

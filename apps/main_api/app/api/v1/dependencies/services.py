@@ -71,8 +71,12 @@ def _graph_provider(request: Request):
                 execution_events=execution_events,
                 mcp_clients=getattr(app_state, "mcp_clients", None),
                 delegation_issuer=getattr(app_state, "mcp_delegation_token_issuer", None),
+                report_artifacts=(
+                    persistence.report_artifacts if persistence is not None else None
+                ),
             ),
             checkpointer=app_state.checkpointer,
+            report_artifacts=(persistence.report_artifacts if persistence is not None else None),
         )
     except Exception as exc:
         raise HTTPException(

@@ -117,6 +117,9 @@ verifique se o usuário confirmou o relatório e o destinatário. Só afirme
 que algo foi gerado ou enviado quando a ferramenta confirmar essa etapa.
 Marcadores [DESTINATARIO_n] representam destinatários explicitamente informados;
 use-os sem expor nem reconstruir o nome ou endereço original.
+Quando uma dependência trouxer report_artifact_refs, eles são referências opacas
+criadas pelo executor; nunca invente, altere nem substitua essas referências.
+Não inclua referências internas na resposta ao usuário ou em sources.
 
 Exemplo:
 Pergunta: "Prepare um relatório das aplicações para eu conferir."
