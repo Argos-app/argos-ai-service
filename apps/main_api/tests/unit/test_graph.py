@@ -257,6 +257,7 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         "user_id": "user-demo",
         "farm_id": "farm-demo",
         "session_id": "session-demo",
+        "argos_task_id": "t1",
     }
     assert judge.calls[0][0].sources == (source,)
     assert router.calls[0][0].session_context.session_summary == "Continuidade da tarefa"

@@ -7,8 +7,10 @@ from uuid import uuid4
 
 import pytest
 from app.agents.tools.farm_reports import (
-    ReportSourceValidationError,
     build_farm_report_tool,
+)
+from app.application.report_artifact_service import (
+    ReportSourceValidationError,
     validate_report_source,
 )
 from app.infrastructure.mcp.data_client import McpDataClient
@@ -264,6 +266,9 @@ async def test_report_tool_returns_candidates_then_fails_closed_without_signed_s
             "argos_user_id": str(uuid4()),
             "argos_request_id": str(uuid4()),
             "argos_authorized_property_ids": (str(property_id),),
+            "session_id": str(uuid4()),
+            "interaction_id": str(uuid4()),
+            "argos_task_id": "farm-task",
         }
     }
 
