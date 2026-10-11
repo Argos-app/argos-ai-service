@@ -10,7 +10,12 @@ from app.agent_schemas.inputs import QuestionFormattingRequest
 from app.api.v1.dependencies.auth import Principal
 from app.api.v1.models.interactions import AnswerInteraction, AnswerText, MessageInteraction
 from app.application.session_service import MongoSessionService
-from app.domain.memory import SessionSummary
+from app.domain.memory import (
+    MemoryFieldAction,
+    SessionSummary,
+    UserMemoryChange,
+    UserMemoryFieldChange,
+)
 from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
@@ -352,6 +357,36 @@ class FakeExecutionEvents:
         return ()
 
 
+class FakeUserMemoryRepository:
+    def __init__(self):
+        self.memories = {}
+
+    async def get(self, user_id):
+        return self.memories.get(user_id)
+
+    async def save_if_current(self, memory, *, expected_revision):
+        current = self.memories.get(memory.user_id)
+        if (current.revision if current else None) != expected_revision:
+            return False
+        self.memories[memory.user_id] = memory
+        return True
+
+
+class FakeUserMemoryExtractor:
+    async def extract(self, *, user_id, session_id, sanitized_user_input, current):
+        del user_id, current
+        excerpt = "Prefiro linguagem simples."
+        if excerpt not in sanitized_user_input:
+            return UserMemoryChange()
+        return UserMemoryChange(
+            tone=UserMemoryFieldChange(
+                action=MemoryFieldAction.SET,
+                value="linguagem simples",
+                source_excerpt=excerpt,
+            )
+        )
+
+
 class FakeSummaryGenerator:
     def __init__(self):
         self.calls = []
@@ -413,3 +448,33 @@ async def test_service_summarizes_only_after_the_fifteenth_completed_user_entry(
     assert len(generator.calls[0][0]) == 30
     assert summaries.current.through_user_message_number == 15
     assert summaries.current.through_sequence == 30
+
+
+@pytest.mark.asyncio
+async def test_declared_memory_is_saved_and_used_in_the_same_interaction_context():
+    graph = FakeGraph()
+    memories = FakeUserMemoryRepository()
+    service, _, _, _ = _service(
+        graph,
+        user_memory=memories,
+        user_memory_extractor_provider=lambda: FakeUserMemoryExtractor(),
+    )
+    principal = _principal()
+    session = await service.create_session(principal)
+
+    await service.create_interaction(
+        principal,
+        session.session_id,
+        MessageInteraction(
+            kind="message",
+            client_message_id=uuid4(),
+            message="Prefiro linguagem simples.",
+        ),
+    )
+
+    memory = await memories.get(principal.user_id)
+    assert memory is not None
+    assert memory.tone == "linguagem simples"
+    assert memory.tone_source_session_id == session.session_id
+    assert memory.tone_source_excerpt == "Prefiro linguagem simples."
+    assert graph.invocations[0][0]["session_context"].user_tone == "linguagem simples"

@@ -172,3 +172,15 @@ async def test_context_uses_summary_profile_and_only_completed_prior_messages():
     ]
     assert context.user_tone == "simples e acolhedor"
     assert context.user_general_goal == "entender os medicamentos"
+
+    other_user_context = await build_session_context(
+        session_id=session_id,
+        user_id=uuid4(),
+        before_sequence=6,
+        conversations=FakeConversations(messages),
+        interactions=FakeInteractions({item.interaction_id: item for item in interactions}),
+        summaries=FakeSummaries(summary),
+        user_memory=FakeMemory(memory),
+    )
+    assert other_user_context.user_tone is None
+    assert other_user_context.user_general_goal is None
