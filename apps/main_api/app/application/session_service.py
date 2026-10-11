@@ -27,6 +27,7 @@ from app.api.v1.models.interactions import (
     QuestionResponse,
 )
 from app.api.v1.models.sessions import Session
+from app.application.context_builder import build_session_context
 from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
@@ -40,7 +41,9 @@ from app.domain.sessions import (
 from app.ports.conversation_repository import ConversationRepository
 from app.ports.interaction_repository import InteractionRepository
 from app.ports.session_repository import SessionRepository
+from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.session_work_repository import SessionWorkRepository
+from app.ports.user_memory_repository import UserMemoryRepository
 from app.privacy import minimize_pii
 from app.session_config import (
     CLARIFICATION_TTL_SECONDS,
@@ -63,6 +66,8 @@ class MongoSessionService:
         conversations: ConversationRepository,
         session_work: SessionWorkRepository,
         graph_provider: GraphProvider,
+        summaries: SessionSummaryRepository | None = None,
+        user_memory: UserMemoryRepository | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
         renew_seconds: int = SESSION_LEASE_RENEW_SECONDS,
     ) -> None:
@@ -71,6 +76,8 @@ class MongoSessionService:
         self._conversations = conversations
         self._session_work = session_work
         self._graph_provider = graph_provider
+        self._summaries = summaries
+        self._user_memory = user_memory
         self._lease_seconds = lease_seconds
         self._renew_seconds = renew_seconds
 
@@ -236,6 +243,15 @@ class MongoSessionService:
 
             failed = False
             try:
+                session_context = await build_session_context(
+                    session_id=session_id,
+                    user_id=principal.user_id,
+                    before_sequence=accepted_message.sequence,
+                    conversations=self._conversations,
+                    interactions=self._interactions,
+                    summaries=self._summaries,
+                    user_memory=self._user_memory,
+                )
                 from app.graph.workflow import (
                     executar_fluxo,
                     executar_resposta,
@@ -249,6 +265,7 @@ class MongoSessionService:
                         farm_id=str(authorized_farms[0]),
                         session_id=str(session_id),
                         interaction_id=str(interaction_id),
+                        session_context=session_context,
                     )
                 else:
                     state = await executar_resposta(
@@ -257,6 +274,8 @@ class MongoSessionService:
                         question_id=str(body.question_id),
                         session_id=str(session_id),
                         interaction_id=str(interaction_id),
+                        checkpoint_namespace=str(body.interaction_id),
+                        session_context=session_context,
                     )
             except Exception:
                 failed = True
@@ -421,7 +440,12 @@ class MongoSessionService:
 
         try:
             snapshot = await graph.aget_state(
-                {"configurable": {"thread_id": str(session.session_id)}}
+                {
+                    "configurable": {
+                        "thread_id": str(session.session_id),
+                        "checkpoint_ns": f"interaction-{body.interaction_id}",
+                    }
+                }
             )
         except Exception as exc:
             raise HTTPException(

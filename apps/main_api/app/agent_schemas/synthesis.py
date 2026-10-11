@@ -1,5 +1,6 @@
 """Contratos da consolidação e da revisão de evidências."""
 
+from app.agent_schemas.inputs import SessionContext
 from app.agent_schemas.results import RouteTask, SourceReference, SpecialistResult
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +18,7 @@ class OrchestratorInput(_SynthesisModel):
     request: str = Field(min_length=1)
     outcomes: tuple[TaskOutcome, ...]
     revision_feedback: str | None = None
+    session_context: SessionContext = Field(default_factory=SessionContext)
 
 
 class OrchestratorResult(_SynthesisModel):

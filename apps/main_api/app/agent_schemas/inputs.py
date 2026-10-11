@@ -2,11 +2,33 @@
 
 from typing import Literal
 
+from app.session_config import (
+    SESSION_CONTEXT_MAX_MESSAGES,
+    SESSION_CONTEXT_MESSAGE_MAX_CHARS,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _AgentInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+
+class ContextMessage(_AgentInput):
+    """Mensagem pública anterior, incluída apenas para continuidade da conversa."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=SESSION_CONTEXT_MESSAGE_MAX_CHARS)
+
+
+class SessionContext(_AgentInput):
+    """Contexto persistido da sessão e preferências permitidas do usuário."""
+
+    session_summary: str | None = Field(default=None, max_length=12_000)
+    recent_messages: tuple[ContextMessage, ...] = Field(
+        default=(), max_length=SESSION_CONTEXT_MAX_MESSAGES
+    )
+    user_tone: str | None = Field(default=None, max_length=256)
+    user_general_goal: str | None = Field(default=None, max_length=1_000)
 
 
 class PseudonymizedInput(_AgentInput):
@@ -19,6 +41,7 @@ class RouterInput(_AgentInput):
     """Informação mínima para o roteador decompor e encaminhar uma solicitação."""
 
     message: str = Field(min_length=1)
+    session_context: SessionContext = Field(default_factory=SessionContext)
 
 
 class DependencyResult(_AgentInput):
@@ -39,6 +62,7 @@ class SpecialistInput(_AgentInput):
     depends_on: tuple[str, ...] = ()
     required_evidence: tuple[str, ...] = ()
     dependency_results: tuple[DependencyResult, ...] = ()
+    session_context: SessionContext = Field(default_factory=SessionContext)
 
 
 class QuestionOption(_AgentInput):

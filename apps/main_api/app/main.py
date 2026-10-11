@@ -28,6 +28,11 @@ def create_app(
             runtime = await create_runtime(configured)
         app.state.persistence = runtime.persistence if runtime else None
         app.state.mongo_database = runtime.database if runtime else None
+        app.state.checkpointer = (
+            checkpointer
+            if checkpointer is not None
+            else (runtime.checkpointer if runtime else None)
+        )
         try:
             yield
         finally:

@@ -71,6 +71,8 @@ def get_session_service(request: Request) -> SessionService:
         interactions=persistence.interactions,
         conversations=persistence.conversations,
         session_work=persistence.session_work,
+        summaries=persistence.session_summaries,
+        user_memory=persistence.user_memory,
         graph_provider=lambda: _graph_provider(request),
     )
 

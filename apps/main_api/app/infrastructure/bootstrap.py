@@ -1,8 +1,13 @@
 """Inicialização e encerramento dos recursos duráveis do main_api."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from app.infrastructure.checkpoints.mongo import (
+    MongoCheckpointerRuntime,
+    create_mongo_checkpointer,
+)
 from app.infrastructure.persistence.mongo import MongoPersistence
 from app.settings import Settings
 
@@ -12,9 +17,17 @@ class ServiceRuntime:
     mongo_client: Any
     database: Any
     persistence: MongoPersistence
+    checkpoints: MongoCheckpointerRuntime
+
+    @property
+    def checkpointer(self) -> Any:
+        return self.checkpoints.saver
 
     async def close(self) -> None:
-        self.mongo_client.close()
+        try:
+            self.checkpoints.close()
+        finally:
+            self.mongo_client.close()
 
 
 async def create_runtime(settings: Settings) -> ServiceRuntime:
@@ -43,7 +56,8 @@ async def create_runtime(settings: Settings) -> ServiceRuntime:
         )
         persistence = MongoPersistence(database)
         await persistence.ensure_indexes()
-        return ServiceRuntime(client, database, persistence)
+        checkpoints = await asyncio.to_thread(create_mongo_checkpointer, settings)
+        return ServiceRuntime(client, database, persistence, checkpoints)
     except Exception:
         client.close()
         raise
