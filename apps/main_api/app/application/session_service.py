@@ -30,6 +30,7 @@ from app.api.v1.models.interactions import (
 from app.api.v1.models.sessions import Session
 from app.application.context_builder import build_session_context
 from app.application.session_summary_service import SessionSummaryService
+from app.application.user_memory_service import UserMemoryService
 from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
@@ -43,7 +44,7 @@ from app.domain.sessions import (
 from app.ports.conversation_repository import ConversationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
 from app.ports.interaction_repository import InteractionRepository
-from app.ports.memory_generators import SessionSummaryGenerator
+from app.ports.memory_generators import SessionSummaryGenerator, UserMemoryExtractor
 from app.ports.session_repository import SessionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.session_work_repository import SessionWorkRepository
@@ -57,6 +58,7 @@ from app.session_config import (
 
 GraphProvider = Callable[[], Any]
 SummaryGeneratorProvider = Callable[[], SessionSummaryGenerator | None]
+MemoryExtractorProvider = Callable[[], UserMemoryExtractor | None]
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 logger = logging.getLogger(__name__)
 
@@ -76,6 +78,7 @@ class MongoSessionService:
         user_memory: UserMemoryRepository | None = None,
         execution_events: ExecutionEventRepository | None = None,
         summary_generator_provider: SummaryGeneratorProvider | None = None,
+        user_memory_extractor_provider: MemoryExtractorProvider | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
         renew_seconds: int = SESSION_LEASE_RENEW_SECONDS,
     ) -> None:
@@ -86,6 +89,14 @@ class MongoSessionService:
         self._graph_provider = graph_provider
         self._summaries = summaries
         self._user_memory = user_memory
+        self._user_memory_service = (
+            UserMemoryService(
+                repository=user_memory,
+                extractor_provider=user_memory_extractor_provider,
+            )
+            if user_memory is not None
+            else None
+        )
         self._summary_service = (
             SessionSummaryService(
                 summaries=summaries,
@@ -264,6 +275,15 @@ class MongoSessionService:
 
             failed = False
             try:
+                memory_input = _memory_input(body, sanitized_input, answer_text)
+                if memory_input is not None:
+                    await self._update_user_memory(
+                        user_id=principal.user_id,
+                        session_id=session_id,
+                        interaction_id=interaction_id,
+                        source_created_at=accepted_message.created_at,
+                        sanitized_user_input=memory_input,
+                    )
                 await self._publish_due_summary(
                     session_id=session_id,
                     user_id=principal.user_id,
@@ -382,6 +402,31 @@ class MongoSessionService:
             logger.exception(
                 "falha ao resumir sessão %s; resumo anterior e cobertura foram mantidos",
                 session_id,
+            )
+
+    async def _update_user_memory(
+        self,
+        *,
+        user_id: UUID,
+        session_id: UUID,
+        interaction_id: UUID,
+        source_created_at: datetime,
+        sanitized_user_input: str,
+    ) -> None:
+        if self._user_memory_service is None:
+            return
+        try:
+            await self._user_memory_service.update_from_user_entry(
+                user_id=user_id,
+                session_id=session_id,
+                interaction_id=interaction_id,
+                source_created_at=source_created_at,
+                sanitized_user_input=sanitized_user_input,
+            )
+        except Exception:
+            logger.exception(
+                "falha ao atualizar memória do usuário %s; interação seguirá com memória atual",
+                user_id,
             )
 
     async def _find_existing(
@@ -600,6 +645,18 @@ def _normalize_input(
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
     return kind, key, content, payload_json, digest, public_id
+
+
+def _memory_input(
+    body: InteractionInput,
+    sanitized_input: str,
+    answer_text: str | None,
+) -> str | None:
+    if isinstance(body, MessageInteraction):
+        return sanitized_input
+    if isinstance(body, AnswerInteraction) and isinstance(body.answer, AnswerText):
+        return answer_text or sanitized_input
+    return None
 
 
 def _interaction_id(

@@ -19,6 +19,7 @@ def create_app(
     models: dict[Any, Any] | None = None,
     checkpointer: Any = None,
     session_summary_generator: Any = None,
+    user_memory_extractor: Any = None,
 ) -> FastAPI:
     configured = settings or Settings.from_env()
 
@@ -45,6 +46,7 @@ def create_app(
     app.state.models = models
     app.state.checkpointer = checkpointer
     app.state.session_summary_generator = session_summary_generator
+    app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
 
     @app.middleware("http")

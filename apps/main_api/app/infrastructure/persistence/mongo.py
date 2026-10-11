@@ -620,6 +620,10 @@ def _memory_document(memory: UserMemory) -> dict[str, Any]:
         "goal_source_interaction_id": str(memory.goal_source_interaction_id)
         if memory.goal_source_interaction_id
         else None,
+        "tone_source_excerpt": memory.tone_source_excerpt,
+        "goal_source_excerpt": memory.goal_source_excerpt,
+        "tone_updated_at": memory.tone_updated_at,
+        "goal_updated_at": memory.goal_updated_at,
         "revision": memory.revision,
         "updated_at": memory.updated_at,
     }
@@ -644,6 +648,10 @@ def _memory_from_document(document: dict[str, Any]) -> UserMemory:
         else None,
         revision=document["revision"],
         updated_at=document["updated_at"],
+        tone_source_excerpt=document.get("tone_source_excerpt"),
+        goal_source_excerpt=document.get("goal_source_excerpt"),
+        tone_updated_at=document.get("tone_updated_at"),
+        goal_updated_at=document.get("goal_updated_at"),
     )
 
 

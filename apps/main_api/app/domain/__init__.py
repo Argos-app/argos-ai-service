@@ -1,6 +1,13 @@
 """Modelos independentes de transporte, agentes e armazenamento."""
 
-from app.domain.memory import SessionSummary, SummaryFact, UserMemory
+from app.domain.memory import (
+    MemoryFieldAction,
+    SessionSummary,
+    SummaryFact,
+    UserMemory,
+    UserMemoryChange,
+    UserMemoryFieldChange,
+)
 from app.domain.sessions import (
     ConversationMessage,
     ExecutionEvent,
@@ -29,9 +36,12 @@ __all__ = [
     "InteractionStatus",
     "MessageKind",
     "MessageRole",
+    "MemoryFieldAction",
     "ProcessingLease",
     "SessionRecord",
     "SessionSummary",
     "SummaryFact",
     "UserMemory",
+    "UserMemoryChange",
+    "UserMemoryFieldChange",
 ]

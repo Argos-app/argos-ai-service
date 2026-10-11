@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
-from app.domain.memory import SessionSummary, UserMemory
+from app.domain.memory import SessionSummary, UserMemory, UserMemoryChange
 from app.domain.sessions import ConversationMessage, ExecutionEvent
 
 
@@ -30,5 +30,5 @@ class UserMemoryExtractor(Protocol):
         session_id: UUID,
         sanitized_user_input: str,
         current: UserMemory | None,
-    ) -> UserMemory | None:
+    ) -> UserMemoryChange:
         """Propõe atualizações somente para tom e objetivo geral declarados."""

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 from app.domain.common import require_utc
@@ -18,6 +19,40 @@ class SummaryFact:
     def __post_init__(self) -> None:
         if not self.content.strip():
             raise ValueError("content do fato não pode estar vazio")
+
+
+class MemoryFieldAction(StrEnum):
+    UNCHANGED = "unchanged"
+    SET = "set"
+    DELETE = "delete"
+
+
+@dataclass(frozen=True, slots=True)
+class UserMemoryFieldChange:
+    action: MemoryFieldAction = MemoryFieldAction.UNCHANGED
+    value: str | None = None
+    source_excerpt: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action == MemoryFieldAction.SET:
+            if not self.value or not self.value.strip():
+                raise ValueError("set exige valor de memória não vazio")
+            if not self.source_excerpt or not self.source_excerpt.strip():
+                raise ValueError("set exige trecho de origem não vazio")
+        elif self.value is not None or self.source_excerpt is not None:
+            raise ValueError("valor e trecho só são válidos para ação set")
+
+
+@dataclass(frozen=True, slots=True)
+class UserMemoryChange:
+    tone: UserMemoryFieldChange = UserMemoryFieldChange()
+    general_goal: UserMemoryFieldChange = UserMemoryFieldChange()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tone, UserMemoryFieldChange):
+            raise TypeError("tone deve ser UserMemoryFieldChange")
+        if not isinstance(self.general_goal, UserMemoryFieldChange):
+            raise TypeError("general_goal deve ser UserMemoryFieldChange")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,9 +101,17 @@ class UserMemory:
     goal_source_interaction_id: UUID | None
     revision: int
     updated_at: datetime
+    tone_source_excerpt: str | None = None
+    goal_source_excerpt: str | None = None
+    tone_updated_at: datetime | None = None
+    goal_updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         require_utc(self.updated_at, "updated_at")
+        if self.tone_updated_at is not None:
+            require_utc(self.tone_updated_at, "tone_updated_at")
+        if self.goal_updated_at is not None:
+            require_utc(self.goal_updated_at, "goal_updated_at")
         if self.revision < 1:
             raise ValueError("revision deve ser positiva")
         if self.tone is not None and not self.tone.strip():
@@ -83,11 +126,36 @@ class UserMemory:
             raise ValueError("origem de tone deve acompanhar seu valor")
         if (self.tone is None) != (self.tone_source_interaction_id is None):
             raise ValueError("interação de origem de tone deve acompanhar seu valor")
+        if self.tone is None and self.tone_source_excerpt is not None:
+            raise ValueError("trecho de origem de tone exige valor")
+        if self.tone_source_excerpt is not None and len(self.tone_source_excerpt) > 512:
+            raise ValueError("trecho de origem de tone não pode exceder 512 caracteres")
         if (self.general_goal is None) != (self.goal_source_session_id is None):
             raise ValueError("origem de general_goal deve acompanhar seu valor")
         if (self.general_goal is None) != (self.goal_source_interaction_id is None):
             raise ValueError("interação de origem de general_goal deve acompanhar seu valor")
+        if self.general_goal is None and self.goal_source_excerpt is not None:
+            raise ValueError("trecho de origem de general_goal exige valor")
+        if self.goal_source_excerpt is not None and len(self.goal_source_excerpt) > 512:
+            raise ValueError("trecho de origem de general_goal não pode exceder 512 caracteres")
 
     @property
     def is_empty(self) -> bool:
         return self.tone is None and self.general_goal is None
+
+    @property
+    def tone_effective_updated_at(self) -> datetime:
+        return self.tone_updated_at or self.updated_at
+
+    @property
+    def goal_effective_updated_at(self) -> datetime:
+        return self.goal_updated_at or self.updated_at
+
+    @property
+    def summary_text(self) -> str | None:
+        fields = []
+        if self.tone:
+            fields.append(f"Tom de comunicação: {self.tone}")
+        if self.general_goal:
+            fields.append(f"Objetivo geral: {self.general_goal}")
+        return "; ".join(fields) if fields else None
