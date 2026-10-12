@@ -9,30 +9,32 @@ mobile ficam em outros repositórios.
 
 O principal tem contratos HTTP, grafo de agentes, Factory e Registry. Ele usa
 Mongo para sessões, mensagens, eventos de execução, checkpoints, resumos e
-preferências limitadas do usuário; as tools de negócio ainda são simuladas e a
-autenticação externa continua pendente. O MCP de e-mail já implementa
-preparação, envio e consulta de estado, com testes isolados pelo SDK MCP real,
-Mongo, PostgreSQL e SMTP de teste. `apps/mcp_data` ainda não tem implementação;
-seu papel futuro está descrito abaixo. A integração completa principal → dados →
-e-mail permanece planejada.
+preferências limitadas do usuário. A API valida identidade JWT EdDSA do backend
+e vincula ferramentas LangChain aos MCPs configurados, com delegação por
+usuário, propriedade, agente e operação. O backend ainda não inclui `farm_ids`,
+então a criação de sessão permanece bloqueada até delegar o escopo autorizado. O
+MCP de dados oferece consultas somente leitura; a projeção assinada para
+relatórios e o fluxo completo principal → dados → e-mail ainda não estão
+implementados. O MCP de e-mail permite preparar relatórios e consultar estado
+pelo Secretário; o envio não está exposto ao LLM.
 
 ## Agentes
 
 Os agentes são acionados conforme a solicitação; não executam todos a cada
 mensagem. O sistema principal usa FastAPI, LangGraph e LangChain.
 
-| Agente                  | Função                                                                                                                                 |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Fazenda                 | Consulta aplicações, lotes, bovinos em exceção e carências. Sempre consulta o MCP de dados para responder.                             |
-| Doutor                  | Consulta informações documentadas sobre medicamentos no MCP de dados. Apresenta fontes e limites; não substitui avaliação veterinária. |
-| Analista                | Solicita cálculos e previsões ao MCP de predição e explica resultados, premissas e limitações.                                         |
-| Secretário              | Recebe referências dos dados autorizados de Fazenda pelo executor e solicita preparação, envio e consulta ao MCP de e-mail.            |
-| Informações             | Responde questões gerais e encaminha perguntas documentais ou legais especializadas ao A2A.                                            |
-| Orquestrador            | Consolida os resultados, identifica lacunas e solicita complementações dentro dos limites do fluxo.                                    |
-| Juiz                    | Verifica se as afirmações têm apoio nas fontes e sinaliza inconsistências ou necessidade de revisão.                                   |
-| Formatador de perguntas | Transforma informações faltantes em perguntas de esclarecimento, em texto ou com opções para o aplicativo.                             |
-| Documental — A2A        | Consulta termos, condições e FAQs nos PDFs atuais indexados no Qdrant.                                                                 |
-| Legal — A2A             | Responde com base nas fontes legais disponíveis, indicando jurisdição, datas e limitações.                                             |
+| Agente                  | Função                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fazenda                 | Consulta aplicações, lotes, bovinos em exceção e carências. Sempre consulta o MCP de dados para responder.                                 |
+| Doutor                  | Consulta informações documentadas sobre medicamentos no MCP de dados. Apresenta fontes e limites; não substitui avaliação veterinária.     |
+| Analista                | Solicita cálculos e previsões ao MCP de predição e explica resultados, premissas e limitações.                                             |
+| Secretário              | Recebe referências de Fazenda e pode preparar relatórios ou consultar estado no MCP de e-mail; o envio aguarda autorização determinística. |
+| Informações             | Responde questões gerais e encaminha perguntas documentais ou legais especializadas ao A2A.                                                |
+| Orquestrador            | Consolida os resultados, identifica lacunas e solicita complementações dentro dos limites do fluxo.                                        |
+| Juiz                    | Verifica se as afirmações têm apoio nas fontes e sinaliza inconsistências ou necessidade de revisão.                                       |
+| Formatador de perguntas | Transforma informações faltantes em perguntas de esclarecimento, em texto ou com opções para o aplicativo.                                 |
+| Documental — A2A        | Consulta termos, condições e FAQs nos PDFs atuais indexados no Qdrant.                                                                     |
+| Legal — A2A             | Responde com base nas fontes legais disponíveis, indicando jurisdição, datas e limitações.                                                 |
 
 Autenticação, anonimização por regex, validações, cálculos, renderização e envio
 não são agentes com LLM. O Roteador seleciona especialistas; o **agente
@@ -44,11 +46,11 @@ aplicativo e permite retomar a sessão após a resposta do usuário.
 MCP é o protocolo usado para disponibilizar ferramentas aos agentes. Cada MCP é
 uma aplicação separada e valida o acesso aos dados solicitados.
 
-| MCP                                  | Função                                                                                                                                                                                                                                                                                                                         |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Dados — planejado                    | Resolve propriedades, rebanhos e lotes autorizados usando a modelagem relacional; consulta documentos de histórico e medicamentos no Mongo. Para relatório, entrega uma projeção de um lote em `LotReportEnvelope`, assinada e vinculada ao solicitante, escopo e validade. Não aceita SQL ou pipelines arbitrários do agente. |
-| E-mail — implementado isoladamente   | Verifica o envelope recebido, resolve destinatários cadastrados no PostgreSQL, renderiza o relatório e envia pelo no-reply configurado. Guarda preparações e operações no Mongo; não relê o documento Mongo de negócio.                                                                                                        |
-| Predição — implementado isoladamente | Estima consumo de medicamentos por propriedade e unidade, repetindo a média diária mensal de um histórico anual por até 28 dias. Não usa modelo treinado nem prevê produção, doenças ou mortes; acesso exige Bearer interno e delegação de propriedades.                                                                       |
+| MCP                         | Função                                                                                                                                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Dados — implementado        | Expõe consultas de propriedades, rebanhos, lotes, aplicações, exceções, ocorrências, documentos e catálogo de medicamentos. As tools Fazenda e Doutor usam delegações curtas por chamada. A projeção assinada `LotReportEnvelope` segue pendente.            |
+| E-mail — integração parcial | O Secretário pode preparar relatórios e consultar estado com identidade do usuário vinculada pelo principal. `send_report` permanece fora do conjunto de tools do LLM até haver autorização determinística de envio.                                         |
+| Predição — integrado        | Estima consumo de medicamentos por propriedade e unidade, repetindo a média diária mensal de um histórico anual por até 28 dias. A tool Analista envia delegação curta com `prediction.read`; não usa modelo treinado nem prevê produção, doenças ou mortes. |
 
 ## Sessões e memória do principal
 
@@ -71,7 +73,10 @@ veja [`apps/main_api/.env.example`](apps/main_api/.env.example). Em testes
 locais executados no host contra o Compose, use o URI de conexão direta
 documentado no README dos testes de integração. O stub de identidade continua
 disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
-desse modo, autenticação real ainda não foi ligada ao contrato do backend.
+desse modo, configure a chave pública Ed25519 do backend em
+`MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
+agente e operações delegadas. O backend deve incluir `farm_ids` no token para
+que a API possa abrir sessões com o escopo autorizado.
 
 Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
 persistência e retomada com Mongo replica set descartável: siga
@@ -92,9 +97,12 @@ propriedade; correspondências ambíguas exigem esclarecimento. O contrato atual
 aceita um lote. O MCP de e-mail resolve nomes/e-mails no cadastro e recebe o
 envelope sem consultar novamente o documento de negócio.
 
-O principal preserva os destinatários em contexto protegido antes da sanitização
-e valida a intenção antes do envio. Pedido explícito inequívoco pode seguir sem
-segunda confirmação; preparar não autoriza enviar.
+O principal troca nomes e e-mails de destinatários explícitos por referências
+`[DESTINATARIO_n]` antes de persistir a mensagem ou enviá-la ao LLM. O seletor
+original e a origem da intenção de envio ficam no checkpoint da interação e
+continuam disponíveis durante esclarecimentos; não são reutilizados em outro
+pedido. Pedido explícito inequívoco pode seguir sem segunda confirmação;
+preparar não autoriza enviar.
 
 O MCP de e-mail expõe `prepare_report`, `send_report` e `get_report_status` por
 Streamable HTTP em `/mcp`. As tools recebem `payload`; o Bearer interno fica no
