@@ -27,6 +27,7 @@ from app.graph.workflow import (
     executar_resposta,
     initial_state,
     no_guardrail_entrada,
+    no_saida_segura,
 )
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventWriteError
@@ -53,6 +54,19 @@ class FakeFactory:
 
     def create(self, agent_id: AgentId) -> FakeAgent:
         return self.agents[agent_id]
+
+
+def test_safe_response_preserves_recovered_email_action_outcome() -> None:
+    result = no_saida_segura(
+        {
+            "final_answer": SAFE_ANSWER,
+            "email_action_summary": "O MCP confirmou o recebimento do envio.",
+        }
+    )
+
+    assert result["final_answer"] == (
+        f"{SAFE_ANSWER}\n\nEstado do envio: O MCP confirmou o recebimento do envio."
+    )
 
 
 def request_state(message: str = "Quais aplicações existem?") -> dict:

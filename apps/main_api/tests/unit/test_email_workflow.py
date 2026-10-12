@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ import pytest
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.email_workflow import EmailWorkflow, _fingerprint
 from app.domain.email_preparations import (
+    EmailOperationReference,
     EmailPreparation,
     EmailSendAuthorization,
     SendAuthorizationOrigin,
@@ -563,6 +565,48 @@ def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
     assert "idempotency_key" not in json.dumps(send_result)
 
 
+def test_recover_interaction_outcome_reads_mcp_without_resending():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    sent = _dispatch_result(prepared.report_id)
+
+    def respond(name, arguments):
+        assert name == "get_report_status"
+        assert arguments["payload"]["operation_id"] == str(sent.operation_id)
+        return SimpleNamespace(
+            structuredContent=ReportStatusResult.model_validate(
+                sent.model_dump(mode="json")
+            ).model_dump(mode="json"),
+            content=[],
+        )
+
+    client = _EmailClient(respond)
+    workflow, repository, authorization, config = _authorized_dispatch(
+        artifact, prepared, property_id, client
+    )
+    repository.operation_references[authorization.authorization_id] = EmailOperationReference(
+        authorization_id=authorization.authorization_id,
+        principal_user_id=artifact.principal_user_id,
+        session_id=artifact.session_id,
+        operation_id=sent.operation_id,
+        recorded_at=datetime.now(UTC),
+    )
+
+    summary = asyncio.run(workflow.recover_interaction_outcome(configurable=config))
+
+    assert summary == "O MCP confirmou o recebimento do envio; isso não confirma a entrega."
+    assert [name for name, *_ in client.calls] == ["get_report_status"]
+
+
 def test_lost_send_response_retries_with_same_report_and_idempotency_key():
     artifact, property_id = _artifact()
     prepared = PreparedReport(
@@ -605,3 +649,67 @@ def test_lost_send_response_retries_with_same_report_and_idempotency_key():
         repository.operation_references[authorization.authorization_id].operation_id
         == result.operation_id
     )
+
+
+def test_status_without_action_ref_returns_sanitized_choices_for_own_history():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    result = _dispatch_result(prepared.report_id)
+
+    def respond(name, arguments):
+        assert name == "get_report_status"
+        assert arguments["payload"]["requested_by"] == str(artifact.principal_user_id)
+        return SimpleNamespace(
+            structuredContent=ReportStatusResult.model_validate(
+                result.model_dump(mode="json")
+            ).model_dump(mode="json"),
+            content=[],
+        )
+
+    client = _EmailClient(respond)
+    workflow, repository, authorization, config = _authorized_dispatch(
+        artifact, prepared, property_id, client
+    )
+    second_authorization = replace(
+        authorization,
+        authorization_id=uuid4(),
+        source_interaction_id=uuid4(),
+        idempotency_key=str(uuid4()),
+    )
+    repository.authorizations[
+        (
+            second_authorization.principal_user_id,
+            second_authorization.session_id,
+            second_authorization.source_interaction_id,
+        )
+    ] = second_authorization
+    operation_ids = (uuid4(), uuid4())
+    for action, operation_id in zip(
+        (authorization, second_authorization), operation_ids, strict=True
+    ):
+        repository.operation_references[action.authorization_id] = EmailOperationReference(
+            authorization_id=action.authorization_id,
+            principal_user_id=action.principal_user_id,
+            session_id=action.session_id,
+            operation_id=operation_id,
+            recorded_at=datetime.now(UTC),
+        )
+
+    response = json.loads(asyncio.run(workflow.status(authorization_id=None, configurable=config)))
+
+    assert response["status"] == "needs_action_selection"
+    assert {item["action_ref"] for item in response["actions"]} == {
+        str(authorization.authorization_id),
+        str(second_authorization.authorization_id),
+    }
+    assert all(item["status"] == "accepted" for item in response["actions"])
+    assert all(str(operation_id) not in json.dumps(response) for operation_id in operation_ids)
