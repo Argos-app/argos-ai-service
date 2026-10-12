@@ -8,8 +8,13 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from app.agents.tools.email import build_email_prepare_tool
+from app.agents.tools.email import (
+    build_email_prepare_tool,
+    build_email_send_tool,
+    build_email_status_tool,
+)
 from app.agents.tools.farm_reports import build_farm_report_tool
+from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.email_workflow import EmailWorkflow
 from app.infrastructure.mcp.client import McpClients, McpToolServerClient
 from app.infrastructure.mcp.data_client import McpDataClient
@@ -187,7 +192,9 @@ def build_mcp_tool_bindings(
         )
 
     bindings: dict[AgentId, dict[str, tuple[StructuredTool, ...]]] = {}
-    mcp_configured = any((clients.data, clients.prediction, clients.email))
+    # Receiving an McpClients object is an explicit production configuration.
+    # Missing services get unavailable tools rather than silently falling back to mocks.
+    mcp_configured = True
     if clients.data is not None:
         farm_tools = tuple(
             _make_tool(
@@ -243,16 +250,25 @@ def build_mcp_tool_bindings(
         }
     if clients.email is not None:
         email_tools: tuple[StructuredTool, ...] = ()
+        workflow = None
+        dispatch_workflow = None
+        if report_artifacts is not None and email_preparations is not None:
+            workflow = EmailWorkflow(
+                email_client=clients.email,
+                report_artifacts=report_artifacts,
+                preparations=email_preparations,
+            )
+            dispatch_workflow = EmailDispatchWorkflow(
+                email_client=clients.email,
+                preparations=email_preparations,
+                report_artifacts=report_artifacts,
+            )
         if "prepare_report" in clients.email.allowed_tools:
-            if report_artifacts is not None and email_preparations is not None:
-                workflow = EmailWorkflow(
-                    email_client=clients.email,
-                    report_artifacts=report_artifacts,
-                    preparations=email_preparations,
-                )
-            else:
-                workflow = None
             email_tools = (*email_tools, build_email_prepare_tool(workflow))
+        if "send_report" in clients.email.allowed_tools:
+            email_tools = (*email_tools, build_email_send_tool(dispatch_workflow))
+        if "get_report_status" in clients.email.allowed_tools:
+            email_tools = (*email_tools, build_email_status_tool(dispatch_workflow))
         if email_tools:
             bindings[AgentId.SECRETARY] = {"report_delivery": email_tools}
     if mcp_configured:
@@ -286,15 +302,6 @@ def build_mcp_tool_bindings(
                 ),
             ),
         )
-        bindings.setdefault(AgentId.SECRETARY, {})["farm_data"] = (
-            _unavailable_tool(
-                "farm_data_from_executor",
-                "Use resultados e referências fornecidos pelo agente Fazenda; "
-                "não consulta o MCP diretamente.",
-                "A consulta de Fazenda deve ser fornecida pelo executor antes "
-                "da preparação do relatório.",
-            ),
-        )
         bindings.setdefault(AgentId.SECRETARY, {}).setdefault(
             "report_delivery",
             (
@@ -303,6 +310,16 @@ def build_mcp_tool_bindings(
                     "Prepara ou consulta relatórios somente quando o MCP de e-mail "
                     "está configurado.",
                     "MCP de e-mail não configurado; nenhuma operação foi executada.",
+                ),
+            ),
+        )
+        bindings.setdefault(AgentId.INFORMATION, {}).setdefault(
+            "documental_a2a",
+            (
+                _unavailable_tool(
+                    "documental_unavailable",
+                    "Consulta Documental somente quando o serviço estiver configurado.",
+                    "Serviço Documental não configurado; nenhum documento foi consultado.",
                 ),
             ),
         )

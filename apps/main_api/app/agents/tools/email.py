@@ -11,6 +11,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from app.application.email_dispatch_workflow import EmailDispatchWorkflow
     from app.application.email_workflow import EmailWorkflow
 
 
@@ -21,6 +22,22 @@ class PrepareReportInput(BaseModel):
         description="Referência do relatório fornecida na dependência de Fazenda."
     )
     report_title: str = Field(min_length=1, max_length=200)
+
+
+class SendReportInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class GetReportStatusInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_ref: UUID | None = Field(
+        default=None,
+        description=(
+            "Referência opaca retornada por uma consulta anterior quando há várias ações. "
+            "Não solicite ao usuário que informe UUIDs."
+        ),
+    )
 
 
 def build_email_prepare_tool(workflow: EmailWorkflow | None) -> StructuredTool:
@@ -52,4 +69,60 @@ def build_email_prepare_tool(workflow: EmailWorkflow | None) -> StructuredTool:
     )
 
 
-__all__ = ["PrepareReportInput", "build_email_prepare_tool"]
+def build_email_send_tool(workflow: EmailDispatchWorkflow | None) -> StructuredTool:
+    async def send_report(config: RunnableConfig) -> str:
+        configurable = (config or {}).get("configurable") or {}
+        if not isinstance(configurable, Mapping):
+            raise ValueError("contexto protegido do envio está ausente")
+        if workflow is None:
+            return "Envio indisponível; nenhuma chamada foi feita ao MCP de e-mail."
+        return await workflow.send(configurable=dict(configurable))
+
+    return StructuredTool.from_function(
+        coroutine=send_report,
+        name="send_report",
+        description=(
+            "Solicita o envio somente quando o runtime encontrou autorização explícita "
+            "válida para a preparação. Não aceita destinatários, relatório, usuário ou chave "
+            "idempotente como argumentos."
+        ),
+        args_schema=SendReportInput,
+    )
+
+
+def build_email_status_tool(workflow: EmailDispatchWorkflow | None) -> StructuredTool:
+    async def get_report_status(
+        action_ref: UUID | None = None,
+        *,
+        config: RunnableConfig,
+    ) -> str:
+        configurable = (config or {}).get("configurable") or {}
+        if not isinstance(configurable, Mapping):
+            raise ValueError("contexto protegido da consulta de e-mail está ausente")
+        if workflow is None:
+            return "Consulta indisponível; nenhum status foi solicitado ao MCP de e-mail."
+        return await workflow.status(
+            authorization_id=action_ref,
+            configurable=dict(configurable),
+        )
+
+    return StructuredTool.from_function(
+        coroutine=get_report_status,
+        name="get_report_status",
+        description=(
+            "Consulta o estado atual no MCP para uma ação do usuário autenticado. "
+            "Sem action_ref, usa a única ação da sessão ou retorna opções opacas se houver "
+            "mais de uma; nunca peça UUID interno ao usuário."
+        ),
+        args_schema=GetReportStatusInput,
+    )
+
+
+__all__ = [
+    "GetReportStatusInput",
+    "PrepareReportInput",
+    "SendReportInput",
+    "build_email_prepare_tool",
+    "build_email_send_tool",
+    "build_email_status_tool",
+]

@@ -11,7 +11,8 @@ Especialistas permitidos:
 - farm: aplicações registradas, lotes, bovinos em exceção e carências da fazenda.
 - doctor: informações documentadas sobre medicamentos para bovinos.
 - analyst: indicadores, cálculos, comparações e previsões.
-- secretary: organização de dados, preparação de relatórios e e-mail.
+- secretary: organização de dados, preparação/envio de relatórios e consulta do
+  estado de e-mails.
 - information: dúvidas gerais sobre o Argos, termos, condições e FAQs.
 
 Documental e Legal não são rotas diretas: encaminhe pedidos relacionados a

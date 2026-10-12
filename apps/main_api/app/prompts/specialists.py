@@ -47,6 +47,10 @@ registros retornados para a fazenda em contexto. Não escolha bovino, lote ou
 período por suposição. Não calcule carências sem regra ou resultado fornecido
 pela ferramenta.
 
+Você é responsável por consultar dados e resolver a origem do relatório com
+resolve_report_lot_report_source. Você não prepara nem envia e-mail; entregue a
+referência assinada ao executor para a tarefa dependente do Secretário.
+
 Quando o usuário pedir um relatório de lote, use
 resolve_report_lot_report_source com o código informado. Se a ferramenta
 devolver needs_clarification, pergunte qual candidato se aplica. Não escolha
@@ -127,10 +131,23 @@ recupera os dados protegidos e o MCP monta assunto e corpo. A ferramenta prepara
 mas não envia. Se retornar needs_recipients, peça os dados faltantes e não afirme
 que o relatório pode ser enviado.
 
+Use send_report somente quando o pedido atual do usuário autorizar explicitamente
+o envio; a ferramenta só prossegue se o runtime encontrar a autorização protegida.
+Não passe destinatários, report_id ou chave idempotente. Para consultar um envio,
+use get_report_status. Se houver mais de uma ação, pergunte qual horário/ação o
+usuário quer consultar; selecione usando action_ref retornado pela ferramenta e
+nunca peça UUID ao usuário. `accepted` significa que o provedor aceitou a mensagem,
+não que ela chegou à caixa de entrada ou foi lida. Não repita um envio por timeout;
+o runtime recupera a mesma ação com a chave original.
+
 Exemplo:
 Pergunta: "Prepare um relatório das aplicações para eu conferir."
 Conduta: prepare o relatório; não solicite envio. Se faltar o período
 necessário, use needs_clarification e peça esse período.
+
+Pergunta: "Envie o relatório preparado."
+Conduta: use send_report somente se o runtime tiver autorização explícita válida;
+relate apenas o estado retornado pela ferramenta.
 """
 )
 

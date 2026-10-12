@@ -71,11 +71,23 @@ ALLOWED_TOOL_SLOTS: dict[AgentId, frozenset[str]] = {
     AgentId.FARM: frozenset({"farm_data"}),
     AgentId.DOCTOR: frozenset({"medicine_reference"}),
     AgentId.ANALYST: frozenset({"prediction"}),
-    AgentId.SECRETARY: frozenset({"farm_data", "report_delivery"}),
+    AgentId.SECRETARY: frozenset({"report_delivery"}),
     AgentId.INFORMATION: frozenset({"documental_a2a"}),
     AgentId.ORCHESTRATOR: frozenset(),
     AgentId.JUDGE: frozenset(),
     AgentId.QUESTION_FORMATTER: frozenset(),
+}
+
+ALLOWED_TOOL_NAMES_BY_SLOT: dict[tuple[AgentId, str], frozenset[str]] = {
+    (AgentId.SECRETARY, "report_delivery"): frozenset(
+        {
+            "prepare_report",
+            "send_report",
+            "get_report_status",
+            "mcp_email_unavailable",
+            "mock_preparar_relatorio",
+        }
+    ),
 }
 
 _EXPECTED_MODEL_POLICIES: dict[AgentId, ModelPolicyId] = {
@@ -171,7 +183,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
         AgentDefinition(
             agent_id=AgentId.ROUTER,
             prompt_key="router",
-            prompt_version="1",
+            prompt_version="2",
             input_schema=RouterInput,
             output_schema=RoutePlan,
             tool_slots=(),
@@ -180,7 +192,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
         AgentDefinition(
             agent_id=AgentId.FARM,
             prompt_key="farm",
-            prompt_version="1",
+            prompt_version="2",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
             tool_slots=("farm_data",),
@@ -207,10 +219,10 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
         AgentDefinition(
             agent_id=AgentId.SECRETARY,
             prompt_key="secretary",
-            prompt_version="1",
+            prompt_version="2",
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
-            tool_slots=("farm_data", "report_delivery"),
+            tool_slots=("report_delivery",),
             model_policy=ModelPolicyId.SECRETARY,
         ),
         AgentDefinition(
@@ -225,7 +237,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
         AgentDefinition(
             agent_id=AgentId.ORCHESTRATOR,
             prompt_key="orchestrator",
-            prompt_version="1",
+            prompt_version="2",
             input_schema=OrchestratorInput,
             output_schema=OrchestratorResult,
             tool_slots=(),
@@ -234,7 +246,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
         AgentDefinition(
             agent_id=AgentId.JUDGE,
             prompt_key="judge",
-            prompt_version="1",
+            prompt_version="2",
             input_schema=JudgeInput,
             output_schema=JudgeResult,
             tool_slots=(),

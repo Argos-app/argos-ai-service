@@ -165,15 +165,42 @@ class EmailDispatchWorkflow:
         )
         return _safe_result(result)
 
-    async def status(self, *, authorization_id: UUID, configurable: dict[str, Any]) -> str:
+    async def status(self, *, authorization_id: UUID | None, configurable: dict[str, Any]) -> str:
         principal_user_id, session_id = self._identity(configurable)
-        authorization = await self._preparations.get_send_authorization_by_id(
-            authorization_id=authorization_id,
-            principal_user_id=principal_user_id,
-            session_id=session_id,
-        )
-        if authorization is None:
-            raise ValueError("ação de envio não encontrada para o usuário autenticado")
+        if authorization_id is None:
+            authorizations = await self._preparations.list_send_authorizations(
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+            )
+            if not authorizations:
+                return json.dumps(
+                    {
+                        "status": "not_found",
+                        "message": "Não encontrei ações de envio nesta sessão.",
+                    },
+                    ensure_ascii=False,
+                )
+            if len(authorizations) > 1:
+                actions = await self._action_options(
+                    authorizations, principal_user_id=principal_user_id, session_id=session_id
+                )
+                return json.dumps(
+                    {
+                        "status": "needs_action_selection",
+                        "actions": actions,
+                        "message": "Há mais de uma ação; peça ao usuário para indicar qual delas.",
+                    },
+                    ensure_ascii=False,
+                )
+            authorization = authorizations[0]
+        else:
+            authorization = await self._preparations.get_send_authorization_by_id(
+                authorization_id=authorization_id,
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+            )
+            if authorization is None:
+                raise ValueError("ação de envio não encontrada para o usuário autenticado")
         operation_reference = await self._preparations.get_send_operation_reference(
             authorization_id=authorization.authorization_id,
             principal_user_id=principal_user_id,
@@ -183,13 +210,7 @@ class EmailDispatchWorkflow:
             return _safe_unconfirmed()
         return await self._refresh_status(authorization, operation_reference, principal_user_id)
 
-    async def recent_actions(self, *, configurable: dict[str, Any]) -> str:
-        """Projeta ações próprias sem expor documentos, chaves ou operation IDs."""
-        principal_user_id, session_id = self._identity(configurable)
-        authorizations = await self._preparations.list_send_authorizations(
-            principal_user_id=principal_user_id,
-            session_id=session_id,
-        )
+    async def _action_options(self, authorizations, *, principal_user_id, session_id):
         actions = []
         for authorization in authorizations:
             operation_reference = await self._preparations.get_send_operation_reference(
@@ -197,14 +218,22 @@ class EmailDispatchWorkflow:
                 principal_user_id=principal_user_id,
                 session_id=session_id,
             )
+            if operation_reference is None:
+                status = "not_confirmed"
+            else:
+                status = json.loads(
+                    await self._refresh_status(
+                        authorization, operation_reference, principal_user_id
+                    )
+                )["status"]
             actions.append(
                 {
                     "action_ref": str(authorization.authorization_id),
                     "authorized_at": authorization.authorized_at.isoformat(),
-                    "status": "status_check_available" if operation_reference else "not_confirmed",
+                    "status": status,
                 }
             )
-        return json.dumps({"actions": actions}, ensure_ascii=False)
+        return actions
 
     async def _refresh_status(
         self, authorization, operation_reference, principal_user_id: UUID

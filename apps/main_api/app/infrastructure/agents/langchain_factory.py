@@ -36,7 +36,7 @@ def validate_agent_configuration(
             f"Modelo não configurado para a política {definition.model_policy.value}"
         )
 
-    if (definition.prompt_key, definition.prompt_version) != (agent_id.value, "1"):
+    if definition.prompt_key != agent_id.value:
         raise AgentFactoryConfigurationError(
             f"Referência de prompt incompatível para {agent_id.value}"
         )
