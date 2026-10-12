@@ -1,0 +1,30 @@
+name: argos-mcp-data-integration
+
+services:
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: mcp_data_test
+            POSTGRES_PASSWORD: mcp_data_test_local_only
+            POSTGRES_DB: mcp_data_test
+        ports:
+            - "127.0.0.1:54329:5432"
+        tmpfs:
+            - /var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U mcp_data_test -d mcp_data_test"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    mongo:
+        image: mongo:7.0
+        ports:
+            - "127.0.0.1:27029:27017"
+        tmpfs:
+            - /data/db
+        healthcheck:
+            test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ping:1})"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
