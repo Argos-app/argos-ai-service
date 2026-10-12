@@ -21,8 +21,32 @@ from .lot_report import (
     LotReportEnvelope,
     LotReportIdentity,
 )
+from .prediction import (
+    ConsumptionUnit,
+    CoverageStatus,
+    DataOrigin,
+    EstimateMedicineConsumptionRequest,
+    EstimateMedicineConsumptionResponse,
+    MedicineConsumptionEstimate,
+    MonthlyConsumption,
+    PredictionMode,
+    PredictionStatus,
+    PredictionWindow,
+    PropertyCoverage,
+)
 
 __all__ = [
+    "ConsumptionUnit",
+    "CoverageStatus",
+    "DataOrigin",
+    "EstimateMedicineConsumptionRequest",
+    "EstimateMedicineConsumptionResponse",
+    "MedicineConsumptionEstimate",
+    "MonthlyConsumption",
+    "PredictionMode",
+    "PredictionStatus",
+    "PredictionWindow",
+    "PropertyCoverage",
     "AnimalExceptionRecord",
     "ApplicationRecord",
     "LotReportData",
