@@ -23,6 +23,7 @@ from packages.observability import (
     OperationTimer,
     ProtocolMetadata,
     ResultMetadata,
+    Usage,
     classify_exception,
 )
 
@@ -64,6 +65,8 @@ class OperationRecorder:
         protocol: ProtocolMetadata | None = None,
         timeout_ms: float | None = None,
         error_origin: ErrorOrigin = ErrorOrigin.UNKNOWN,
+        provider: str | None = None,
+        model_requested: str | None = None,
     ) -> None:
         self._collector = collector
         self._error_origin = error_origin
@@ -84,6 +87,8 @@ class OperationRecorder:
             status=ObservationStatus.STARTED,
             protocol=protocol,
             timeout_ms=timeout_ms,
+            provider=provider,
+            model_requested=model_requested,
         )
         self._emit(self._started)
 
@@ -98,6 +103,8 @@ class OperationRecorder:
         replayed_result: bool | None = None,
         error_origin: ErrorOrigin | None = None,
         cancellation_state: CancellationState | None = None,
+        model_returned: str | None = None,
+        usage: Usage | None = None,
     ) -> None:
         if self._finished:
             return
@@ -136,6 +143,8 @@ class OperationRecorder:
                 "replayed_result": replayed_result,
                 "error": error_metadata,
                 "cancellation_state": cancellation_state,
+                "model_returned": model_returned,
+                "usage": usage,
             }
         )
         self._emit(terminal)

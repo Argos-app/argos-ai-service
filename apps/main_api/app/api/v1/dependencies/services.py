@@ -135,6 +135,7 @@ def _summary_generator_provider(request: Request):
             if settings is not None
             else SESSION_SUMMARY_INPUT_MAX_TOKENS
         ),
+        observation_collector=active_collector(getattr(app_state, "observability_collector", None)),
     )
     app_state.session_summary_generator = generator
     return generator
@@ -157,7 +158,10 @@ def _user_memory_extractor_provider(request: Request):
         return None
     from app.infrastructure.agents.user_memory_extractor import LangChainUserMemoryExtractor
 
-    extractor = LangChainUserMemoryExtractor(model)
+    extractor = LangChainUserMemoryExtractor(
+        model,
+        observation_collector=active_collector(getattr(app_state, "observability_collector", None)),
+    )
     app_state.user_memory_extractor = extractor
     return extractor
 

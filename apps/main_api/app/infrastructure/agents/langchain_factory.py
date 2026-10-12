@@ -8,6 +8,7 @@ from uuid import UUID
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
 from app.infrastructure.agents.execution_observer import ExecutionObserver
 from app.infrastructure.observability.langchain_callbacks import ObservabilityToolCallback
+from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.infrastructure.observability.recording import OperationRecorder
 from app.ports.agent import Agent, AgentId
 from app.ports.execution_event_repository import ExecutionEventRepository
@@ -118,6 +119,9 @@ class _LangChainAgent(Agent[Any, BaseModel]):
         if self._observation_collector is not None:
             callbacks.append(
                 ObservabilityToolCallback(self._observation_collector, self._agent_id.value)
+            )
+            callbacks.append(
+                ModelUsageCallback(self._observation_collector, agent=self._agent_id.value)
             )
         if callbacks:
             config = config or {}
