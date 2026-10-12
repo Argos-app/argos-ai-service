@@ -8,11 +8,18 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from app.application.email_workflow import EmailWorkflow
+from app.application.email_dispatch_workflow import EmailDispatchWorkflow
+from app.application.email_workflow import EmailWorkflow, _fingerprint
+from app.domain.email_preparations import (
+    EmailPreparation,
+    EmailSendAuthorization,
+    SendAuthorizationOrigin,
+)
 from app.domain.report_artifacts import ReportArtifact
 from app.ports.email_preparation_repository import EmailSendAuthorizationConflictError
 
 from packages.contracts import (
+    DispatchStatus,
     LotReportData,
     LotReportEnvelope,
     LotReportIdentity,
@@ -22,6 +29,8 @@ from packages.contracts import (
     RecipientResolution,
     RecipientResolutionStatus,
     RecipientSelector,
+    ReportStatusResult,
+    SendReportResult,
 )
 
 
@@ -36,12 +45,22 @@ class _Artifacts:
             raise LookupError("not found")
         return self.artifact
 
+    async def get_owned(self, *, reference, principal_user_id, session_id):
+        if (
+            reference != self.artifact.reference
+            or principal_user_id != self.artifact.principal_user_id
+            or session_id != self.artifact.session_id
+        ):
+            raise LookupError("not found")
+        return self.artifact
+
 
 class _Preparations:
     def __init__(self):
         self.records = {}
         self.pending = []
         self.authorizations = {}
+        self.operation_references = {}
 
     async def find_matching(self, **key):
         identity = (
@@ -60,6 +79,18 @@ class _Preparations:
             preparation.request_fingerprint,
         )
         self.records[key] = preparation
+
+    async def get_by_reference(self, *, reference, principal_user_id, session_id):
+        return next(
+            (
+                item
+                for item in self.records.values()
+                if item.reference == reference
+                and item.principal_user_id == principal_user_id
+                and item.session_id == session_id
+            ),
+            None,
+        )
 
     async def save_pending_recipient_resolution(self, resolution):
         self.pending.append(resolution)
@@ -108,6 +139,46 @@ class _Preparations:
             )
         )
 
+    async def list_send_authorizations(self, *, principal_user_id, session_id, limit=20):
+        values = [
+            item
+            for item in self.authorizations.values()
+            if item.principal_user_id == principal_user_id and item.session_id == session_id
+        ]
+        return tuple(values[:limit])
+
+    async def get_send_authorization_by_id(
+        self, *, authorization_id, principal_user_id, session_id
+    ):
+        return next(
+            (
+                item
+                for item in self.authorizations.values()
+                if item.authorization_id == authorization_id
+                and item.principal_user_id == principal_user_id
+                and item.session_id == session_id
+            ),
+            None,
+        )
+
+    async def get_send_operation_reference(
+        self, *, authorization_id, principal_user_id, session_id
+    ):
+        reference = self.operation_references.get(authorization_id)
+        if reference is None or (reference.principal_user_id, reference.session_id) != (
+            principal_user_id,
+            session_id,
+        ):
+            return None
+        return reference
+
+    async def save_send_operation_reference(self, reference):
+        existing = self.operation_references.get(reference.authorization_id)
+        if existing is not None and existing.operation_id != reference.operation_id:
+            raise EmailSendAuthorizationConflictError("operation conflict")
+        self.operation_references[reference.authorization_id] = reference
+        return reference
+
 
 class _EmailClient:
     service_name = "email"
@@ -118,6 +189,8 @@ class _EmailClient:
 
     async def call_tool(self, name, arguments, *, request_headers=None):
         self.calls.append((name, arguments, request_headers))
+        if callable(self.prepared):
+            return self.prepared(name, arguments)
         return SimpleNamespace(structuredContent=self.prepared.model_dump(mode="json"), content=[])
 
 
@@ -367,3 +440,168 @@ def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_pr
     assert pending.options[0].selector.value == "alex1@example.com"
     assert "a***@example.com" in pending.options[0].label
     assert preparations.authorizations == {}
+
+
+def _authorized_dispatch(artifact, prepared, property_id, client):
+    now = datetime.now(UTC)
+    preparation = EmailPreparation(
+        reference=uuid4(),
+        principal_user_id=artifact.principal_user_id,
+        session_id=artifact.session_id,
+        interaction_id=uuid4(),
+        report_artifact_ref=artifact.reference,
+        request_fingerprint="request-hash",
+        prepared_report=prepared,
+        created_at=now,
+    )
+    authorization = EmailSendAuthorization(
+        authorization_id=uuid4(),
+        principal_user_id=artifact.principal_user_id,
+        session_id=artifact.session_id,
+        source_interaction_id=uuid4(),
+        preparation_reference=preparation.reference,
+        report_id=prepared.report_id,
+        request_fingerprint=preparation.request_fingerprint,
+        prepared_fingerprint=_fingerprint(prepared.model_dump(mode="json")),
+        recipients_fingerprint=_fingerprint(
+            [recipient.model_dump(mode="json") for recipient in prepared.recipients]
+        ),
+        origin=SendAuthorizationOrigin.EXPLICIT_REQUEST,
+        idempotency_key=str(uuid4()),
+        authorized_at=now,
+        expires_at=prepared.expires_at,
+    )
+    repository = _Preparations()
+    repository.records[
+        (
+            preparation.principal_user_id,
+            preparation.session_id,
+            preparation.report_artifact_ref,
+            preparation.request_fingerprint,
+        )
+    ] = preparation
+    repository.authorizations[
+        (
+            authorization.principal_user_id,
+            authorization.session_id,
+            authorization.source_interaction_id,
+        )
+    ] = authorization
+    workflow = EmailDispatchWorkflow(
+        email_client=client,
+        preparations=repository,
+        report_artifacts=_Artifacts(artifact),
+    )
+    config = {
+        "argos_user_id": str(artifact.principal_user_id),
+        "session_id": str(artifact.session_id),
+        "argos_send_intent_source_interaction_id": str(authorization.source_interaction_id),
+        "argos_authorized_property_ids": (str(property_id),),
+    }
+    return workflow, repository, authorization, config
+
+
+def _dispatch_result(report_id, operation_id=None, status=DispatchStatus.ACCEPTED):
+    now = datetime.now(UTC)
+    return SendReportResult(
+        operation_id=operation_id or uuid4(),
+        report_id=report_id,
+        status=status,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    sent = _dispatch_result(prepared.report_id)
+
+    def respond(name, arguments):
+        if name == "send_report":
+            return SimpleNamespace(structuredContent=sent.model_dump(mode="json"), content=[])
+        requested_operation = arguments["payload"]["operation_id"]
+        assert requested_operation == str(sent.operation_id)
+        status = ReportStatusResult.model_validate(sent.model_dump(mode="json"))
+        return SimpleNamespace(structuredContent=status.model_dump(mode="json"), content=[])
+
+    client = _EmailClient(respond)
+    workflow, repository, authorization, config = _authorized_dispatch(
+        artifact, prepared, property_id, client
+    )
+
+    async def execute():
+        send_result = json.loads(await workflow.send(configurable=config))
+        status_result = json.loads(
+            await workflow.status(
+                authorization_id=authorization.authorization_id,
+                configurable=config,
+            )
+        )
+        return send_result, status_result
+
+    send_result, status_result = asyncio.run(execute())
+
+    assert send_result["status"] == "accepted"
+    assert status_result["status"] == "accepted"
+    assert len(client.calls) == 2
+    assert [item[0] for item in client.calls] == ["send_report", "get_report_status"]
+    assert (
+        repository.operation_references[authorization.authorization_id].operation_id
+        == sent.operation_id
+    )
+    assert str(sent.operation_id) not in json.dumps(send_result)
+    assert "idempotency_key" not in json.dumps(send_result)
+
+
+def test_lost_send_response_retries_with_same_report_and_idempotency_key():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    calls = []
+    result = _dispatch_result(prepared.report_id)
+
+    def respond(name, arguments):
+        calls.append(arguments["payload"])
+        if len(calls) == 1:
+            raise TimeoutError("response lost after remote operation")
+        return SimpleNamespace(structuredContent=result.model_dump(mode="json"), content=[])
+
+    client = _EmailClient(respond)
+    workflow, repository, authorization, config = _authorized_dispatch(
+        artifact, prepared, property_id, client
+    )
+
+    async def retry():
+        first = json.loads(await workflow.send(configurable=config))
+        second = json.loads(await workflow.send(configurable=config))
+        return first, second
+
+    first, second = asyncio.run(retry())
+
+    assert first["status"] == "unknown"
+    assert second["status"] == "accepted"
+    assert calls[0] == calls[1]
+    assert calls[0]["report_id"] == str(prepared.report_id)
+    assert calls[0]["idempotency_key"] == authorization.idempotency_key
+    assert (
+        repository.operation_references[authorization.authorization_id].operation_id
+        == result.operation_id
+    )

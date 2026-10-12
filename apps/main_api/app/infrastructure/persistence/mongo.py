@@ -826,7 +826,7 @@ class MongoPersistence:
             database["ai_email_preparations"],
             database["ai_pending_recipient_resolutions"],
             database["ai_email_send_authorizations"],
-            database["ai_email_send_receipts"],
+            database["ai_email_operation_references"],
         )
         self.session_work = MongoSessionWorkRepository(
             database,

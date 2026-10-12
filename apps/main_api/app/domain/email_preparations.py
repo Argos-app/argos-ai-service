@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from packages.contracts import PreparedReport, RecipientSelector, SendReportResult
+from packages.contracts import PreparedReport, RecipientSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,13 +82,13 @@ class EmailSendAuthorization:
 
 
 @dataclass(frozen=True, slots=True)
-class EmailSendReceipt:
-    """Recibo validado do MCP, isolado do contexto conversacional do agente."""
+class EmailOperationReference:
+    """Referência local mínima à operação canônica que pertence ao MCP."""
 
     authorization_id: UUID
     principal_user_id: UUID
     session_id: UUID
-    result: SendReportResult
+    operation_id: UUID
     recorded_at: datetime
 
 

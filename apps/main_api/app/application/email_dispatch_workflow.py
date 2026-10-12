@@ -9,7 +9,7 @@ from uuid import UUID
 
 from app.application.email_workflow import _fingerprint, _payload
 from app.application.report_artifact_service import validate_report_source
-from app.domain.email_preparations import EmailSendReceipt
+from app.domain.email_preparations import EmailOperationReference
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from packages.contracts import (
@@ -93,13 +93,13 @@ class EmailDispatchWorkflow:
         if authorization is None:
             raise ValueError("não há autorização persistida para este pedido de envio")
 
-        receipt = await self._preparations.get_send_receipt(
+        operation_reference = await self._preparations.get_send_operation_reference(
             authorization_id=authorization.authorization_id,
             principal_user_id=principal_user_id,
             session_id=session_id,
         )
-        if receipt is not None:
-            return await self._refresh_status(authorization, receipt, principal_user_id)
+        if operation_reference is not None:
+            return await self._refresh_status(authorization, operation_reference, principal_user_id)
 
         now = datetime.now(UTC)
         if now >= authorization.expires_at:
@@ -154,16 +154,16 @@ class EmailDispatchWorkflow:
             return _safe_unconfirmed()
         result = SendReportResult.model_validate(_payload(response))
         self._validate_result(result, authorization.report_id)
-        persisted = await self._preparations.save_send_receipt(
-            EmailSendReceipt(
+        await self._preparations.save_send_operation_reference(
+            EmailOperationReference(
                 authorization_id=authorization.authorization_id,
                 principal_user_id=principal_user_id,
                 session_id=session_id,
-                result=result,
+                operation_id=result.operation_id,
                 recorded_at=datetime.now(UTC),
             )
         )
-        return _safe_result(persisted.result)
+        return _safe_result(result)
 
     async def status(self, *, authorization_id: UUID, configurable: dict[str, Any]) -> str:
         principal_user_id, session_id = self._identity(configurable)
@@ -174,14 +174,14 @@ class EmailDispatchWorkflow:
         )
         if authorization is None:
             raise ValueError("ação de envio não encontrada para o usuário autenticado")
-        receipt = await self._preparations.get_send_receipt(
+        operation_reference = await self._preparations.get_send_operation_reference(
             authorization_id=authorization.authorization_id,
             principal_user_id=principal_user_id,
             session_id=session_id,
         )
-        if receipt is None:
+        if operation_reference is None:
             return _safe_unconfirmed()
-        return await self._refresh_status(authorization, receipt, principal_user_id)
+        return await self._refresh_status(authorization, operation_reference, principal_user_id)
 
     async def recent_actions(self, *, configurable: dict[str, Any]) -> str:
         """Projeta ações próprias sem expor documentos, chaves ou operation IDs."""
@@ -192,7 +192,7 @@ class EmailDispatchWorkflow:
         )
         actions = []
         for authorization in authorizations:
-            receipt = await self._preparations.get_send_receipt(
+            operation_reference = await self._preparations.get_send_operation_reference(
                 authorization_id=authorization.authorization_id,
                 principal_user_id=principal_user_id,
                 session_id=session_id,
@@ -201,14 +201,16 @@ class EmailDispatchWorkflow:
                 {
                     "action_ref": str(authorization.authorization_id),
                     "authorized_at": authorization.authorized_at.isoformat(),
-                    "status": receipt.result.status.value if receipt else "not_confirmed",
+                    "status": "status_check_available" if operation_reference else "not_confirmed",
                 }
             )
         return json.dumps({"actions": actions}, ensure_ascii=False)
 
-    async def _refresh_status(self, authorization, receipt, principal_user_id: UUID) -> str:
+    async def _refresh_status(
+        self, authorization, operation_reference, principal_user_id: UUID
+    ) -> str:
         request = ReportStatusRequest(
-            operation_id=receipt.result.operation_id,
+            operation_id=operation_reference.operation_id,
             requested_by=principal_user_id,
         )
         try:
@@ -218,17 +220,8 @@ class EmailDispatchWorkflow:
             result = ReportStatusResult.model_validate(_payload(response))
             self._validate_result(result, authorization.report_id)
         except Exception:
-            return _safe_result(receipt.result, recovered=True)
-        updated = await self._preparations.save_send_receipt(
-            EmailSendReceipt(
-                authorization_id=authorization.authorization_id,
-                principal_user_id=receipt.principal_user_id,
-                session_id=receipt.session_id,
-                result=result,
-                recorded_at=datetime.now(UTC),
-            )
-        )
-        return _safe_result(updated.result, recovered=True)
+            return _safe_unconfirmed()
+        return _safe_result(result, recovered=True)
 
     @staticmethod
     def _validate_result(result: SendReportResult, report_id: UUID) -> None:

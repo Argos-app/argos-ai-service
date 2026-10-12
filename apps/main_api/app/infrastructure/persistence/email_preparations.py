@@ -5,9 +5,9 @@ from typing import Any
 from uuid import UUID
 
 from app.domain.email_preparations import (
+    EmailOperationReference,
     EmailPreparation,
     EmailSendAuthorization,
-    EmailSendReceipt,
     PendingRecipientOption,
     PendingRecipientResolution,
     SendAuthorizationOrigin,
@@ -135,25 +135,23 @@ def _send_authorization(document: dict[str, Any]) -> EmailSendAuthorization:
     )
 
 
-def _send_receipt_document(receipt: EmailSendReceipt) -> dict[str, Any]:
+def _operation_reference_document(reference: EmailOperationReference) -> dict[str, Any]:
     return {
-        "_id": str(receipt.authorization_id),
-        "principal_user_id": str(receipt.principal_user_id),
-        "session_id": str(receipt.session_id),
-        "result": receipt.result.model_dump(mode="json"),
-        "recorded_at": receipt.recorded_at,
-        "purge_at": receipt.recorded_at + timedelta(days=31),
+        "_id": str(reference.authorization_id),
+        "principal_user_id": str(reference.principal_user_id),
+        "session_id": str(reference.session_id),
+        "operation_id": str(reference.operation_id),
+        "recorded_at": reference.recorded_at,
+        "purge_at": reference.recorded_at + timedelta(days=31),
     }
 
 
-def _send_receipt(document: dict[str, Any]) -> EmailSendReceipt:
-    from packages.contracts import SendReportResult
-
-    return EmailSendReceipt(
+def _operation_reference(document: dict[str, Any]) -> EmailOperationReference:
+    return EmailOperationReference(
         authorization_id=UUID(document["_id"]),
         principal_user_id=UUID(document["principal_user_id"]),
         session_id=UUID(document["session_id"]),
-        result=SendReportResult.model_validate(document["result"]),
+        operation_id=UUID(document["operation_id"]),
         recorded_at=document["recorded_at"],
     )
 
@@ -185,12 +183,12 @@ class MongoEmailPreparationRepository:
         collection: Any,
         pending_resolutions: Any = None,
         send_authorizations: Any = None,
-        send_receipts: Any = None,
+        operation_references: Any = None,
     ) -> None:
         self._collection = collection
         self._pending_resolutions = pending_resolutions
         self._send_authorizations = send_authorizations
-        self._send_receipts = send_receipts
+        self._operation_references = operation_references
 
     async def ensure_indexes(self) -> None:
         await self._collection.create_index(
@@ -234,14 +232,14 @@ class MongoEmailPreparationRepository:
                 name="ttl_email_send_authorizations",
                 expireAfterSeconds=0,
             )
-        if self._send_receipts is not None:
-            await self._send_receipts.create_index(
+        if self._operation_references is not None:
+            await self._operation_references.create_index(
                 [("principal_user_id", 1), ("session_id", 1), ("_id", 1)],
                 unique=True,
-                name="uq_email_send_receipt_scope",
+                name="uq_email_operation_reference_scope",
             )
-            await self._send_receipts.create_index(
-                "purge_at", name="ttl_email_send_receipts", expireAfterSeconds=0
+            await self._operation_references.create_index(
+                "purge_at", name="ttl_email_operation_references", expireAfterSeconds=0
             )
 
     async def find_matching(
@@ -401,59 +399,50 @@ class MongoEmailPreparationRepository:
         )
         return _send_authorization(document) if document is not None else None
 
-    async def get_send_receipt(
+    async def get_send_operation_reference(
         self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
-    ) -> EmailSendReceipt | None:
-        if self._send_receipts is None:
+    ) -> EmailOperationReference | None:
+        if self._operation_references is None:
             return None
-        document = await self._send_receipts.find_one(
+        document = await self._operation_references.find_one(
             {
                 "_id": str(authorization_id),
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
             }
         )
-        return _send_receipt(document) if document is not None else None
+        return _operation_reference(document) if document is not None else None
 
-    async def save_send_receipt(self, receipt: EmailSendReceipt) -> EmailSendReceipt:
-        if self._send_receipts is None:
-            raise RuntimeError("armazenamento de recibos de envio indisponível")
+    async def save_send_operation_reference(
+        self, reference: EmailOperationReference
+    ) -> EmailOperationReference:
+        if self._operation_references is None:
+            raise RuntimeError("armazenamento de referências de operação indisponível")
         scope = {
-            "_id": str(receipt.authorization_id),
-            "principal_user_id": str(receipt.principal_user_id),
-            "session_id": str(receipt.session_id),
+            "_id": str(reference.authorization_id),
+            "principal_user_id": str(reference.principal_user_id),
+            "session_id": str(reference.session_id),
         }
-        existing = await self._send_receipts.find_one(scope)
+        existing = await self._operation_references.find_one(scope)
         if existing is not None:
-            stored = _send_receipt(existing)
-            if stored.result.operation_id != receipt.result.operation_id:
+            stored = _operation_reference(existing)
+            if stored.operation_id != reference.operation_id:
                 raise EmailSendAuthorizationConflictError(
-                    "a autorização já possui recibo para outra operação"
+                    "a autorização já aponta para outra operação"
                 )
-            await self._send_receipts.update_one(
-                scope,
-                {
-                    "$set": {
-                        "result": receipt.result.model_dump(mode="json"),
-                        "recorded_at": receipt.recorded_at,
-                        "purge_at": receipt.recorded_at + timedelta(days=31),
-                    }
-                },
-            )
+            return stored
         else:
-            await self._send_receipts.update_one(
+            await self._operation_references.update_one(
                 scope,
-                {"$setOnInsert": _send_receipt_document(receipt)},
+                {"$setOnInsert": _operation_reference_document(reference)},
                 upsert=True,
             )
-        document = await self._send_receipts.find_one(scope)
+        document = await self._operation_references.find_one(scope)
         if document is None:
-            raise RuntimeError("recibo de envio não foi persistido")
-        stored = _send_receipt(document)
-        if stored.result.operation_id != receipt.result.operation_id:
-            raise EmailSendAuthorizationConflictError(
-                "a autorização já possui recibo para outra operação"
-            )
+            raise RuntimeError("referência da operação não foi persistida")
+        stored = _operation_reference(document)
+        if stored.operation_id != reference.operation_id:
+            raise EmailSendAuthorizationConflictError("a autorização já aponta para outra operação")
         return stored
 
 

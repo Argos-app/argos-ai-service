@@ -4,9 +4,9 @@ from typing import Protocol
 from uuid import UUID
 
 from app.domain.email_preparations import (
+    EmailOperationReference,
     EmailPreparation,
     EmailSendAuthorization,
-    EmailSendReceipt,
     PendingRecipientResolution,
 )
 
@@ -64,8 +64,10 @@ class EmailPreparationRepository(Protocol):
         self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
     ) -> EmailSendAuthorization | None: ...
 
-    async def get_send_receipt(
+    async def get_send_operation_reference(
         self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
-    ) -> EmailSendReceipt | None: ...
+    ) -> EmailOperationReference | None: ...
 
-    async def save_send_receipt(self, receipt: EmailSendReceipt) -> EmailSendReceipt: ...
+    async def save_send_operation_reference(
+        self, reference: EmailOperationReference
+    ) -> EmailOperationReference: ...

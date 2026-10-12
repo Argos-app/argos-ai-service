@@ -101,19 +101,13 @@ async def test_doctor_tools_use_doctor_identity_and_medicine_operation():
 
 
 @pytest.mark.asyncio
-async def test_secretary_email_binding_never_exposes_send_tool_and_binds_requester():
+async def test_secretary_email_binding_does_not_expose_unscoped_status_or_send_tools():
     email_client = _FakeClient("email")
     bindings = build_mcp_tool_bindings(McpClients(email=email_client), None)
     tools = bindings[AgentId.SECRETARY]["report_delivery"]
-    user_id = str(uuid4())
 
-    assert {tool.name for tool in tools} == {"prepare_report", "get_report_status"}
-    await _tool(tools, "get_report_status").ainvoke(
-        {"payload": {"operation_id": str(uuid4()), "requested_by": str(uuid4())}},
-        config={"configurable": {"argos_user_id": user_id}},
-    )
-    assert email_client.calls[0]["arguments"]["payload"]["requested_by"] == user_id
-    assert email_client.calls[0]["request_headers"] is None
+    assert {tool.name for tool in tools} == {"prepare_report"}
+    assert email_client.calls == []
 
 
 def test_data_tools_require_delegation_signer():
@@ -140,5 +134,5 @@ def test_configured_mcp_tools_are_bound_to_expected_agents():
         "estimate_medicine_consumption"
     }
     secretary_tools = {tool.name for tool in bindings[AgentId.SECRETARY]["report_delivery"]}
-    assert secretary_tools == {"prepare_report", "get_report_status"}
+    assert secretary_tools == {"prepare_report"}
     assert "send_report" not in secretary_tools
