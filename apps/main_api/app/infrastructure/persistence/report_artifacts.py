@@ -83,7 +83,7 @@ class MongoReportArtifactRepository:
                 "task_id": task_id,
             }
         ).sort([("created_at", -1), ("_id", 1)])
-        return tuple(_artifact(document) async for document in cursor)
+        return tuple([_artifact(document) async for document in cursor])
 
     async def get(
         self,

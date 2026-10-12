@@ -383,7 +383,7 @@ class MongoEmailPreparationRepository:
             cursor = cursor.sort("authorized_at", -1)
         if hasattr(cursor, "limit"):
             cursor = cursor.limit(max(1, min(limit, 100)))
-        return tuple(_send_authorization(document) async for document in cursor)
+        return tuple([_send_authorization(document) async for document in cursor])
 
     async def get_send_authorization_by_id(
         self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
