@@ -104,6 +104,7 @@ def _signed_envelope(user_id, property_id, lot_id):
 def test_report_source_validation_checks_identity_scope_expiry_and_hash():
     user_id, property_id, lot_id = uuid4(), uuid4(), uuid4()
     envelope = _signed_envelope(user_id, property_id, lot_id)
+    valid_now = datetime(2026, 10, 11, tzinfo=UTC)
 
     assert (
         validate_report_source(
@@ -111,7 +112,7 @@ def test_report_source_validation_checks_identity_scope_expiry_and_hash():
             principal_user_id=user_id,
             lot_id=lot_id,
             authorized_property_ids=(property_id,),
-            now=datetime(2026, 10, 11, tzinfo=UTC),
+            now=valid_now,
         )
         is envelope
     )
@@ -122,6 +123,7 @@ def test_report_source_validation_checks_identity_scope_expiry_and_hash():
             principal_user_id=uuid4(),
             lot_id=lot_id,
             authorized_property_ids=(property_id,),
+            now=valid_now,
         )
     with pytest.raises(ReportSourceValidationError, match="lote selecionado"):
         validate_report_source(
@@ -129,6 +131,7 @@ def test_report_source_validation_checks_identity_scope_expiry_and_hash():
             principal_user_id=user_id,
             lot_id=uuid4(),
             authorized_property_ids=(property_id,),
+            now=valid_now,
         )
     with pytest.raises(ReportSourceValidationError, match="propriedade"):
         validate_report_source(
@@ -136,6 +139,7 @@ def test_report_source_validation_checks_identity_scope_expiry_and_hash():
             principal_user_id=user_id,
             lot_id=lot_id,
             authorized_property_ids=(uuid4(),),
+            now=valid_now,
         )
     with pytest.raises(ReportSourceValidationError, match="expirado"):
         validate_report_source(
@@ -152,14 +156,16 @@ def test_report_source_validation_checks_identity_scope_expiry_and_hash():
             principal_user_id=user_id,
             lot_id=lot_id,
             authorized_property_ids=(property_id,),
+            now=valid_now,
         )
 
 
 @pytest.mark.asyncio
 async def test_resolve_report_lot_passes_delegated_scope_and_matches_exact_code():
     user_id, property_id, request_id = uuid4(), uuid4(), uuid4()
-    lot = _lot(code="l-1", property_id=property_id)
-    client = _FakeMcpClient(_page(lot, _lot(code="L-10", property_id=property_id)))
+    lot_id = uuid4()
+    lot = _lot(code="l-1", property_id=property_id, lot_id=lot_id)
+    client = _FakeMcpClient([_page(lot, _lot(code="L-10", property_id=property_id))])
     issuer = _FakeIssuer()
     data = McpDataClient(client, issuer)
 
@@ -171,7 +177,7 @@ async def test_resolve_report_lot_passes_delegated_scope_and_matches_exact_code(
     )
 
     assert len(result.candidates) == 1
-    assert result.candidates[0].lot_id == lot["lot_id"]
+    assert result.candidates[0].lot_id == lot_id
     assert result.unique_candidate is not None
     assert client.calls[0]["name"] == "list_lots"
     assert client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
