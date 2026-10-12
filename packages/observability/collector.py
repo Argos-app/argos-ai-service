@@ -1,9 +1,15 @@
 """Emissão best-effort que mantém falhas de telemetria fora do fluxo funcional."""
 
 import logging
+from time import monotonic
 
 from .models import Observation
-from .ports import CollectionFailureReporter, ObservationCollector, ObservationWriter
+from .ports import (
+    CollectionFailureReporter,
+    ObservationCollector,
+    ObservationWriter,
+    SubmissionResult,
+)
 from .sanitization import sanitize_observation
 
 _LOGGER = logging.getLogger(__name__)
@@ -19,26 +25,34 @@ class BestEffortObservationCollector(ObservationCollector):
         report_failure: CollectionFailureReporter | None = None,
     ) -> None:
         self._writer = writer
-        self._report_failure = report_failure or self._log_failure
+        self._report_failure = report_failure
+        self._last_report_at: dict[str, float] = {}
 
     def emit(self, observation: Observation) -> None:
         try:
-            accepted = self._writer.try_submit(sanitize_observation(observation))
+            result = self._writer.try_submit(sanitize_observation(observation))
         except Exception:
             self._report("writer_error")
             return
-        if not accepted:
-            self._report("queue_full")
+        if result != SubmissionResult.ACCEPTED:
+            self._report(result.value)
 
     def _report(self, code: str) -> None:
         try:
-            self._report_failure(code)
+            if self._report_failure is not None:
+                self._report_failure(code)
+            else:
+                self._log_failure(code)
         except Exception:
             # O canal de diagnóstico também não pode alterar a operação observada.
             return
 
-    @staticmethod
-    def _log_failure(code: str) -> None:
+    def _log_failure(self, code: str) -> None:
+        now = monotonic()
+        last_report = self._last_report_at.get(code)
+        if last_report is not None and now - last_report < 30:
+            return
+        self._last_report_at[code] = now
         _LOGGER.warning("observability collection failed", extra={"failure_code": code})
 
 

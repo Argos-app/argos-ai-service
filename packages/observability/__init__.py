@@ -27,6 +27,7 @@ from .ports import (
     CollectionFailureReporter,
     ObservationCollector,
     ObservationWriter,
+    SubmissionResult,
 )
 from .sanitization import (
     SafeFailure,
@@ -62,6 +63,7 @@ __all__ = [
     "ResultMetadata",
     "SafeFailure",
     "SystemClock",
+    "SubmissionResult",
     "TimingResult",
     "Usage",
     "UsageAvailability",

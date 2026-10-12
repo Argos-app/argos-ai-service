@@ -1,10 +1,27 @@
 """Configuração externa do serviço principal."""
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _observability_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        _LOGGER.warning(
+            "invalid observability setting; using default",
+            extra={"setting": name},
+        )
+        return default
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +30,15 @@ class Settings:
     mongo_database: str = "argos_ai"
     mongo_server_selection_timeout_ms: int = 5_000
     mongo_write_timeout_ms: int = 5_000
+    observability_collection: str | None = None
+    observability_queue_max_items: int = 2_048
+    observability_queue_max_bytes: int = 8 * 1024 * 1024
+    observability_document_max_bytes: int = 16 * 1024
+    observability_batch_size: int = 100
+    observability_batch_interval_ms: int = 250
+    observability_max_attempts: int = 3
+    observability_retry_base_delay_ms: int = 50
+    observability_shutdown_timeout_ms: int = 2_000
     session_summary_input_max_tokens: int = SESSION_SUMMARY_INPUT_MAX_TOKENS
     auth_issuer: str = "argos-backend-service"
     auth_audience: str = "argos-ai-service"
@@ -53,6 +79,27 @@ class Settings:
                 os.getenv("MAIN_API_MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
             ),
             mongo_write_timeout_ms=int(os.getenv("MAIN_API_MONGO_WRITE_TIMEOUT_MS", "5000")),
+            observability_collection=os.getenv("MAIN_API_OBSERVABILITY_COLLECTION") or None,
+            observability_queue_max_items=_observability_int(
+                "MAIN_API_OBSERVABILITY_QUEUE_MAX_ITEMS", 2048
+            ),
+            observability_queue_max_bytes=_observability_int(
+                "MAIN_API_OBSERVABILITY_QUEUE_MAX_BYTES", 8 * 1024 * 1024
+            ),
+            observability_document_max_bytes=_observability_int(
+                "MAIN_API_OBSERVABILITY_DOCUMENT_MAX_BYTES", 16 * 1024
+            ),
+            observability_batch_size=_observability_int("MAIN_API_OBSERVABILITY_BATCH_SIZE", 100),
+            observability_batch_interval_ms=_observability_int(
+                "MAIN_API_OBSERVABILITY_BATCH_INTERVAL_MS", 250
+            ),
+            observability_max_attempts=_observability_int("MAIN_API_OBSERVABILITY_MAX_ATTEMPTS", 3),
+            observability_retry_base_delay_ms=_observability_int(
+                "MAIN_API_OBSERVABILITY_RETRY_BASE_DELAY_MS", 50
+            ),
+            observability_shutdown_timeout_ms=_observability_int(
+                "MAIN_API_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2000
+            ),
             session_summary_input_max_tokens=int(
                 os.getenv(
                     "MAIN_API_SESSION_SUMMARY_INPUT_MAX_TOKENS",

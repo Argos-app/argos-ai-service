@@ -1,7 +1,10 @@
 """Interfaces independentes de framework e infraestrutura para observabilidade."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol
 
 from .models import Observation
@@ -20,8 +23,16 @@ class Clock(Protocol):
 class ObservationWriter(Protocol):
     """Aceita uma observação sem esperar por rede ou persistência."""
 
-    def try_submit(self, observation: Observation) -> bool:
-        """Retorna imediatamente se aceitou a observação na fila limitada."""
+    def try_submit(self, observation: Observation) -> SubmissionResult:
+        """Retorna imediatamente o resultado da tentativa na fila limitada."""
+
+
+class SubmissionResult(StrEnum):
+    ACCEPTED = "accepted"
+    QUEUE_FULL = "queue_full"
+    DOCUMENT_TOO_LARGE = "document_too_large"
+    INVALID_DOCUMENT = "invalid_document"
+    NOT_RUNNING = "writer_not_running"
 
 
 class ObservationCollector(Protocol):

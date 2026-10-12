@@ -11,6 +11,7 @@ from app.api.v1.router import router as v1_router
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
 from app.infrastructure.mcp import McpDelegationTokenIssuer, create_mcp_clients
 from app.settings import Settings
+from packages.observability import DisabledObservationCollector
 
 
 def create_app(
@@ -31,6 +32,11 @@ def create_app(
             runtime = await create_runtime(configured)
         app.state.persistence = runtime.persistence if runtime else None
         app.state.mongo_database = runtime.database if runtime else None
+        app.state.observability_collector = (
+            getattr(runtime, "observation_collector", DisabledObservationCollector())
+            if runtime
+            else DisabledObservationCollector()
+        )
         app.state.checkpointer = (
             checkpointer
             if checkpointer is not None
@@ -49,6 +55,7 @@ def create_app(
     app.state.session_summary_generator = session_summary_generator
     app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
+    app.state.observability_collector = DisabledObservationCollector()
     app.state.mcp_clients = create_mcp_clients(configured)
     app.state.mcp_delegation_token_issuer = (
         McpDelegationTokenIssuer(configured)

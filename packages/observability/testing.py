@@ -1,6 +1,7 @@
 """Fakes de memória para testes do núcleo de observabilidade."""
 
 from .models import Observation
+from .ports import SubmissionResult
 
 
 class InMemoryObservationWriter:
@@ -11,10 +12,10 @@ class InMemoryObservationWriter:
         self.error = error
         self.observations: list[Observation] = []
 
-    def try_submit(self, observation: Observation) -> bool:
+    def try_submit(self, observation: Observation) -> SubmissionResult:
         if self.error is not None:
             raise self.error
         if not self.accept:
-            return False
+            return SubmissionResult.QUEUE_FULL
         self.observations.append(observation)
-        return True
+        return SubmissionResult.ACCEPTED
