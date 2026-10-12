@@ -41,6 +41,8 @@ from app.prompts.specialists import (
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool
 
+from packages.observability import ObservationCollector
+
 AgentToolBindings = Mapping[AgentId, Mapping[str, Sequence[BaseTool]]]
 
 
@@ -112,6 +114,7 @@ def build_agent_factory(
     delegation_issuer: McpDelegationTokenIssuer | None = None,
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
+    observation_collector: ObservationCollector | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
@@ -122,6 +125,7 @@ def build_agent_factory(
                 delegation_issuer,
                 report_artifacts=report_artifacts,
                 email_preparations=email_preparations,
+                observation_collector=observation_collector,
             )
         )
     for agent_id, slots in (tool_bindings or {}).items():
@@ -245,4 +249,5 @@ def build_agent_factory(
             AgentId.QUESTION_FORMATTER: question_formatter_app,
         },
         execution_events=execution_events,
+        observation_collector=observation_collector,
     )

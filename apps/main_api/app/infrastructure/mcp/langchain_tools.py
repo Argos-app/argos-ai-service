@@ -22,6 +22,7 @@ from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.ports.agent import AgentId
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
+from packages.observability import ObservationCollector
 
 
 class McpToolBindingConfigurationError(ValueError):
@@ -184,6 +185,7 @@ def build_mcp_tool_bindings(
     delegation_issuer: McpDelegationTokenIssuer | None,
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
+    observation_collector: ObservationCollector | None = None,
 ) -> dict[AgentId, dict[str, tuple[StructuredTool, ...]]]:
     """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação."""
     if (clients.data is not None or clients.prediction is not None) and delegation_issuer is None:
@@ -257,11 +259,13 @@ def build_mcp_tool_bindings(
                 email_client=clients.email,
                 report_artifacts=report_artifacts,
                 preparations=email_preparations,
+                observation_collector=observation_collector,
             )
             dispatch_workflow = EmailDispatchWorkflow(
                 email_client=clients.email,
                 preparations=email_preparations,
                 report_artifacts=report_artifacts,
+                observation_collector=observation_collector,
             )
         if "prepare_report" in clients.email.allowed_tools:
             email_tools = (*email_tools, build_email_prepare_tool(workflow))

@@ -9,9 +9,21 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
-from app.infrastructure.mcp import McpDelegationTokenIssuer, create_mcp_clients
+from app.infrastructure.mcp import (
+    McpDelegationTokenIssuer,
+    bind_observation_collector,
+    create_mcp_clients,
+)
+from app.infrastructure.observability.recording import OperationRecorder, active_collector
 from app.settings import Settings
-from packages.observability import DisabledObservationCollector
+from packages.observability import (
+    DisabledObservationCollector,
+    ErrorOrigin,
+    HttpMetadata,
+    ObservationStatus,
+    OperationKind,
+    OperationPhase,
+)
 
 
 def create_app(
@@ -36,6 +48,9 @@ def create_app(
             getattr(runtime, "observation_collector", DisabledObservationCollector())
             if runtime
             else DisabledObservationCollector()
+        )
+        app.state.mcp_clients = bind_observation_collector(
+            app.state.mcp_clients, app.state.observability_collector
         )
         app.state.checkpointer = (
             checkpointer
@@ -70,6 +85,42 @@ def create_app(
             if len(body) > 32 * 1024:
                 return JSONResponse(status_code=413, content={"detail": "Corpo excede 32 KiB"})
         return await call_next(request)
+
+    @app.middleware("http")
+    async def observe_http(request: Request, call_next):
+        collector = active_collector(app.state.observability_collector)
+        if collector is None or request.url.path in {"/health/live", "/health/ready"}:
+            return await call_next(request)
+        recorder = OperationRecorder(
+            collector,
+            operation_kind=OperationKind.HTTP,
+            operation_name="http.request",
+            operation_phase=OperationPhase.EXECUTION,
+            error_origin=ErrorOrigin.APPLICATION,
+        )
+        try:
+            response = await call_next(request)
+        except BaseException as exc:
+            recorder.finish(error=exc)
+            raise
+        route = request.scope.get("route")
+        route_template = getattr(route, "path", "unmatched")
+        status_code = response.status_code
+        recorder.finish(
+            status=(
+                ObservationStatus.FAILED
+                if status_code >= 500
+                else ObservationStatus.REJECTED
+                if status_code >= 400
+                else ObservationStatus.SUCCEEDED
+            ),
+            http=HttpMetadata(
+                method=request.method[:12],
+                route=route_template[:200],
+                status_code=status_code,
+            ),
+        )
+        return response
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:

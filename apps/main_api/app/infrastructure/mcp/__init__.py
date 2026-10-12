@@ -9,6 +9,7 @@ from app.infrastructure.mcp.client import (
     McpToolExecutionError,
     McpToolNotAllowedError,
     McpToolServerClient,
+    bind_observation_collector,
     create_mcp_clients,
 )
 from app.infrastructure.mcp.data_client import McpDataClient
@@ -32,6 +33,7 @@ __all__ = [
     "McpToolExecutionError",
     "McpToolNotAllowedError",
     "McpToolServerClient",
+    "bind_observation_collector",
     "McpDataClient",
     "DelegationRequestError",
     "DelegationTokenConfigurationError",

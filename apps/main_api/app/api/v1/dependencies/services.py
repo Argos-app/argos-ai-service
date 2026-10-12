@@ -14,6 +14,7 @@ from app.application.message_history_service import (
     MessageHistoryService as MongoMessageHistoryService,
 )
 from app.application.session_service import MongoSessionService
+from app.infrastructure.observability.recording import active_collector
 
 
 class SessionService(Protocol):
@@ -39,6 +40,7 @@ class MessageHistoryQueryService(Protocol):
 
 def _graph_provider(request: Request):
     app_state = request.app.state
+    observation_collector = active_collector(getattr(app_state, "observability_collector", None))
     if app_state.agent_graph is not None:
         return app_state.agent_graph
     from app.agents.registry import ModelPolicyId
@@ -73,12 +75,14 @@ def _graph_provider(request: Request):
                 email_client=mcp_clients.email,
                 preparations=persistence.email_preparations,
                 report_artifacts=persistence.report_artifacts,
+                observation_collector=observation_collector,
             )
         graph = build_graph(
             build_agent_factory(
                 models,
                 execution_events=execution_events,
                 mcp_clients=mcp_clients,
+                observation_collector=observation_collector,
                 delegation_issuer=getattr(app_state, "mcp_delegation_token_issuer", None),
                 report_artifacts=(
                     persistence.report_artifacts if persistence is not None else None
@@ -170,6 +174,9 @@ def get_session_service(request: Request) -> SessionService:
         summaries=persistence.session_summaries,
         user_memory=persistence.user_memory,
         execution_events=persistence.execution_events,
+        observation_collector=active_collector(
+            getattr(request.app.state, "observability_collector", None)
+        ),
         email_preparations=persistence.email_preparations,
         summary_generator_provider=lambda: _summary_generator_provider(request),
         user_memory_extractor_provider=lambda: _user_memory_extractor_provider(request),
