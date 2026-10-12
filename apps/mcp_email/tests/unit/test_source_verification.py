@@ -1,5 +1,5 @@
 import base64
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -37,7 +37,7 @@ def envelope() -> LotReportEnvelope:
         report=report,
         principal_user_id=uuid4(),
         authorized_property_ids=(report.requested_lot.property_id,),
-        valid_until=datetime(2026, 10, 10, tzinfo=UTC),
+        valid_until=datetime.now(UTC) + timedelta(days=5),
         payload_hash="pending",
         signature="valid-signature",
         signature_key_id="key-1",
