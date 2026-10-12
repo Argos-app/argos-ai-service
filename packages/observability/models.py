@@ -1,5 +1,7 @@
 """Schema versionado para persistir uma observação técnica por tentativa."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum

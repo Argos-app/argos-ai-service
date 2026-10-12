@@ -1,5 +1,6 @@
 """Contrato compartilhado para observações técnicas brutas."""
 
+from .collector import BestEffortObservationCollector, DisabledObservationCollector
 from .models import (
     AttemptReason,
     AttemptVisibility,
@@ -21,25 +22,51 @@ from .models import (
     UsageAvailability,
     UsageSource,
 )
+from .ports import (
+    Clock,
+    CollectionFailureReporter,
+    ObservationCollector,
+    ObservationWriter,
+)
+from .sanitization import (
+    SafeFailure,
+    allowlisted_value,
+    classify_exception,
+    sanitize_observation,
+)
+from .timing import OperationTimer, SystemClock, TimingResult
 
 __all__ = [
     "AttemptReason",
     "AttemptVisibility",
+    "BestEffortObservationCollector",
     "Billing",
     "CancellationState",
+    "Clock",
+    "CollectionFailureReporter",
+    "DisabledObservationCollector",
     "ErrorMetadata",
     "ErrorOrigin",
     "ExecutionMode",
     "HttpMetadata",
     "Observation",
+    "ObservationCollector",
     "ObservationLevel",
     "ObservationStatus",
     "OperationKind",
     "OperationPhase",
+    "ObservationWriter",
+    "OperationTimer",
     "ProtocolMetadata",
     "ResourceUsage",
     "ResultMetadata",
+    "SafeFailure",
+    "SystemClock",
+    "TimingResult",
     "Usage",
     "UsageAvailability",
     "UsageSource",
+    "allowlisted_value",
+    "classify_exception",
+    "sanitize_observation",
 ]
