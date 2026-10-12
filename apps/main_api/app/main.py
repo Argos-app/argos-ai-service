@@ -80,6 +80,16 @@ def create_app(
                 status_code=503,
                 content={"status": "unavailable", "reason": "session_store_not_configured"},
             )
+        if not configured.auth_trusted_public_keys:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "identity_not_configured"},
+            )
+        if getattr(app.state, "checkpointer", None) is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "graph_runtime_not_configured"},
+            )
         try:
             await app.state.mongo_database.command("ping")
         except Exception:

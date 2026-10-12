@@ -210,6 +210,53 @@ class EmailDispatchWorkflow:
             return _safe_unconfirmed()
         return await self._refresh_status(authorization, operation_reference, principal_user_id)
 
+    async def recover_interaction_outcome(self, *, configurable: dict[str, Any]) -> str | None:
+        """Return a deterministic public summary for a send linked to this request.
+
+        This only reads the authorization/reference already persisted by the main API and asks
+        the MCP for its current status. It never initiates or retries a dispatch.
+        """
+        try:
+            principal_user_id, session_id = self._identity(configurable)
+            source_interaction_id = UUID(
+                str(configurable["argos_send_intent_source_interaction_id"])
+            )
+            authorization = await self._preparations.get_send_authorization(
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+                source_interaction_id=source_interaction_id,
+            )
+            if authorization is None:
+                return None
+            reference = await self._preparations.get_send_operation_reference(
+                authorization_id=authorization.authorization_id,
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+            )
+            if reference is None:
+                return None
+            result = json.loads(
+                await self._refresh_status(authorization, reference, principal_user_id)
+            )
+        except Exception:
+            return "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado."
+
+        summaries = {
+            DispatchStatus.PENDING.value: "O envio está em processamento.",
+            DispatchStatus.ACCEPTED.value: (
+                "O MCP confirmou o recebimento do envio; isso não confirma a entrega."
+            ),
+            DispatchStatus.PARTIAL.value: "O MCP confirmou um envio parcial.",
+            DispatchStatus.FAILED.value: "O MCP confirmou que o envio falhou.",
+            DispatchStatus.UNKNOWN.value: (
+                "O MCP ainda não confirmou o estado do envio; nenhum novo envio foi solicitado."
+            ),
+        }
+        return summaries.get(
+            result.get("status"),
+            "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado.",
+        )
+
     async def _action_options(self, authorizations, *, principal_user_id, session_id):
         actions = []
         for authorization in authorizations:

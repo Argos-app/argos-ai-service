@@ -27,6 +27,7 @@ from app.agent_schemas.synthesis import (
     OrchestratorResult,
     TaskOutcome,
 )
+from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.report_artifact_service import (
     ReportSourceExpiredError,
     ReportSourceValidationError,
@@ -118,6 +119,7 @@ def reset_turn_state() -> dict:
         "recipient_selectors": {},
         "send_intent_requested": False,
         "send_intent_source_interaction_id": None,
+        "email_action_summary": None,
         "sanitized_message": "",
         "route": [],
         "route_plan": None,
@@ -432,6 +434,7 @@ async def no_especialista(
     agent_id: AgentId,
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
+    email_dispatch: EmailDispatchWorkflow | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
     tasks = state["ordered_tasks"]
@@ -618,6 +621,25 @@ async def no_especialista(
                 missing_fields=("recipient",),
             )
 
+    email_action_summary = None
+    if (
+        agent_id == AgentId.SECRETARY
+        and email_dispatch is not None
+        and state.get("send_intent_requested")
+    ):
+        configurable = (config or {}).get("configurable") or {}
+        recovery_context = dict(configurable)
+        recovery_context.setdefault("argos_user_id", state["user_id"])
+        recovery_context.setdefault("session_id", state["session_id"])
+        if state.get("send_intent_source_interaction_id"):
+            recovery_context.setdefault(
+                "argos_send_intent_source_interaction_id",
+                state["send_intent_source_interaction_id"],
+            )
+        email_action_summary = await email_dispatch.recover_interaction_outcome(
+            configurable=recovery_context
+        )
+
     outcome = TaskOutcome(task=task, result=result)
     if result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE):
         errors.append(f"{agent_id.value}_{result.status.value}")
@@ -629,6 +651,8 @@ async def no_especialista(
         "task_outcomes": (*state.get("task_outcomes", ()), outcome),
         "sources": sources,
     }
+    if email_action_summary is not None:
+        update["email_action_summary"] = email_action_summary
     if agent_id == AgentId.FARM and report_artifacts is not None:
         configurable = (config or {}).get("configurable") or {}
         try:
@@ -834,12 +858,22 @@ def no_guardrail_saida(state: AgentState) -> dict:
         for identifier in build_agent_context(state).values():
             if identifier:
                 answer = answer.replace(identifier, "[identificador protegido]")
+    answer = _include_email_action_summary(answer, state.get("email_action_summary"))
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
 def no_saida_segura(state: AgentState) -> dict:
-    answer = state.get("final_answer") or SAFE_ANSWER
+    answer = _include_email_action_summary(
+        state.get("final_answer") or SAFE_ANSWER,
+        state.get("email_action_summary"),
+    )
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
+
+
+def _include_email_action_summary(answer: str, summary: str | None) -> str:
+    if not summary:
+        return answer
+    return f"{answer}\n\nEstado do envio: {summary}"
 
 
 def decidir_pos_entrada(state: AgentState) -> str:
@@ -892,6 +926,7 @@ def build_graph(
     checkpointer: Any = None,
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
+    email_dispatch: EmailDispatchWorkflow | None = None,
 ):
     graph = StateGraph(AgentState)
     graph.add_node("guardrail_input", no_guardrail_entrada)
@@ -911,6 +946,7 @@ def build_graph(
                 agent_id=agent_id,
                 report_artifacts=report_artifacts,
                 email_preparations=email_preparations,
+                email_dispatch=email_dispatch,
             ),
         )
     graph.add_node("orchestrator", partial(no_orquestrador, factory=factory))

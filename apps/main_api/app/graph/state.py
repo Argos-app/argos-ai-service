@@ -18,6 +18,7 @@ class AgentState(MessagesState):
     recipient_selectors: dict[str, dict[str, str]]
     send_intent_requested: bool
     send_intent_source_interaction_id: str | None
+    email_action_summary: str | None
 
     route: list[str]
     route_plan: RoutePlan | None
