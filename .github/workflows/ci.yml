@@ -63,7 +63,9 @@ jobs:
               run: docker build --file apps/a2a_agent/Dockerfile --tag argos-a2a-agent:ci .
 
             - name: Validate standalone A2A Compose
-              run: docker compose --env-file apps/a2a_agent/.env.example --file apps/a2a_agent/compose.yaml config --quiet
+              run: |
+                  cp apps/a2a_agent/.env.example apps/a2a_agent/.env
+                  docker compose --env-file apps/a2a_agent/.env.example --file apps/a2a_agent/compose.yaml config --quiet
 
             - name: Set up Node.js
               uses: actions/setup-node@v4
