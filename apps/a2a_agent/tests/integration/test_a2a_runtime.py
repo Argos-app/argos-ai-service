@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 import pytest_asyncio
-from a2a.client import A2AClientError, ClientConfig, create_client
+from a2a.client import ClientConfig, create_client
 from a2a.types import (
     GetTaskRequest,
     Message,
@@ -28,6 +28,7 @@ from a2a.types import (
     SendMessageRequest,
     a2a_pb2,
 )
+from a2a.utils.errors import TaskNotFoundError
 from argos_a2a_agent.adapters.inbound.a2a_server import create_agent_card
 from argos_a2a_agent.adapters.storage import LocalManifestRepository
 from argos_a2a_agent.application.document_queries import AggregateDocuments, GetDocumentExcerpt
@@ -435,7 +436,8 @@ async def test_detailed_and_aggregated_read_use_cases_over_published_corpus(
         document_ids=("11111111-1111-4111-8111-111111111111",),
         jurisdiction="BR",
     )
-    revision = answer["corpus_revision"]
+    corpus_revision = answer["corpus_revision"]
+    document_revision = answer["sources"][0]["revision_hash"]
 
     class CurrentRevision:
         async def execute(self, context):
@@ -443,7 +445,7 @@ async def test_detailed_and_aggregated_read_use_cases_over_published_corpus(
             return EnsureCurrentCorpusOutcome(
                 status=CorpusRefreshStatus.UNCHANGED,
                 checked_at=datetime.now(UTC),
-                corpus_revision=revision,
+                corpus_revision=corpus_revision,
             )
 
         async def reauthorize(self, context):
@@ -469,7 +471,7 @@ async def test_detailed_and_aggregated_read_use_cases_over_published_corpus(
             document_id=UUID("11111111-1111-4111-8111-111111111111"),
             page_from=1,
             page_to=1,
-            expected_revision=revision,
+            expected_revision=document_revision,
         ),
         context,
     )
@@ -567,7 +569,7 @@ async def test_revocation_and_task_ownership_are_rechecked_per_request(
     other_user = uuid4()
     harness.set_authorized([harness.user_id, other_user])
     other_client, other_http = await harness.sdk_client(user_id=other_user)
-    with pytest.raises(A2AClientError):
+    with pytest.raises(TaskNotFoundError):
         await other_client.get_task(GetTaskRequest(id=task.id))
     await other_client.close()
     await other_http.aclose()

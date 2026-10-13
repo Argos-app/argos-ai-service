@@ -205,7 +205,9 @@ class _DocumentSpecialist:
             top_k=8,
             document_ids=request.document_ids,
             document_types=(self.document_type,),
-            jurisdictions=(request.jurisdiction,) if request.jurisdiction else None,
+            jurisdictions=(request.jurisdiction,)
+            if request.jurisdiction and self.skill == DocumentSkill.LEGAL
+            else None,
         )
 
     def _needs_early_answer(self, request: DocumentQuestionRequest) -> bool:
