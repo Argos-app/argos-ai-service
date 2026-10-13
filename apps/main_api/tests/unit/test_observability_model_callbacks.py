@@ -152,7 +152,15 @@ async def test_model_usage_is_kept_when_agent_output_parsing_fails(monkeypatch):
         "create_agent",
         lambda **_: RunnableWithInvalidStructuredOutput(),
     )
-    models = {policy: object() for policy in ModelPolicyId}
+
+    class CapableModel:
+        def with_structured_output(self, _schema):
+            return self
+
+        def bind_tools(self, _tools):
+            return self
+
+    models = {policy: CapableModel() for policy in ModelPolicyId}
     agent = build_agent_factory(
         models,
         observation_collector=collector,

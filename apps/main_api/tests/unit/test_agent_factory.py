@@ -17,6 +17,7 @@ from app.agents.registry import ModelPolicyId
 from app.agents.specialists import build_agent_factory
 from app.domain.sessions import ExecutionStatus
 from app.infrastructure.agents import langchain_factory
+from app.infrastructure.agents.model_factory import ModelRuntimeConfigurationError
 from app.infrastructure.mcp.client import McpClients
 from app.ports.agent import AgentId
 
@@ -173,7 +174,7 @@ def test_factory_fails_when_model_for_policy_is_missing() -> None:
     models = _models()
     del models[ModelPolicyId.FARM]
 
-    with pytest.raises(langchain_factory.AgentFactoryConfigurationError, match="Modelo"):
+    with pytest.raises(ModelRuntimeConfigurationError, match="modelo ausente"):
         build_agent_factory(models, use_mock_tools=True)
 
 

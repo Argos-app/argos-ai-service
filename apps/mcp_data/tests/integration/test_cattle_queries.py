@@ -37,6 +37,7 @@ async def test_tools_and_property_herd_lot_queries_are_scoped_and_paginated(mcp_
             "list_animal_lot_history",
             "list_cattle_documents",
             "get_farm_summary",
+            "get_lot_report_source",
             "summarize_exception_animals",
             "list_medicines",
             "list_medicine_documents",

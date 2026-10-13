@@ -56,13 +56,14 @@ def test_a2a_capture_content_requires_explicit_api_key():
         qdrant_write_api_key="write-key",
         qdrant_collection="documents",
         qdrant_vector_size=3,
-        document_source_root=Path("/tmp/documents"),
-        manifest_path=Path("/tmp/manifest.json"),
+        document_source_root=Path("C:/tmp/documents"),
+        manifest_path=Path("C:/tmp/manifest.json"),
         internal_service_token="service-token",
         resource_server_url="https://resource.example",
         delegation_issuer="argos-test",
         trusted_delegation_keys=(("key-id", "public-key"),),
         a2a_endpoint_url="https://a2a.example/a2a",
+        permission_sql_dsn="postgresql://reader:password@database/documents",
         langsmith_capture_content=True,
     )
     try:

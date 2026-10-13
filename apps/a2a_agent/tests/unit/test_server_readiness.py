@@ -24,6 +24,7 @@ def test_readiness_is_unavailable_without_a_configured_agent_registry():
         delegation_issuer="main-api",
         trusted_delegation_keys=(("test", "not-used-by-readiness"),),
         a2a_endpoint_url="https://a2a.example/a2a",
+        permission_sql_dsn="postgresql://reader:password@database/documents",
     )
     server = create_a2a_server(
         settings,

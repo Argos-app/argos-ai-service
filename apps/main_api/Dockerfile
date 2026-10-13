@@ -3,12 +3,13 @@ FROM python:3.14.3-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app
+ARG PIP_VERSION=26.2.1
 
 WORKDIR /app
 
-COPY apps/main_api/requirements.txt /app/requirements.txt
-RUN python -m pip install --no-cache-dir --disable-pip-version-check \
-    -r /app/requirements.txt
+COPY apps/main_api/pylock.toml /app/pylock.toml
+RUN python -m pip install --no-cache-dir --disable-pip-version-check "pip==${PIP_VERSION}" \
+    && python -m pip install --no-cache-dir --disable-pip-version-check -r /app/pylock.toml
 
 COPY apps/main_api/app/ /app/app/
 COPY packages/contracts/ /app/packages/contracts/

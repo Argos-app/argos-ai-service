@@ -15,6 +15,7 @@ from app.domain.report_artifacts import (
     ReportArtifactNotFoundError,
 )
 from app.graph.workflow import no_especialista
+from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
 from app.ports.data_client import ReportLotCandidate, ReportLotResolution
 
@@ -228,13 +229,16 @@ async def test_secretary_receives_only_validated_artifact_reference():
         status="partial",
         answer="Origem consultada.",
     )
-    farm_update = await no_especialista(
-        state,
-        factory=_FakeFactory(farm=_FakeAgent(farm_result)),
-        agent_id=AgentId.FARM,
-        report_artifacts=repository,
-        config=config,
-    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "get_lot_report_source")
+    with execution_limits_scope(limits):
+        farm_update = await no_especialista(
+            state,
+            factory=_FakeFactory(farm=_FakeAgent(farm_result)),
+            agent_id=AgentId.FARM,
+            report_artifacts=repository,
+            config=config,
+        )
     resumed_state = {**state, **farm_update}
     resumed_state["current_task_index"] = 1
     secretary_agent = _FakeAgent(

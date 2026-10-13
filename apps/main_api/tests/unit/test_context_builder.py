@@ -227,7 +227,7 @@ async def test_context_without_summary_is_bounded_by_recent_messages_and_char_bu
                 interaction_id=interaction_id,
                 sequence=index * 2 + 2,
                 role=MessageRole.ASSISTANT,
-                kind=MessageKind.ASSISTANT_RESPONSE,
+                kind=MessageKind.ASSISTANT_ANSWER,
                 sanitized_content=f"resposta {index} " + "y" * 900,
                 created_at=now,
             )

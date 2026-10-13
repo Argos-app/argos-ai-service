@@ -2,6 +2,7 @@
 !apps/
 !apps/main_api/
 !apps/main_api/requirements.txt
+!apps/main_api/pylock.toml
 !apps/main_api/app/
 !apps/main_api/app/**
 !packages/

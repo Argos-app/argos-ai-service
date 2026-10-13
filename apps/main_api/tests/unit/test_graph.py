@@ -331,15 +331,10 @@ async def test_session_checkpoint_is_scoped_to_interaction_for_safe_recovery() -
 
 @pytest.mark.asyncio
 async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
-    source = SourceReference(title="Registro sintético", reference="mock://farm-demo/1")
     router = FakeAgent(RoutePlan(intent="consulta", tasks=(task(),)))
-    farm = FakeAgent(
-        SpecialistResult(
-            agent="farm", status="success", answer="Resultado simulado", sources=(source,)
-        )
-    )
+    farm = FakeAgent(SpecialistResult(agent="farm", status="success", answer="Resultado simulado"))
     orchestrator = FakeAgent(
-        OrchestratorResult(draft_answer="Resultado simulado, não é dado real.", sources=(source,))
+        OrchestratorResult(draft_answer="Resultado simulado, não é dado real.")
     )
     judge = FakeAgent(JudgeResult(decision="approved", reason="Simulação identificada"))
     graph = build_graph(
@@ -354,19 +349,32 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
     )
     state = request_state()
     state["session_context"] = session_context
-    result = await graph.ainvoke(state)
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda")
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(state)
 
     assert result["final_answer"] == "Resultado simulado, não é dado real."
     assert result["called_agents"] == ["router", "farm", "orchestrator", "judge"]
-    assert result["sources"] == [source]
-    assert farm.calls[0][1] == {
+    assert len(result["sources"]) == 1
+    assert result["sources"][0].title == "Consulta externa: consultar_fazenda"
+    assert {
+        key: farm.calls[0][1][key]
+        for key in (
+            "user_id",
+            "farm_id",
+            "session_id",
+            "interaction_id",
+            "argos_task_id",
+        )
+    } == {
         "user_id": "user-demo",
         "farm_id": "farm-demo",
         "session_id": "session-demo",
         "interaction_id": "interaction-origin",
         "argos_task_id": "t1",
     }
-    assert judge.calls[0][0].sources == (source,)
+    assert judge.calls[0][0].sources == ()
     assert router.calls[0][0].session_context.session_summary == "Continuidade da tarefa"
     assert router.calls[0][0].session_context.user_tone is None
     assert farm.calls[0][0].session_context.recent_messages == (
@@ -404,7 +412,11 @@ async def test_graph_orders_dependencies_and_passes_previous_result() -> None:
         )
     )
 
-    result = await graph.ainvoke(request_state("Compare aplicações e indicadores"))
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda")
+    limits.record_tool_success("analyst", "estimate_medicine_consumption")
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state("Compare aplicações e indicadores"))
 
     assert result["called_agents"] == ["router", "farm", "analyst", "orchestrator", "judge"]
     assert [outcome.task.task_id for outcome in result["task_outcomes"]] == ["t1", "t2"]
