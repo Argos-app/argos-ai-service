@@ -367,6 +367,63 @@ async def test_sdk_queries_two_agents_mixed_refresh_restart_and_concurrency(
 
 
 @pytest.mark.asyncio
+async def test_main_api_a2a_client_records_its_own_observation(a2a_harness: A2AHarness) -> None:
+    """O cliente do main_api registra sua chamada separadamente da medição do servidor."""
+    from app.infrastructure.a2a.client import DocumentA2AClient
+    from app.settings import Settings as MainAPISettings
+
+    from packages.observability import ObservationStatus
+
+    harness = a2a_harness
+    private_der = harness.private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    settings = MainAPISettings(
+        mcp_delegation_issuer=ISSUER,
+        mcp_delegation_key_id="integration-key",
+        mcp_delegation_private_key=base64.b64encode(private_der).decode("ascii"),
+        document_a2a_url=harness.endpoint,
+        document_a2a_service_token=SERVICE_TOKEN,
+    )
+
+    class Collector:
+        def __init__(self) -> None:
+            self.observations = []
+
+        def emit(self, observation) -> None:
+            self.observations.append(observation)
+
+    collector = Collector()
+    client = DocumentA2AClient(settings, observation_collector=collector)
+    question = "Quais são as condições?"
+    try:
+        result = json.loads(await client.ask(question, user_id=harness.user_id))
+    finally:
+        await client.aclose()
+
+    assert result["status"] in {"success", "unavailable"}
+    assert len(collector.observations) == 2
+    started, terminal = collector.observations
+    assert started.status == ObservationStatus.STARTED
+    assert terminal.status == ObservationStatus.SUCCEEDED
+    assert terminal.operation_name == "a2a.documental.message.send"
+    assert terminal.agent == "documental"
+    assert terminal.protocol.name == "a2a"
+    assert terminal.protocol.operation == "message.send"
+    assert terminal.protocol.skill == "documental"
+    assert terminal.protocol.task_state == "completed"
+    assert terminal.result.code == result["status"]
+    assert terminal.started_at.tzinfo is not None
+    assert terminal.ended_at.tzinfo is not None
+    assert terminal.duration_ms is not None and terminal.duration_ms >= 0
+    serialized = repr(terminal.model_dump())
+    assert question not in serialized
+    assert str(harness.user_id) not in serialized
+
+
+@pytest.mark.asyncio
 async def test_detailed_and_aggregated_read_use_cases_over_published_corpus(
     a2a_harness: A2AHarness,
 ) -> None:
