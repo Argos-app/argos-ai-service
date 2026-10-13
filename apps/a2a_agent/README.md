@@ -54,6 +54,17 @@ versione `apps/a2a_agent/.env`. O serviço falha fechado quando as configuraçõ
 estão ausentes, a permissão não pode ser confirmada ou um provedor retorna
 resposta inválida.
 
+Para persistir observabilidade bruta, configure `A2A_OBSERVABILITY_MONGO_URI`
+como segredo e informe `A2A_OBSERVABILITY_COLLECTION` e, se necessário,
+`A2A_OBSERVABILITY_MONGO_DATABASE` como configuração. URI e coleção precisam ser
+informadas juntas; quando ambas forem omitidas, a coleta persistente fica
+desativada. O writer usa uma fila limitada em memória, sem spool local; falhas
+de configuração ou indisponibilidade do MongoDB desativam a persistência sem
+interromper as respostas A2A. Os registros incluem tentativas de operações A2A,
+agentes, provedores HTTP, embeddings, autorização PostgreSQL e adapters de
+documentos/Qdrant, sem persistir argumentos, prompts, respostas ou
+identificadores de usuário/task/contexto.
+
 ## Operação e recuperação
 
 - `GET /health/live` verifica o processo; `GET /health/ready` também depende da
