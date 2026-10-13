@@ -25,7 +25,14 @@ _SAFE_ERROR_CODES = frozenset(
     {"operation_cancelled", "operation_timeout", "connection_failed", "operation_failed"}
 )
 _TIMEOUT_EXCEPTION_NAMES = frozenset(
-    {"TimeoutException", "ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout"}
+    {
+        "TimeoutException",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "WriteTimeout",
+        "PoolTimeout",
+        "DocumentAgentDeadlineError",
+    }
 )
 _CONNECTION_EXCEPTION_NAMES = frozenset({"ConnectError", "NetworkError", "RemoteProtocolError"})
 

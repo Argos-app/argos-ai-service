@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
+from argos_a2a_agent.adapters.observability.recording import observe_operation
 from argos_a2a_agent.agents.prompts import (
     DOCUMENTAL_SYSTEM_PROMPT,
     LEGAL_SYSTEM_PROMPT,
@@ -41,6 +42,14 @@ from packages.contracts.a2a import (
     DocumentType,
 )
 from packages.contracts.documents import SearchDocumentsRequest
+from packages.observability import (
+    ErrorOrigin,
+    ObservationCollector,
+    ObservationLevel,
+    OperationKind,
+    OperationPhase,
+    ResultMetadata,
+)
 from packages.security.access import DocumentAccessContext
 
 Clock = Callable[[], datetime]
@@ -60,14 +69,40 @@ class _DocumentSpecialist:
         answer_generator: DocumentAnswerGenerator,
         *,
         clock: Clock = lambda: datetime.now(UTC),
+        observation_collector: ObservationCollector | None = None,
     ) -> None:
         self._search = search
         self._ensure_current = ensure_current
         self._repository = repository
         self._answer_generator = answer_generator
         self._clock = clock
+        self._observation_collector = observation_collector
 
     async def execute(
+        self,
+        request: DocumentQuestionRequest,
+        context: DocumentAccessContext | None,
+    ) -> DocumentAnswerResponse:
+        async with observe_operation(
+            self._observation_collector,
+            operation_kind=OperationKind.AGENT,
+            operation_name=f"a2a.agent.{self.skill.value}",
+            operation_phase=OperationPhase.EXECUTION,
+            observation_level=ObservationLevel.LOCAL_OPERATION,
+            agent=self.skill.value,
+            error_origin=ErrorOrigin.APPLICATION,
+        ) as recorder:
+            response = await self._execute(request, context)
+            if recorder is not None:
+                recorder.finish(
+                    result=ResultMetadata(
+                        source="document_answer",
+                        code=response.status.value,
+                    )
+                )
+            return response
+
+    async def _execute(
         self,
         request: DocumentQuestionRequest,
         context: DocumentAccessContext | None,
@@ -370,12 +405,44 @@ class MixedDocumentAgent(_DocumentSpecialist):
         legal: LegalAgent,
         *,
         clock: Clock = lambda: datetime.now(UTC),
+        observation_collector: ObservationCollector | None = None,
     ) -> None:
-        super().__init__(search, ensure_current, repository, answer_generator, clock=clock)
+        super().__init__(
+            search,
+            ensure_current,
+            repository,
+            answer_generator,
+            clock=clock,
+            observation_collector=observation_collector,
+        )
         self._documental = documental
         self._legal = legal
 
     async def execute(
+        self,
+        request: DocumentQuestionRequest,
+        context: DocumentAccessContext | None,
+    ) -> DocumentAnswerResponse:
+        async with observe_operation(
+            self._observation_collector,
+            operation_kind=OperationKind.AGENT,
+            operation_name=f"a2a.agent.{self.skill.value}",
+            operation_phase=OperationPhase.EXECUTION,
+            observation_level=ObservationLevel.LOCAL_OPERATION,
+            agent=self.skill.value,
+            error_origin=ErrorOrigin.APPLICATION,
+        ) as recorder:
+            response = await self._execute(request, context)
+            if recorder is not None:
+                recorder.finish(
+                    result=ResultMetadata(
+                        source="document_answer",
+                        code=response.status.value,
+                    )
+                )
+            return response
+
+    async def _execute(
         self,
         request: DocumentQuestionRequest,
         context: DocumentAccessContext | None,

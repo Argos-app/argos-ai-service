@@ -6,6 +6,7 @@ from typing import Any
 
 from argos_a2a_agent.adapters.inbound.delegation import ACCESS_CONTEXT_KEY
 from argos_a2a_agent.settings import Settings
+from packages.observability import ObservationCollector
 from packages.security.delegation import GlobalDocumentDelegationTokenVerifier
 from packages.security.errors import AccessContextError
 
@@ -89,6 +90,7 @@ def create_a2a_server(
     readiness_check: Callable[[], Awaitable[Any]],
     delegation_verifier: GlobalDocumentDelegationTokenVerifier,
     agent_registry: Any | None = None,
+    observation_collector: ObservationCollector | None = None,
 ) -> Any:
     """Cria healthchecks e, quando composto, o transporte A2A protegido.
 
@@ -138,7 +140,7 @@ def create_a2a_server(
 
         card = create_agent_card(settings.a2a_endpoint_url)
         handler = DefaultRequestHandler(
-            agent_executor=DocumentA2AExecutor(agent_registry),
+            agent_executor=DocumentA2AExecutor(agent_registry, observation_collector),
             task_store=InMemoryTaskStore(owner_resolver=task_owner),
             agent_card=card,
         )

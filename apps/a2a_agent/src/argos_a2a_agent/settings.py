@@ -1,12 +1,26 @@
 """Configuração explícita do serviço A2A, seguindo o bootstrap dos MCPs."""
 
 import json
+import logging
 import math
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _observability_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        _LOGGER.warning("invalid observability setting; using default", extra={"setting": name})
+        return default
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +54,19 @@ class Settings:
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
     a2a_endpoint_url: str | None = None
+    observability_mongo_uri: str | None = field(default=None, repr=False)
+    observability_mongo_database: str = "argos_ai"
+    observability_collection: str | None = None
+    observability_mongo_server_selection_timeout_ms: int = 5_000
+    observability_mongo_write_timeout_ms: int = 5_000
+    observability_queue_max_items: int = 2_048
+    observability_queue_max_bytes: int = 8 * 1024 * 1024
+    observability_document_max_bytes: int = 16 * 1024
+    observability_batch_size: int = 100
+    observability_batch_interval_ms: int = 250
+    observability_max_attempts: int = 3
+    observability_retry_base_delay_ms: int = 50
+    observability_shutdown_timeout_ms: int = 2_000
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -112,6 +139,35 @@ class Settings:
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
             a2a_endpoint_url=os.getenv("A2A_ENDPOINT_URL"),
+            observability_mongo_uri=os.getenv("A2A_OBSERVABILITY_MONGO_URI") or None,
+            observability_mongo_database=os.getenv("A2A_OBSERVABILITY_MONGO_DATABASE", "argos_ai"),
+            observability_collection=os.getenv("A2A_OBSERVABILITY_COLLECTION") or None,
+            observability_mongo_server_selection_timeout_ms=_observability_int(
+                "A2A_OBSERVABILITY_MONGO_SERVER_SELECTION_TIMEOUT_MS", 5_000
+            ),
+            observability_mongo_write_timeout_ms=_observability_int(
+                "A2A_OBSERVABILITY_MONGO_WRITE_TIMEOUT_MS", 5_000
+            ),
+            observability_queue_max_items=_observability_int(
+                "A2A_OBSERVABILITY_QUEUE_MAX_ITEMS", 2_048
+            ),
+            observability_queue_max_bytes=_observability_int(
+                "A2A_OBSERVABILITY_QUEUE_MAX_BYTES", 8 * 1024 * 1024
+            ),
+            observability_document_max_bytes=_observability_int(
+                "A2A_OBSERVABILITY_DOCUMENT_MAX_BYTES", 16 * 1024
+            ),
+            observability_batch_size=_observability_int("A2A_OBSERVABILITY_BATCH_SIZE", 100),
+            observability_batch_interval_ms=_observability_int(
+                "A2A_OBSERVABILITY_BATCH_INTERVAL_MS", 250
+            ),
+            observability_max_attempts=_observability_int("A2A_OBSERVABILITY_MAX_ATTEMPTS", 3),
+            observability_retry_base_delay_ms=_observability_int(
+                "A2A_OBSERVABILITY_RETRY_BASE_DELAY_MS", 50
+            ),
+            observability_shutdown_timeout_ms=_observability_int(
+                "A2A_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2_000
+            ),
         )
 
     def validate_runtime(self, *, require_providers: bool = True) -> None:
@@ -150,6 +206,11 @@ class Settings:
             missing.append("A2A_TRUSTED_DELEGATION_KEYS")
         if not self.documents_read_role_codes:
             missing.append("A2A_DOCUMENTS_READ_ROLE_CODES")
+        if (self.observability_mongo_uri is None) != (self.observability_collection is None):
+            missing.append(
+                "A2A_OBSERVABILITY_MONGO_URI e A2A_OBSERVABILITY_COLLECTION "
+                "devem ser configuradas juntas"
+            )
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.a2a_port <= 65535:
@@ -278,3 +339,46 @@ class Settings:
                 raise ValueError(f"{name} deve ser texto não vazio de até 200 caracteres")
         if any(char.isspace() for char in self.internal_service_token):
             raise ValueError("A2A_INTERNAL_SERVICE_TOKEN não pode conter espaços")
+        if not self.observability_mongo_database.strip():
+            raise ValueError("A2A_OBSERVABILITY_MONGO_DATABASE não pode estar vazio")
+        if self.observability_collection is not None:
+            collection = self.observability_collection
+            if (
+                not collection
+                or collection.strip() != collection
+                or collection.startswith("system.")
+                or "$" in collection
+                or "\x00" in collection
+                or len(collection.encode("utf-8")) > 120
+            ):
+                raise ValueError("A2A_OBSERVABILITY_COLLECTION inválida")
+            try:
+                mongo_uri = urlsplit(self.observability_mongo_uri or "")
+                valid_mongo_uri = mongo_uri.scheme in {"mongodb", "mongodb+srv"} and bool(
+                    mongo_uri.hostname
+                )
+                valid_mongo_uri = valid_mongo_uri and (
+                    mongo_uri.port is None or 1 <= mongo_uri.port <= 65535
+                )
+            except ValueError:
+                valid_mongo_uri = False
+            if not valid_mongo_uri:
+                raise ValueError("A2A_OBSERVABILITY_MONGO_URI deve ser uma URI Mongo válida")
+        limits = (
+            self.observability_mongo_server_selection_timeout_ms,
+            self.observability_mongo_write_timeout_ms,
+            self.observability_queue_max_items,
+            self.observability_queue_max_bytes,
+            self.observability_document_max_bytes,
+            self.observability_batch_size,
+            self.observability_batch_interval_ms,
+            self.observability_max_attempts,
+            self.observability_shutdown_timeout_ms,
+        )
+        if min(limits) < 1 or self.observability_retry_base_delay_ms < 0:
+            raise ValueError("limites de observabilidade A2A inválidos")
+        if (
+            self.observability_batch_size > self.observability_queue_max_items
+            or self.observability_document_max_bytes > self.observability_queue_max_bytes
+        ):
+            raise ValueError("limites do lote ou documento excedem a fila A2A")
