@@ -191,7 +191,6 @@ async def create_runtime_dependencies(
         provider_resources.append(answer_generator)
         permission_directory = PostgresDocumentPermissionDirectory(
             pool,
-            settings.documents_read_role_codes,
             observation_collector=observation_collector,
         )
         fingerprint_material = (

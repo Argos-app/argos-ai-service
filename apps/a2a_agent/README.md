@@ -40,12 +40,13 @@ fingerprint de indexação; alterá-la força o sincronizador a criar uma nova
 geração compatível com Qdrant. O modelo e a dimensão devem ser os mesmos usados
 para indexar e consultar.
 
-O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Ele
-exige usuário ativo, papel ativo, ausência de bloqueio vigente e código de papel
-incluído em `A2A_DOCUMENTS_READ_ROLE_CODES`. A configuração padrão mapeia os
-papéis humanos existentes para `documents.read` e exclui `SISTEMA`. A conexão
-usa transações read-only; configure um usuário de banco com privilégio somente
-de leitura. A credencial de banco não é compartilhada com os clientes Qdrant.
+O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
+os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o
+usuário e seu registro de permissão estão ativos e que não há bloqueio vigente,
+sem filtrar pelo código — inclusive para `SISTEMA`. A operação ainda exige
+delegação assinada, válida e autorizada para `documents.read`. A conexão usa
+transações read-only; configure um usuário de banco com privilégio somente de
+leitura. A credencial de banco não é compartilhada com os clientes Qdrant.
 
 Embeddings recebem texto extraído dos PDFs; o gerador recebe a pergunta e os
 trechos recuperados. Use endpoints aprovados para esses dados e injete chaves,

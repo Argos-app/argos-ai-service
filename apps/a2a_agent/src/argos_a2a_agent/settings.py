@@ -4,7 +4,6 @@ import json
 import logging
 import math
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -62,7 +61,6 @@ class Settings:
     answer_api_key: str | None = field(default=None, repr=False)
     answer_model: str | None = None
     permission_sql_dsn: str | None = field(default=None, repr=False)
-    documents_read_role_codes: tuple[str, ...] = ("ADMIN", "GERENTE", "PECUARISTA", "APLICADOR")
     model_timeout_seconds: float = 20
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
@@ -115,11 +113,6 @@ class Settings:
             model_timeout = float(os.getenv("A2A_MODEL_TIMEOUT_SECONDS", "20"))
         except ValueError as exc:
             raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser um número") from exc
-        raw_roles = os.getenv(
-            "A2A_DOCUMENTS_READ_ROLE_CODES",
-            "ADMIN,GERENTE,PECUARISTA,APLICADOR",
-        )
-        role_codes = tuple(item.strip().upper() for item in raw_roles.split(",") if item.strip())
         return cls(
             qdrant_url=os.getenv("A2A_QDRANT_URL"),
             qdrant_read_api_key=os.getenv("A2A_QDRANT_READ_API_KEY"),
@@ -151,7 +144,6 @@ class Settings:
             answer_api_key=os.getenv("A2A_ANSWER_API_KEY"),
             answer_model=os.getenv("A2A_ANSWER_MODEL"),
             permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
-            documents_read_role_codes=role_codes,
             model_timeout_seconds=model_timeout,
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
@@ -225,8 +217,6 @@ class Settings:
         ]
         if not self.trusted_delegation_keys:
             missing.append("A2A_TRUSTED_DELEGATION_KEYS")
-        if not self.documents_read_role_codes:
-            missing.append("A2A_DOCUMENTS_READ_ROLE_CODES")
         if (self.observability_mongo_uri is None) != (self.observability_collection is None):
             missing.append(
                 "A2A_OBSERVABILITY_MONGO_URI e A2A_OBSERVABILITY_COLLECTION "
@@ -242,13 +232,6 @@ class Settings:
             raise ValueError("A2A_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos")
         if not self.a2a_host.strip():
             raise ValueError("A2A_HOST não pode ser vazio")
-        if len(self.documents_read_role_codes) != len(set(self.documents_read_role_codes)):
-            raise ValueError("A2A_DOCUMENTS_READ_ROLE_CODES não pode conter duplicatas")
-        if any(
-            not re.fullmatch(r"[A-Z][A-Z0-9_]{0,29}", code) or code == "SISTEMA"
-            for code in self.documents_read_role_codes
-        ):
-            raise ValueError("papel configurado para documents.read é inválido")
         if self.qdrant_read_api_key == self.qdrant_write_api_key:
             raise ValueError("credenciais Qdrant de leitura e escrita devem ser distintas")
         if (
