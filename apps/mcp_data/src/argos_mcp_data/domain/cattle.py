@@ -51,6 +51,7 @@ class ListHerdsRequest(ScopedPageRequest):
 
 
 class ListLotsRequest(DateRangeRequest):
+    lot_id: UUID | None = None
     herd_id: UUID | None = None
     lot_code: str | None = Field(default=None, min_length=1, max_length=20)
     category: Literal["ENGORDA", "CRIA", "RECRIA"] | None = None
@@ -68,6 +69,13 @@ class ListLotsRequest(DateRangeRequest):
         ):
             raise ValueError("head_count_min deve ser menor ou igual a head_count_max")
         return self
+
+
+class GetLotReportSourceRequest(_Model):
+    """Identidade do lote e da propriedade autorizada para montar o relatório."""
+
+    lot_id: UUID
+    property_id: UUID
 
 
 class ListExceptionAnimalsRequest(DateRangeRequest):
@@ -144,6 +152,7 @@ class LotRecord(_Model):
     property_name: str
     herd_id: UUID
     herd_name: str
+    herd_breed: str
     lot_code: str
     category: str
     is_exception_lot: bool

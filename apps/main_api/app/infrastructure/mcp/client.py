@@ -30,6 +30,7 @@ MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
             "list_properties",
             "list_herds",
             "list_lots",
+            "get_lot_report_source",
             "list_exception_animals",
             "list_applications",
             "list_application_animals",

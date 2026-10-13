@@ -76,6 +76,9 @@ def _graph_provider(request: Request):
                 preparations=persistence.email_preparations,
                 report_artifacts=persistence.report_artifacts,
                 observation_collector=observation_collector,
+                report_signature_checker=getattr(
+                    app_state, "report_source_signature_verifier", None
+                ),
             )
         graph = build_graph(
             build_agent_factory(

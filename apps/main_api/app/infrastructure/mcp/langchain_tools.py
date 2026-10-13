@@ -1,7 +1,7 @@
 """Wrappers LangChain locais para chamadas MCP autenticadas e limitadas por agente."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -186,6 +186,7 @@ def build_mcp_tool_bindings(
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
     observation_collector: ObservationCollector | None = None,
+    report_signature_checker: Callable[[bytes, str, str], bool] | None = None,
 ) -> dict[AgentId, dict[str, tuple[StructuredTool, ...]]]:
     """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação."""
     if (clients.data is not None or clients.prediction is not None) and delegation_issuer is None:
@@ -216,6 +217,7 @@ def build_mcp_tool_bindings(
                 build_farm_report_tool(
                     McpDataClient(clients.data, delegation_issuer),
                     artifact_repository=report_artifacts,
+                    signature_checker=report_signature_checker,
                 ),
             )
         if farm_tools:

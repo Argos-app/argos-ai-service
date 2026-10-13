@@ -52,6 +52,8 @@ class DataClient(Protocol):
         self,
         *,
         lot_id: UUID,
+        property_id: UUID,
         principal_user_id: UUID,
         authorized_property_ids: Sequence[UUID],
+        request_id: UUID,
     ) -> LotReportEnvelope: ...

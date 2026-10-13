@@ -24,7 +24,8 @@ class TemplateReportRenderer:
         applications = (
             "\n".join(
                 (
-                    f"- {item.application_date.isoformat()}: {item.medicine_name} "
+                    f"- {item.application_date.isoformat()} ({item.application_kind.lower()}): "
+                    f"{item.medicine_name} "
                     f"(lote do medicamento {item.medicine_batch_number}); "
                     f"({item.dose} {item.unit}, {item.route}); "
                     f"{item.head_count_applied} cabeças; carência até "
@@ -33,11 +34,11 @@ class TemplateReportRenderer:
                         if item.meat_withdrawal_end
                         else 'não informada'
                     }; "
-                    f"status {item.status}."
+                    f"registro {'ativo' if item.active else 'inativo'}."
                 )
                 for item in report.applications
             )
-            or "- Nenhuma aplicação coletiva registrada."
+            or "- Nenhuma aplicação registrada."
         )
         exception_animals = (
             "\n".join(

@@ -105,6 +105,7 @@ class Settings:
     auth_clock_skew_seconds: int = 30
     mcp_data_url: str | None = None
     mcp_data_token: str | None = field(default=None, repr=False)
+    mcp_data_report_trusted_signature_keys: tuple[tuple[str, str], ...] = ()
     mcp_prediction_url: str | None = None
     mcp_prediction_token: str | None = field(default=None, repr=False)
     mcp_email_url: str | None = None
@@ -136,6 +137,19 @@ class Settings:
         ):
             raise ValueError(
                 "MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS deve mapear IDs para chaves públicas Base64"
+            )
+        raw_report_keys = os.getenv("MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS", "{}")
+        try:
+            report_keys = json.loads(raw_report_keys)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve ser JSON"
+            ) from exc
+        if not isinstance(report_keys, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in report_keys.items()
+        ):
+            raise ValueError(
+                "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve mapear IDs para chaves Base64"
             )
 
         return cls(
@@ -180,6 +194,7 @@ class Settings:
             auth_clock_skew_seconds=int(os.getenv("MAIN_API_AUTH_CLOCK_SKEW_SECONDS", "30")),
             mcp_data_url=os.getenv("MAIN_API_MCP_DATA_URL") or None,
             mcp_data_token=os.getenv("MAIN_API_MCP_DATA_TOKEN") or None,
+            mcp_data_report_trusted_signature_keys=tuple(report_keys.items()),
             mcp_prediction_url=os.getenv("MAIN_API_MCP_PREDICTION_URL") or None,
             mcp_prediction_token=os.getenv("MAIN_API_MCP_PREDICTION_TOKEN") or None,
             mcp_email_url=os.getenv("MAIN_API_MCP_EMAIL_URL") or None,

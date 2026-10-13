@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from app.agent_schemas.results import (
@@ -117,6 +117,7 @@ def build_agent_factory(
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
     observation_collector: ObservationCollector | None = None,
+    report_signature_checker: Callable[[bytes, str, str], bool] | None = None,
     documental_a2a_client: DocumentA2AClient | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
@@ -129,6 +130,7 @@ def build_agent_factory(
                 report_artifacts=report_artifacts,
                 email_preparations=email_preparations,
                 observation_collector=observation_collector,
+                report_signature_checker=report_signature_checker,
             )
         )
     if documental_a2a_client is not None:

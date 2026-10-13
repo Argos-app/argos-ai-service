@@ -29,6 +29,7 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
 )
+from packages.security.signatures import TrustedEd25519SignatureVerifier
 
 
 def create_app(
@@ -89,6 +90,11 @@ def create_app(
     app.state.session_summary_generator = session_summary_generator
     app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
+    app.state.report_source_signature_verifier = (
+        TrustedEd25519SignatureVerifier(dict(configured.mcp_data_report_trusted_signature_keys))
+        if configured.mcp_data_report_trusted_signature_keys
+        else None
+    )
     app.state.observability_collector = DisabledObservationCollector()
     app.state.langsmith_tracing = None
     app.state.mcp_clients = create_mcp_clients(configured)

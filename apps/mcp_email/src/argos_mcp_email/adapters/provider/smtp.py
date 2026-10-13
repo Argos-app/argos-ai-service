@@ -2,6 +2,7 @@
 
 import asyncio
 import smtplib
+import ssl
 from collections.abc import Callable
 from email.message import EmailMessage
 from email.utils import make_msgid
@@ -88,7 +89,7 @@ class SmtpMailProvider:
 
         with self._smtp_factory(self._host, self._port, timeout=30) as smtp:
             if self._use_tls:
-                smtp.starttls()
+                smtp.starttls(context=ssl.create_default_context())
             if self._username and self._password:
                 smtp.login(self._username, self._password)
             return smtp.send_message(message)
