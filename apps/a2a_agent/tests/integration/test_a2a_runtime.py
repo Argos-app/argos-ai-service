@@ -290,6 +290,7 @@ async def a2a_harness(tmp_path: Path):
         await write_client.close()
 
 
+@pytest.mark.asyncio
 async def test_sdk_queries_two_agents_mixed_refresh_restart_and_concurrency(
     a2a_harness: A2AHarness, tmp_path: Path
 ) -> None:

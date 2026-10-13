@@ -245,7 +245,7 @@ def create_agent_card(public_url: str) -> Any:
     from a2a.types import AgentCard, AgentSkill, HTTPAuthSecurityScheme, SecurityRequirement
 
     security_scheme = "serviceBearer"
-    required_auth = SecurityRequirement(schemes={security_scheme: []})
+    required_auth = SecurityRequirement(schemes={security_scheme: a2a_pb2.StringList(list=[])})
     return AgentCard(
         name="Argos Documentos Globais",
         description=(
