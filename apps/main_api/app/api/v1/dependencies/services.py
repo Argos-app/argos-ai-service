@@ -43,27 +43,16 @@ def _graph_provider(request: Request):
     observation_collector = active_collector(getattr(app_state, "observability_collector", None))
     if app_state.agent_graph is not None:
         return app_state.agent_graph
-    from app.agents.registry import ModelPolicyId
     from app.agents.specialists import build_agent_factory
     from app.graph.workflow import build_graph
 
     models = getattr(app_state, "models", None)
     if models is None:
-        from app.llms import llm_especialista, llm_rapido
-
-        if llm_rapido is None or llm_especialista is None:
-            return None
-        models = {
-            ModelPolicyId.ROUTER: llm_rapido,
-            ModelPolicyId.FARM: llm_especialista,
-            ModelPolicyId.DOCTOR: llm_especialista,
-            ModelPolicyId.ANALYST: llm_especialista,
-            ModelPolicyId.SECRETARY: llm_especialista,
-            ModelPolicyId.INFORMATION: llm_especialista,
-            ModelPolicyId.ORCHESTRATOR: llm_rapido,
-            ModelPolicyId.JUDGE: llm_rapido,
-            ModelPolicyId.QUESTION_FORMATTER: llm_rapido,
-        }
+        raise HTTPException(
+            status_code=503,
+            detail=getattr(app_state, "model_initialization_error", None)
+            or "Configuração dos modelos indisponível",
+        )
     app_state.models = models
     try:
         persistence = getattr(app_state, "persistence", None)
@@ -121,10 +110,6 @@ def _summary_generator_provider(request: Request):
     models = getattr(app_state, "models", None)
     model = models.get(ModelPolicyId.ROUTER) if models is not None else None
     if model is None:
-        from app.llms import llm_rapido
-
-        model = llm_rapido
-    if model is None:
         return None
     from app.infrastructure.agents.session_summary_generator import (
         LangChainSessionSummaryGenerator,
@@ -159,10 +144,6 @@ def _user_memory_extractor_provider(request: Request):
 
     models = getattr(app_state, "models", None)
     model = models.get(ModelPolicyId.ROUTER) if models is not None else None
-    if model is None:
-        from app.llms import llm_rapido
-
-        model = llm_rapido
     if model is None:
         return None
     from app.infrastructure.agents.user_memory_extractor import LangChainUserMemoryExtractor

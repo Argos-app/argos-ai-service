@@ -22,6 +22,7 @@ from app.infrastructure.agents.langchain_factory import (
     LangChainAgentFactory,
     validate_agent_configuration,
 )
+from app.infrastructure.agents.model_factory import validate_model_capabilities
 from app.infrastructure.mcp.client import McpClients
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.infrastructure.mcp.langchain_tools import build_mcp_tool_bindings
@@ -121,6 +122,7 @@ def build_agent_factory(
     documental_a2a_client: DocumentA2AClient | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
+    validate_model_capabilities(models, registry=registry)
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
     if mcp_clients is not None:
         overrides.update(

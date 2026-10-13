@@ -116,6 +116,11 @@ def create_a2a_server(
         return JSONResponse({"status": "ok"})
 
     async def ready(request: Any) -> Any:
+        if agent_registry is None:
+            return JSONResponse(
+                {"status": "unavailable", "reason": "agent_runtime_not_configured"},
+                status_code=503,
+            )
         try:
             await readiness_check()
         except Exception:

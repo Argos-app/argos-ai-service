@@ -120,6 +120,11 @@ class Settings:
     document_a2a_service_token: str | None = field(default=None, repr=False)
     document_a2a_timeout_seconds: float = 25.0
     document_a2a_response_max_bytes: int = 1_000_000
+    model_api_base_url: str | None = None
+    model_api_key: str | None = field(default=None, repr=False)
+    model_fast_name: str | None = None
+    model_specialist_name: str | None = None
+    model_timeout_seconds: float = 30.0
     langsmith_api_key: str | None = field(default=None, repr=False)
     langsmith_project: str = "argos-ai-service"
     langsmith_endpoint: str | None = None
@@ -213,6 +218,11 @@ class Settings:
             document_a2a_response_max_bytes=int(
                 os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
             ),
+            model_api_base_url=os.getenv("MAIN_API_MODEL_API_BASE_URL") or None,
+            model_api_key=os.getenv("MAIN_API_MODEL_API_KEY") or None,
+            model_fast_name=os.getenv("MAIN_API_MODEL_FAST") or None,
+            model_specialist_name=os.getenv("MAIN_API_MODEL_SPECIALIST") or None,
+            model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "30")),
             langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
             langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
             langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
@@ -240,9 +250,35 @@ class Settings:
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
             or not 0 < self.document_a2a_timeout_seconds <= 30
             or self.document_a2a_response_max_bytes < 1
+            or not 0 < self.model_timeout_seconds <= 120
             or not self.langsmith_project.strip()
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if self.model_api_base_url is not None:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed_model_url = urlsplit(self.model_api_base_url)
+                local_http = parsed_model_url.scheme == "http" and parsed_model_url.hostname in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                }
+                valid_model_url = (
+                    (parsed_model_url.scheme == "https" or local_http)
+                    and bool(parsed_model_url.hostname)
+                    and parsed_model_url.username is None
+                    and parsed_model_url.password is None
+                    and not parsed_model_url.query
+                    and not parsed_model_url.fragment
+                    and (parsed_model_url.port is None or 1 <= parsed_model_url.port <= 65535)
+                )
+            except ValueError:
+                valid_model_url = False
+            if not valid_model_url:
+                raise ValueError(
+                    "MAIN_API_MODEL_API_BASE_URL deve ser HTTPS ou HTTP local sem credenciais"
+                )
         if self.langsmith_capture_content and not self.langsmith_api_key:
             raise ValueError("MAIN_API_LANGSMITH_CAPTURE_CONTENT exige MAIN_API_LANGSMITH_API_KEY")
         if self.langsmith_endpoint is not None:

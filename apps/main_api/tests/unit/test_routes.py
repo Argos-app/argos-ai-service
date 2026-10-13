@@ -19,6 +19,19 @@ QuestionResponse = import_module("app.api.v1.models.interactions").QuestionRespo
 client = TestClient(app)
 
 
+class _FakeChatModel:
+    def with_structured_output(self, _schema):
+        return self
+
+    def bind_tools(self, _tools):
+        return self
+
+
+def _fake_models():
+    ModelPolicyId = import_module("app.agents.registry").ModelPolicyId
+    return {policy: _FakeChatModel() for policy in ModelPolicyId}
+
+
 def test_health_and_readiness() -> None:
     assert client.get("/health/live").json() == {"status": "ok"}
     assert client.get("/health/ready").status_code == 503
@@ -54,14 +67,27 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
     with TestClient(
         main_module.create_app(
             Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            checkpointer=runtime_checkpointer,
         )
-    ) as ready:
-        assert ready.get("/health/ready").json() == {"status": "ok"}
+    ) as models_missing:
+        response = models_missing.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["reason"] == "model_runtime_not_configured"
+
+    with TestClient(
+        main_module.create_app(
+            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            models=_fake_models(),
+            agent_graph=object(),
+        )
+    ) as configured:
+        assert configured.get("/health/ready").json() == {"status": "ok"}
 
     runtime_checkpointer = None
     with TestClient(
         main_module.create_app(
             Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            models=_fake_models(),
         )
     ) as no_runtime:
         response = no_runtime.get("/health/ready")

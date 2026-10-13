@@ -9,6 +9,10 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
 from app.infrastructure.a2a import DocumentA2AClient
+from app.infrastructure.agents.model_factory import (
+    ModelRuntimeConfigurationError,
+    create_configured_models,
+)
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
 from app.infrastructure.mcp import (
     McpDelegationTokenIssuer,
@@ -41,7 +45,21 @@ def create_app(
     session_summary_generator: Any = None,
     user_memory_extractor: Any = None,
 ) -> FastAPI:
+    """Monta o serviço; `models` é injeção explícita destinada a testes."""
     configured = settings or Settings.from_env()
+    model_initialization_error: str | None = None
+    if models is None:
+        try:
+            models, model_initialization_error = create_configured_models(configured)
+        except ModelRuntimeConfigurationError:
+            model_initialization_error = "model_runtime_invalid_configuration"
+    else:
+        try:
+            from app.infrastructure.agents.model_factory import validate_model_capabilities
+
+            validate_model_capabilities(models)
+        except ModelRuntimeConfigurationError:
+            model_initialization_error = "model_runtime_invalid_configuration"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -86,6 +104,7 @@ def create_app(
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
     app.state.agent_graph = agent_graph
     app.state.models = models
+    app.state.model_initialization_error = model_initialization_error
     app.state.checkpointer = checkpointer
     app.state.session_summary_generator = session_summary_generator
     app.state.user_memory_extractor = user_memory_extractor
@@ -161,7 +180,7 @@ def create_app(
         response_model=None,
         responses={503: {"description": "Persistência Mongo indisponível"}},
     )
-    async def ready():
+    async def ready(request: Request):
         if getattr(app.state, "persistence", None) is None:
             return JSONResponse(
                 status_code=503,
@@ -172,11 +191,34 @@ def create_app(
                 status_code=503,
                 content={"status": "unavailable", "reason": "identity_not_configured"},
             )
+        if app.state.model_initialization_error is not None:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "unavailable",
+                    "reason": app.state.model_initialization_error,
+                },
+            )
+        if app.state.models is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "model_runtime_not_configured"},
+            )
         if getattr(app.state, "checkpointer", None) is None:
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "graph_runtime_not_configured"},
             )
+        if app.state.agent_graph is None:
+            try:
+                from app.api.v1.dependencies.services import _graph_provider
+
+                _graph_provider(request)
+            except Exception:
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "unavailable", "reason": "agent_runtime_not_configured"},
+                )
         try:
             await app.state.mongo_database.command("ping")
         except Exception:

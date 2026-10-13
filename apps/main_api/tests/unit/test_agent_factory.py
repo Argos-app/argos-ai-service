@@ -41,8 +41,16 @@ class _FakeRunnable:
         }
 
 
+class _FakeChatModel:
+    def with_structured_output(self, _schema):
+        return self
+
+    def bind_tools(self, _tools):
+        return self
+
+
 def _models() -> dict[ModelPolicyId, object]:
-    return {policy: object() for policy in ModelPolicyId}
+    return {policy: _FakeChatModel() for policy in ModelPolicyId}
 
 
 @pytest.mark.asyncio
