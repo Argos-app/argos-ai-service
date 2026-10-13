@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
+from langsmith import traceable
+
 from argos_a2a_agent.adapters.observability.recording import (
     OperationRecorder,
     active_collector,
@@ -54,6 +56,7 @@ class OpenAICompatibleAnswerGenerator:
         self._max_output_tokens = max_output_tokens
         self._observation_collector = active_collector(observation_collector)
 
+    @traceable(name="a2a.model.answer", run_type="llm")
     async def generate(
         self,
         *,

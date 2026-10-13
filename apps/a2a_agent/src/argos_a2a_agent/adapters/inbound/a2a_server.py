@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -15,6 +16,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 from pydantic import ValidationError
 
 from argos_a2a_agent.adapters.inbound.delegation import ACCESS_CONTEXT_KEY
+from argos_a2a_agent.adapters.observability.langsmith import LangSmithTracing
 from argos_a2a_agent.adapters.observability.recording import OperationRecorder
 from argos_a2a_agent.agents.registry import DocumentAgentRegistry
 from packages.contracts.a2a import DocumentAnswerResponse, DocumentQuestionRequest
@@ -40,9 +42,11 @@ class DocumentA2AExecutor(AgentExecutor):
         self,
         registry: DocumentAgentRegistry,
         observation_collector: ObservationCollector | None = None,
+        langsmith_tracing: LangSmithTracing | None = None,
     ) -> None:
         self._registry = registry
         self._observation_collector = observation_collector
+        self._langsmith_tracing = langsmith_tracing
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id = context.task_id
@@ -67,7 +71,13 @@ class DocumentA2AExecutor(AgentExecutor):
             else None
         )
         try:
-            await self._execute_task(context, event_queue, updater, recorder)
+            trace_context = (
+                self._langsmith_tracing.context()
+                if self._langsmith_tracing is not None
+                else nullcontext()
+            )
+            with trace_context:
+                await self._execute_task(context, event_queue, updater, recorder)
         except BaseException as exc:
             if recorder is not None:
                 task_state = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"

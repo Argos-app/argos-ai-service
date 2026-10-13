@@ -24,6 +24,19 @@ def _observability_int(name: str, default: int) -> int:
         return default
 
 
+def _environment_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    _LOGGER.warning("invalid boolean setting; using default", extra={"setting": name})
+    return default
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     mongo_uri: str | None = None
@@ -61,6 +74,10 @@ class Settings:
     document_a2a_service_token: str | None = field(default=None, repr=False)
     document_a2a_timeout_seconds: float = 25.0
     document_a2a_response_max_bytes: int = 1_000_000
+    langsmith_api_key: str | None = field(default=None, repr=False)
+    langsmith_project: str = "argos-ai-service"
+    langsmith_endpoint: str | None = None
+    langsmith_capture_content: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -135,6 +152,10 @@ class Settings:
             document_a2a_response_max_bytes=int(
                 os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
             ),
+            langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
+            langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
+            langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
+            langsmith_capture_content=_environment_bool("MAIN_API_LANGSMITH_CAPTURE_CONTENT"),
         )
 
     def __post_init__(self) -> None:
@@ -154,8 +175,28 @@ class Settings:
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
             or not 0 < self.document_a2a_timeout_seconds <= 30
             or self.document_a2a_response_max_bytes < 1
+            or not self.langsmith_project.strip()
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if self.langsmith_capture_content and not self.langsmith_api_key:
+            raise ValueError("MAIN_API_LANGSMITH_CAPTURE_CONTENT exige MAIN_API_LANGSMITH_API_KEY")
+        if self.langsmith_endpoint is not None:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed_langsmith_endpoint = urlsplit(self.langsmith_endpoint)
+                valid_langsmith_endpoint = (
+                    parsed_langsmith_endpoint.scheme == "https"
+                    and bool(parsed_langsmith_endpoint.hostname)
+                    and parsed_langsmith_endpoint.username is None
+                    and parsed_langsmith_endpoint.password is None
+                    and not parsed_langsmith_endpoint.query
+                    and not parsed_langsmith_endpoint.fragment
+                )
+            except ValueError:
+                valid_langsmith_endpoint = False
+            if not valid_langsmith_endpoint:
+                raise ValueError("MAIN_API_LANGSMITH_ENDPOINT deve usar HTTPS")
         if bool(self.mcp_delegation_key_id) != bool(self.mcp_delegation_private_key):
             raise ValueError(
                 "MAIN_API_MCP_DELEGATION_KEY_ID e "

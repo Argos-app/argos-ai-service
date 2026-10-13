@@ -46,12 +46,14 @@ class LangChainUserMemoryExtractor:
         model: Any,
         *,
         observation_collector: ObservationCollector | None = None,
+        langsmith_callback: Any | None = None,
     ) -> None:
         structured = getattr(model, "with_structured_output", None)
         if not callable(structured):
             raise ValueError("o modelo de memória deve aceitar saída estruturada")
         self._structured = structured(UserMemoryDraft)
         self._observation_collector = observation_collector
+        self._langsmith_callback = langsmith_callback
 
     async def extract(
         self,
@@ -81,15 +83,18 @@ class LangChainUserMemoryExtractor:
                 HumanMessage(content=payload),
             ]
             if self._observation_collector is None:
-                result = await self._structured.ainvoke(messages)
-            else:
+                callbacks = [self._langsmith_callback] if self._langsmith_callback else []
                 result = await self._structured.ainvoke(
                     messages,
-                    config={
-                        "callbacks": [
-                            ModelUsageCallback(self._observation_collector, agent="user_memory")
-                        ]
-                    },
+                    config={"callbacks": callbacks} if callbacks else None,
+                )
+            else:
+                callbacks = [ModelUsageCallback(self._observation_collector, agent="user_memory")]
+                if self._langsmith_callback is not None:
+                    callbacks.append(self._langsmith_callback)
+                result = await self._structured.ainvoke(
+                    messages,
+                    config={"callbacks": callbacks},
                 )
             return UserMemoryDraft.model_validate(result).to_domain()
         except Exception as exc:

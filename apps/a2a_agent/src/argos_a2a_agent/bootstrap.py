@@ -15,6 +15,7 @@ from argos_a2a_agent.adapters.observability import (
     MongoObservationWriter,
     observe_adapter,
 )
+from argos_a2a_agent.adapters.observability.langsmith import create_langsmith_tracing
 from argos_a2a_agent.adapters.providers import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleEmbeddingProvider,
@@ -232,6 +233,7 @@ async def create_runtime(
         observation_writer,
         observation_collector,
     ) = await _create_observability_runtime(configured)
+    langsmith_tracing = create_langsmith_tracing(configured)
     resources: list[Any] = []
     source = observe_adapter(
         raw_source,
@@ -340,10 +342,13 @@ async def create_runtime(
             delegation_verifier=delegation_verifier,
             agent_registry=agent_registry,
             observation_collector=observation_collector,
+            langsmith_tracing=langsmith_tracing,
         )
 
         # Os adapters passam à propriedade do runtime depois que a composição tem êxito.
         closers = [observation_client.close] if observation_client is not None else []
+        if langsmith_tracing is not None:
+            closers.append(langsmith_tracing.close)
         seen: set[int] = set()
         for resource in resources:
             if id(resource) in seen:
@@ -364,6 +369,8 @@ async def create_runtime(
             await observation_writer.close()
         if observation_client is not None:
             resources.append(observation_client)
+        if langsmith_tracing is not None:
+            resources.append(langsmith_tracing)
         await _close_resources(resources)
         raise
 

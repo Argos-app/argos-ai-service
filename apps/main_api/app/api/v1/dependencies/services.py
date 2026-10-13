@@ -137,6 +137,11 @@ def _summary_generator_provider(request: Request):
             else SESSION_SUMMARY_INPUT_MAX_TOKENS
         ),
         observation_collector=active_collector(getattr(app_state, "observability_collector", None)),
+        langsmith_callback=(
+            app_state.langsmith_tracing.callback
+            if getattr(app_state, "langsmith_tracing", None) is not None
+            else None
+        ),
     )
     app_state.session_summary_generator = generator
     return generator
@@ -162,6 +167,11 @@ def _user_memory_extractor_provider(request: Request):
     extractor = LangChainUserMemoryExtractor(
         model,
         observation_collector=active_collector(getattr(app_state, "observability_collector", None)),
+        langsmith_callback=(
+            app_state.langsmith_tracing.callback
+            if getattr(app_state, "langsmith_tracing", None) is not None
+            else None
+        ),
     )
     app_state.user_memory_extractor = extractor
     return extractor
@@ -181,6 +191,11 @@ def get_session_service(request: Request) -> SessionService:
         execution_events=persistence.execution_events,
         observation_collector=active_collector(
             getattr(request.app.state, "observability_collector", None)
+        ),
+        langsmith_callback=(
+            request.app.state.langsmith_tracing.callback
+            if getattr(request.app.state, "langsmith_tracing", None) is not None
+            else None
         ),
         email_preparations=persistence.email_preparations,
         summary_generator_provider=lambda: _summary_generator_provider(request),

@@ -89,6 +89,7 @@ class MongoSessionService:
         user_memory: UserMemoryRepository | None = None,
         execution_events: ExecutionEventRepository | None = None,
         observation_collector: ObservationCollector | None = None,
+        langsmith_callback: Any | None = None,
         email_preparations: EmailPreparationRepository | None = None,
         summary_generator_provider: SummaryGeneratorProvider | None = None,
         user_memory_extractor_provider: MemoryExtractorProvider | None = None,
@@ -101,6 +102,7 @@ class MongoSessionService:
         self._session_work = session_work
         self._graph_provider = graph_provider
         self._observation_collector = observation_collector
+        self._langsmith_callback = langsmith_callback
         self._email_preparations = email_preparations
         self._summaries = summaries
         self._user_memory = user_memory
@@ -376,6 +378,18 @@ class MongoSessionService:
                     else None
                 )
                 try:
+                    graph_config = {
+                        "configurable": {
+                            "argos_user_id": str(principal.user_id),
+                            "argos_authorized_property_ids": tuple(
+                                str(farm_id) for farm_id in authorized_farms
+                            ),
+                            "argos_request_id": str(interaction_id),
+                        }
+                    }
+                    if self._langsmith_callback is not None:
+                        graph_config["callbacks"] = [self._langsmith_callback]
+                        graph_config["metadata"] = {"argos_operation": "session.interaction"}
                     if isinstance(body, MessageInteraction):
                         state = await executar_fluxo(
                             graph,
@@ -387,15 +401,7 @@ class MongoSessionService:
                             session_context=session_context,
                             recipient_selectors=recipient_selectors,
                             send_intent_requested=send_intent_requested,
-                            config={
-                                "configurable": {
-                                    "argos_user_id": str(principal.user_id),
-                                    "argos_authorized_property_ids": tuple(
-                                        str(farm_id) for farm_id in authorized_farms
-                                    ),
-                                    "argos_request_id": str(interaction_id),
-                                }
-                            },
+                            config=graph_config,
                         )
                     else:
                         state = await executar_resposta(
@@ -409,15 +415,7 @@ class MongoSessionService:
                             recipient_selectors=recipient_selectors,
                             send_intent_requested=send_intent_requested,
                             send_intent_source_interaction_id=send_intent_source_interaction_id,
-                            config={
-                                "configurable": {
-                                    "argos_user_id": str(principal.user_id),
-                                    "argos_authorized_property_ids": tuple(
-                                        str(farm_id) for farm_id in authorized_farms
-                                    ),
-                                    "argos_request_id": str(interaction_id),
-                                }
-                            },
+                            config=graph_config,
                         )
                 except BaseException as exc:
                     if graph_recorder is not None:

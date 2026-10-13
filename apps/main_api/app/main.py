@@ -15,6 +15,10 @@ from app.infrastructure.mcp import (
     bind_observation_collector,
     create_mcp_clients,
 )
+from app.infrastructure.observability.langsmith import (
+    LangSmithTracing,
+    create_langsmith_tracing,
+)
 from app.infrastructure.observability.recording import OperationRecorder, active_collector
 from app.settings import Settings
 from packages.observability import (
@@ -41,36 +45,42 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runtime: ServiceRuntime | None = None
-        if configured.mongo_uri:
-            runtime = await create_runtime(configured)
-        app.state.persistence = runtime.persistence if runtime else None
-        app.state.mongo_database = runtime.database if runtime else None
-        app.state.observability_collector = (
-            getattr(runtime, "observation_collector", DisabledObservationCollector())
-            if runtime
-            else DisabledObservationCollector()
-        )
-        app.state.mcp_clients = bind_observation_collector(
-            app.state.mcp_clients, app.state.observability_collector
-        )
-        if app.state.documental_a2a_client is not None:
-            app.state.documental_a2a_client.bind_observation_collector(
-                app.state.observability_collector
-            )
-        app.state.checkpointer = (
-            checkpointer
-            if checkpointer is not None
-            else (runtime.checkpointer if runtime else None)
-        )
+        langsmith_tracing = create_langsmith_tracing(configured)
+        app.state.langsmith_tracing = langsmith_tracing
         try:
+            if configured.mongo_uri:
+                runtime = await create_runtime(configured)
+            app.state.persistence = runtime.persistence if runtime else None
+            app.state.mongo_database = runtime.database if runtime else None
+            app.state.observability_collector = (
+                getattr(runtime, "observation_collector", DisabledObservationCollector())
+                if runtime
+                else DisabledObservationCollector()
+            )
+            app.state.mcp_clients = bind_observation_collector(
+                app.state.mcp_clients, app.state.observability_collector
+            )
+            if app.state.documental_a2a_client is not None:
+                app.state.documental_a2a_client.bind_observation_collector(
+                    app.state.observability_collector
+                )
+            app.state.checkpointer = (
+                checkpointer
+                if checkpointer is not None
+                else (runtime.checkpointer if runtime else None)
+            )
             yield
         finally:
             try:
                 if runtime:
                     await runtime.close()
             finally:
-                if app.state.documental_a2a_client is not None:
-                    await app.state.documental_a2a_client.aclose()
+                try:
+                    if app.state.documental_a2a_client is not None:
+                        await app.state.documental_a2a_client.aclose()
+                finally:
+                    if isinstance(langsmith_tracing, LangSmithTracing):
+                        langsmith_tracing.close()
 
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
     app.state.agent_graph = agent_graph
@@ -80,6 +90,7 @@ def create_app(
     app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
     app.state.observability_collector = DisabledObservationCollector()
+    app.state.langsmith_tracing = None
     app.state.mcp_clients = create_mcp_clients(configured)
     app.state.documental_a2a_client = (
         DocumentA2AClient(configured) if configured.document_a2a_url else None

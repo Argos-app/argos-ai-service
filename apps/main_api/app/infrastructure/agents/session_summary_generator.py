@@ -59,6 +59,7 @@ class LangChainSessionSummaryGenerator:
         *,
         input_token_limit: int,
         observation_collector: ObservationCollector | None = None,
+        langsmith_callback: Any | None = None,
     ) -> None:
         if input_token_limit < 1:
             raise ValueError("input_token_limit deve ser positivo")
@@ -71,6 +72,7 @@ class LangChainSessionSummaryGenerator:
         self._structured = structured(SessionSummaryDraft)
         self._input_token_limit = input_token_limit
         self._observation_collector = observation_collector
+        self._langsmith_callback = langsmith_callback
 
     async def generate(
         self,
@@ -208,15 +210,20 @@ class LangChainSessionSummaryGenerator:
         try:
             messages = [SystemMessage(content=system_prompt), HumanMessage(content=payload)]
             if self._observation_collector is None:
-                result = await self._structured.ainvoke(messages)
-            else:
+                callbacks = [self._langsmith_callback] if self._langsmith_callback else []
                 result = await self._structured.ainvoke(
                     messages,
-                    config={
-                        "callbacks": [
-                            ModelUsageCallback(self._observation_collector, agent="session_summary")
-                        ]
-                    },
+                    config={"callbacks": callbacks} if callbacks else None,
+                )
+            else:
+                callbacks = [
+                    ModelUsageCallback(self._observation_collector, agent="session_summary")
+                ]
+                if self._langsmith_callback is not None:
+                    callbacks.append(self._langsmith_callback)
+                result = await self._structured.ainvoke(
+                    messages,
+                    config={"callbacks": callbacks},
                 )
             return SessionSummaryDraft.model_validate(result)
         except Exception as exc:

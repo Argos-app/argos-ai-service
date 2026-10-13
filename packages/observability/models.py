@@ -246,7 +246,9 @@ class Observation(_ObservabilityModel):
 
     @field_validator("started_at", "ended_at", "updated_at")
     @classmethod
-    def validate_utc_timestamps(cls, value: datetime, info) -> datetime:
+    def validate_utc_timestamps(cls, value: datetime | None, info) -> datetime | None:
+        if value is None:
+            return None
         return _require_utc_millisecond(value, info.field_name)
 
     @model_validator(mode="after")

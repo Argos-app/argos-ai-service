@@ -6,6 +6,8 @@ import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
+from langsmith import traceable
+
 from argos_a2a_agent.adapters.observability.recording import observe_operation
 from argos_a2a_agent.agents.prompts import (
     DOCUMENTAL_SYSTEM_PROMPT,
@@ -78,6 +80,7 @@ class _DocumentSpecialist:
         self._clock = clock
         self._observation_collector = observation_collector
 
+    @traceable(name="a2a.agent.specialist", run_type="chain")
     async def execute(
         self,
         request: DocumentQuestionRequest,
@@ -418,6 +421,7 @@ class MixedDocumentAgent(_DocumentSpecialist):
         self._documental = documental
         self._legal = legal
 
+    @traceable(name="a2a.agent.mixed", run_type="chain")
     async def execute(
         self,
         request: DocumentQuestionRequest,

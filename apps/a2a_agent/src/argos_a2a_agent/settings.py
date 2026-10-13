@@ -23,6 +23,19 @@ def _observability_int(name: str, default: int) -> int:
         return default
 
 
+def _environment_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    _LOGGER.warning("invalid boolean setting; using default", extra={"setting": name})
+    return default
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     qdrant_url: str | None = None
@@ -67,6 +80,10 @@ class Settings:
     observability_max_attempts: int = 3
     observability_retry_base_delay_ms: int = 50
     observability_shutdown_timeout_ms: int = 2_000
+    langsmith_api_key: str | None = field(default=None, repr=False)
+    langsmith_project: str = "argos-ai-service"
+    langsmith_endpoint: str | None = None
+    langsmith_capture_content: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -168,6 +185,10 @@ class Settings:
             observability_shutdown_timeout_ms=_observability_int(
                 "A2A_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2_000
             ),
+            langsmith_api_key=os.getenv("A2A_LANGSMITH_API_KEY") or None,
+            langsmith_project=os.getenv("A2A_LANGSMITH_PROJECT", "argos-ai-service"),
+            langsmith_endpoint=os.getenv("A2A_LANGSMITH_ENDPOINT") or None,
+            langsmith_capture_content=_environment_bool("A2A_LANGSMITH_CAPTURE_CONTENT"),
         )
 
     def validate_runtime(self, *, require_providers: bool = True) -> None:
@@ -341,6 +362,25 @@ class Settings:
             raise ValueError("A2A_INTERNAL_SERVICE_TOKEN não pode conter espaços")
         if not self.observability_mongo_database.strip():
             raise ValueError("A2A_OBSERVABILITY_MONGO_DATABASE não pode estar vazio")
+        if not self.langsmith_project.strip():
+            raise ValueError("A2A_LANGSMITH_PROJECT não pode estar vazio")
+        if self.langsmith_capture_content and not self.langsmith_api_key:
+            raise ValueError("A2A_LANGSMITH_CAPTURE_CONTENT exige A2A_LANGSMITH_API_KEY")
+        if self.langsmith_endpoint is not None:
+            try:
+                langsmith_endpoint = urlsplit(self.langsmith_endpoint)
+                valid_langsmith_endpoint = (
+                    langsmith_endpoint.scheme == "https"
+                    and bool(langsmith_endpoint.hostname)
+                    and langsmith_endpoint.username is None
+                    and langsmith_endpoint.password is None
+                    and not langsmith_endpoint.query
+                    and not langsmith_endpoint.fragment
+                )
+            except ValueError:
+                valid_langsmith_endpoint = False
+            if not valid_langsmith_endpoint:
+                raise ValueError("A2A_LANGSMITH_ENDPOINT deve usar HTTPS")
         if self.observability_collection is not None:
             collection = self.observability_collection
             if (
