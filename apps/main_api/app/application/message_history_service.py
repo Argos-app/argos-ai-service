@@ -9,16 +9,16 @@ import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from pydantic import TypeAdapter, ValidationError
 
-from app.api.v1.dependencies.auth import Principal
-from app.api.v1.models.interactions import (
-    AnswerValue,
-    QuestionResponse,
-    ResponseValue,
+from app.application.contracts.interactions import (
+    AnswerCommandValue,
+    ApplicationResponse,
+    QuestionResult,
 )
-from app.api.v1.models.messages import SessionMessage, SessionMessagesPage
+from app.application.contracts.messages import SessionMessagesPageView, SessionMessageView
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.identity import ActorContext
 from app.application.session_service import _authorized_farm_ids
 from app.domain.sessions import (
     ConversationMessage,
@@ -32,8 +32,8 @@ from app.privacy import minimize_sensitive_memory_input
 _REDACTED_CONTENT = (
     "[Conteúdo ocultado porque o acesso a uma ou mais fazendas desta sessão foi revogado.]"
 )
-_ANSWER_ADAPTER = TypeAdapter(AnswerValue)
-_RESPONSE_ADAPTER = TypeAdapter(ResponseValue)
+_ANSWER_ADAPTER = TypeAdapter(AnswerCommandValue)
+_RESPONSE_ADAPTER = TypeAdapter(ApplicationResponse)
 
 
 class MessageHistoryService:
@@ -50,24 +50,20 @@ class MessageHistoryService:
 
     async def list_messages(
         self,
-        principal: Principal,
+        principal: ActorContext,
         session_id: UUID,
         *,
         limit: int,
         cursor: str | None,
-    ) -> SessionMessagesPage:
+    ) -> SessionMessagesPageView:
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada"
-            )
+            raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
 
         authorized_farms = _authorized_farm_ids(session, principal.farm_ids)
         if not authorized_farms:
             # Mantém a mesma resposta para sessão inexistente e sem escopo atual.
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada"
-            )
+            raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
         access_changed = len(authorized_farms) != len(session.farm_ids)
 
         before_sequence = None
@@ -95,7 +91,7 @@ class MessageHistoryService:
             if has_more and page_descending
             else None
         )
-        return SessionMessagesPage(
+        return SessionMessagesPageView(
             session_id=session_id,
             items=items,
             next_cursor=next_cursor,
@@ -135,21 +131,21 @@ def _decode_cursor(cursor: str, session_id: UUID, user_id: UUID) -> int:
         raise _invalid_cursor() from None
 
 
-def _invalid_cursor() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cursor inválido")
+def _invalid_cursor() -> ApplicationError:
+    return ApplicationError(ApplicationErrorCode.BAD_REQUEST, "Cursor inválido")
 
 
 def _binding_id(value: UUID) -> str:
     return hashlib.sha256(value.bytes).hexdigest()
 
 
-def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMessage:
+def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMessageView:
     content = (
         _REDACTED_CONTENT if redact else minimize_sensitive_memory_input(message.sanitized_content)
     )
-    answer: AnswerValue | None = None
+    answer: AnswerCommandValue | None = None
     question_id: UUID | None = None
-    response: ResponseValue | None = None
+    response: ApplicationResponse | None = None
     if not redact and message.payload_json:
         try:
             payload = json.loads(message.payload_json)
@@ -168,7 +164,7 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
                 result = payload.get("response")
                 if isinstance(result, dict):
                     response = _RESPONSE_ADAPTER.validate_python(result)
-                    if isinstance(response, QuestionResponse):
+                    if isinstance(response, QuestionResult):
                         response = response.model_copy(
                             update={
                                 "prompt": minimize_sensitive_memory_input(response.prompt),
@@ -192,7 +188,7 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
             question_id = None
             response = None
 
-    return SessionMessage(
+    return SessionMessageView(
         message_id=message.message_id,
         interaction_id=message.interaction_id,
         sequence=message.sequence,

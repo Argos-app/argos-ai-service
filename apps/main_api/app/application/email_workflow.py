@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID, uuid4
 
+from app.application.operation_observation import observe_operation
 from app.application.report_artifact_service import validate_report_source
 from app.domain.email_preparations import (
     EmailPreparation,
@@ -16,11 +17,11 @@ from app.domain.email_preparations import (
     PendingRecipientResolution,
     SendAuthorizationOrigin,
 )
-from app.infrastructure.observability.recording import observe_operation
 from app.ports.email_preparation_repository import (
     EmailPreparationRepository,
     EmailSendAuthorizationConflictError,
 )
+from app.ports.email_tool_client import EmailToolClient
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.session_config import CLARIFICATION_TTL_SECONDS
 from packages.contracts import (
@@ -38,9 +39,6 @@ from packages.observability import (
     OperationPhase,
     ResultMetadata,
 )
-
-if TYPE_CHECKING:
-    from app.infrastructure.mcp.client import McpToolServerClient
 
 
 def _payload(result: Any) -> Any:
@@ -169,7 +167,7 @@ class EmailWorkflow:
     def __init__(
         self,
         *,
-        email_client: McpToolServerClient,
+        email_client: EmailToolClient,
         report_artifacts: ReportArtifactRepository,
         preparations: EmailPreparationRepository,
         observation_collector: ObservationCollector | None = None,

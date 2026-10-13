@@ -8,10 +8,11 @@ from typing import Any
 from uuid import UUID
 
 from app.application.email_workflow import _fingerprint, _payload
+from app.application.operation_observation import observe_operation
 from app.application.report_artifact_service import validate_report_source
 from app.domain.email_preparations import EmailOperationReference
-from app.infrastructure.observability.recording import observe_operation
 from app.ports.email_preparation_repository import EmailPreparationRepository
+from app.ports.email_tool_client import EmailToolClient
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from packages.contracts import (
     DispatchStatus,
@@ -67,7 +68,7 @@ class EmailDispatchWorkflow:
     def __init__(
         self,
         *,
-        email_client: Any,
+        email_client: EmailToolClient,
         preparations: EmailPreparationRepository,
         report_artifacts: ReportArtifactRepository,
         observation_collector: ObservationCollector | None = None,

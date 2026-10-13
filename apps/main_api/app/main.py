@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.operation_observation import OperationRecorder, active_collector
 from app.infrastructure.a2a import DocumentA2AClient
 from app.infrastructure.agents.model_factory import (
     ModelRuntimeConfigurationError,
@@ -23,7 +25,6 @@ from app.infrastructure.observability.langsmith import (
     LangSmithTracing,
     create_langsmith_tracing,
 )
-from app.infrastructure.observability.recording import OperationRecorder, active_collector
 from app.settings import Settings
 from packages.observability import (
     DisabledObservationCollector,
@@ -102,6 +103,20 @@ def create_app(
                         langsmith_tracing.close()
 
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(ApplicationError)
+    async def handle_application_error(request: Request, error: ApplicationError) -> JSONResponse:
+        del request
+        status_code = {
+            ApplicationErrorCode.BAD_REQUEST: 400,
+            ApplicationErrorCode.FORBIDDEN: 403,
+            ApplicationErrorCode.NOT_FOUND: 404,
+            ApplicationErrorCode.CONFLICT: 409,
+            ApplicationErrorCode.INVALID_INPUT: 422,
+            ApplicationErrorCode.UNAVAILABLE: 503,
+        }[error.code]
+        return JSONResponse(status_code=status_code, content={"detail": error.detail})
+
     app.state.agent_graph = agent_graph
     app.state.models = models
     app.state.model_initialization_error = model_initialization_error

@@ -28,6 +28,10 @@ from app.agent_schemas.synthesis import (
     TaskOutcome,
 )
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
+from app.application.execution_limits import (
+    ExecutionLimits,
+    current_execution_limits,
+)
 from app.application.report_artifact_service import (
     ReportSourceExpiredError,
     ReportSourceValidationError,
@@ -39,10 +43,6 @@ from app.domain.report_artifacts import (
     ReportArtifactNotFoundError,
 )
 from app.graph.state import AgentState
-from app.infrastructure.agents.execution_limits import (
-    ExecutionLimits,
-    current_execution_limits,
-)
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.email_preparation_repository import EmailPreparationRepository

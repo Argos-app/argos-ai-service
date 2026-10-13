@@ -5,37 +5,35 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 
-from app.api.v1.dependencies.auth import Principal
-from app.api.v1.models.interactions import InteractionInput, InteractionResult
-from app.api.v1.models.messages import SessionMessagesPage
-from app.api.v1.models.sessions import Session
+from app.application.contracts.interactions import InteractionCommand, InteractionOutcome
+from app.application.contracts.messages import SessionMessagesPageView
+from app.application.contracts.sessions import SessionView
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
-from app.application.message_history_service import (
-    MessageHistoryService as MongoMessageHistoryService,
-)
-from app.application.session_service import MongoSessionService
+from app.application.identity import ActorContext
+from app.application.message_history_service import MessageHistoryService
+from app.application.session_service import SessionApplicationService
 from app.infrastructure.observability.recording import active_collector
 
 
 class SessionService(Protocol):
-    async def create_session(self, principal: Principal) -> Session: ...
+    async def create_session(self, principal: ActorContext) -> SessionView: ...
 
-    async def list_sessions(self, principal: Principal) -> list[Session]: ...
+    async def list_sessions(self, principal: ActorContext) -> list[SessionView]: ...
 
     async def create_interaction(
-        self, principal: Principal, session_id: UUID, body: InteractionInput
-    ) -> InteractionResult: ...
+        self, principal: ActorContext, session_id: UUID, body: InteractionCommand
+    ) -> InteractionOutcome: ...
 
 
 class MessageHistoryQueryService(Protocol):
     async def list_messages(
         self,
-        principal: Principal,
+        principal: ActorContext,
         session_id: UUID,
         *,
         limit: int,
         cursor: str | None,
-    ) -> SessionMessagesPage: ...
+    ) -> SessionMessagesPageView: ...
 
 
 def _graph_provider(request: Request):
@@ -162,7 +160,7 @@ def get_session_service(request: Request) -> SessionService:
     persistence = getattr(request.app.state, "persistence", None)
     if persistence is None:
         raise HTTPException(status_code=503, detail="Sessões indisponíveis")
-    return MongoSessionService(
+    return SessionApplicationService(
         sessions=persistence.sessions,
         interactions=persistence.interactions,
         conversations=persistence.conversations,
@@ -201,7 +199,7 @@ def get_message_history_service(request: Request) -> MessageHistoryQueryService:
     persistence = getattr(request.app.state, "persistence", None)
     if persistence is None:
         raise HTTPException(status_code=503, detail="Sessões indisponíveis")
-    return MongoMessageHistoryService(
+    return MessageHistoryService(
         sessions=persistence.sessions,
         conversations=persistence.conversations,
     )

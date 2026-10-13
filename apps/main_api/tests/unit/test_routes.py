@@ -12,6 +12,9 @@ from pydantic import ValidationError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 app = import_module("app.main").app
+ApplicationError = import_module("app.application.errors").ApplicationError
+ApplicationErrorCode = import_module("app.application.errors").ApplicationErrorCode
+create_app = import_module("app.main").create_app
 MessageInteraction = import_module("app.api.v1.models.interactions").MessageInteraction
 QuestionResponse = import_module("app.api.v1.models.interactions").QuestionResponse
 
@@ -35,6 +38,19 @@ def _fake_models():
 def test_health_and_readiness() -> None:
     assert client.get("/health/live").json() == {"status": "ok"}
     assert client.get("/health/ready").status_code == 503
+
+
+def test_application_errors_keep_the_public_http_error_shape() -> None:
+    application = create_app(agent_graph=object(), models=_fake_models())
+
+    @application.get("/application-error-contract")
+    async def raise_application_error():
+        raise ApplicationError(ApplicationErrorCode.CONFLICT, "Conflito de teste")
+
+    response = TestClient(application).get("/application-error-contract")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Conflito de teste"}
 
 
 def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -> None:

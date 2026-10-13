@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.application.identity import ActorContext
 from app.settings import Settings
 
 _TOKEN_PART = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -47,6 +48,11 @@ class Principal(BaseModel):
     farm_ids: tuple[UUID, ...] = ()
     operations: frozenset[str] = frozenset()
     request_id: UUID | None = None
+
+
+def to_actor_context(principal: Principal) -> ActorContext:
+    """Adapta a identidade HTTP ao contexto mínimo exigido pelos casos de uso."""
+    return ActorContext(user_id=principal.user_id, farm_ids=principal.farm_ids)
 
 
 def _decode_segment(value: str) -> bytes:

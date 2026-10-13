@@ -6,29 +6,30 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import HTTPException, status
-
-from app.api.v1.dependencies.auth import Principal
-from app.api.v1.models.interactions import (
-    AnswerChoice,
-    AnswerConfirmation,
-    AnswerInteraction,
-    AnswerResponse,
-    AnswerText,
-    InteractionInput,
-    InteractionResult,
-    MessageInteraction,
-    QuestionOption,
-    QuestionResponse,
-)
-from app.api.v1.models.sessions import Session
 from app.application.context_builder import build_session_context
+from app.application.contracts.interactions import (
+    AnswerCommand,
+    AnswerResult,
+    ChoiceAnswer,
+    ConfirmationAnswer,
+    InteractionCommand,
+    InteractionOutcome,
+    MessageCommand,
+    QuestionOptionResult,
+    QuestionResult,
+    TextAnswer,
+)
+from app.application.contracts.sessions import SessionView
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.execution_limits import ExecutionLimits, execution_limits_scope
+from app.application.identity import ActorContext
+from app.application.operation_observation import OperationRecorder, observe_operation
 from app.application.session_summary_service import SessionSummaryService
 from app.application.user_memory_service import UserMemoryService
 from app.domain.sessions import (
@@ -41,8 +42,6 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
-from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
-from app.infrastructure.observability.recording import OperationRecorder, observe_operation
 from app.ports.conversation_repository import ConversationRepository
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
@@ -75,8 +74,8 @@ SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança 
 logger = logging.getLogger(__name__)
 
 
-class MongoSessionService:
-    """Executa interações na requisição HTTP e persiste cada transição."""
+class SessionApplicationService:
+    """Executa interações e persiste cada transição usando portas injetadas."""
 
     def __init__(
         self,
@@ -137,11 +136,10 @@ class MongoSessionService:
         self._lease_seconds = lease_seconds
         self._renew_seconds = renew_seconds
 
-    async def create_session(self, principal: Principal) -> Session:
+    async def create_session(self, principal: ActorContext) -> SessionView:
         if not principal.farm_ids:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="O usuário não possui fazendas autorizadas",
+            raise ApplicationError(
+                ApplicationErrorCode.FORBIDDEN, "O usuário não possui fazendas autorizadas"
             )
         now = _utcnow()
         record = SessionRecord(
@@ -156,7 +154,7 @@ class MongoSessionService:
         assert response is not None
         return response
 
-    async def list_sessions(self, principal: Principal) -> list[Session]:
+    async def list_sessions(self, principal: ActorContext) -> list[SessionView]:
         return [
             response
             for record in await self._sessions.list_owned(principal.user_id)
@@ -165,10 +163,10 @@ class MongoSessionService:
 
     async def create_interaction(
         self,
-        principal: Principal,
+        principal: ActorContext,
         session_id: UUID,
-        body: InteractionInput,
-    ) -> InteractionResult:
+        body: InteractionCommand,
+    ) -> InteractionOutcome:
         if self._observation_collector is None:
             return await self._create_interaction(principal, session_id, body)
         async with observe_operation(
@@ -190,20 +188,17 @@ class MongoSessionService:
 
     async def _create_interaction(
         self,
-        principal: Principal,
+        principal: ActorContext,
         session_id: UUID,
-        body: InteractionInput,
-    ) -> InteractionResult:
+        body: InteractionCommand,
+    ) -> InteractionOutcome:
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada"
-            )
+            raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
         authorized_farms = _authorized_farm_ids(session, principal.farm_ids)
         if not authorized_farms:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Nenhuma fazenda desta sessão segue autorizada",
+            raise ApplicationError(
+                ApplicationErrorCode.FORBIDDEN, "Nenhuma fazenda desta sessão segue autorizada"
             )
 
         (
@@ -228,14 +223,13 @@ class MongoSessionService:
 
         graph = self._graph_provider()
         if graph is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Modelos de interação não configurados",
+            raise ApplicationError(
+                ApplicationErrorCode.UNAVAILABLE, "Modelos de interação não configurados"
             )
 
         answer_text: str | None = None
         send_intent_source_interaction_id: str | None = None
-        if isinstance(body, AnswerInteraction):
+        if isinstance(body, AnswerCommand):
             (
                 answer_text,
                 recipient_selectors,
@@ -255,9 +249,8 @@ class MongoSessionService:
             expires_at=now + timedelta(seconds=self._lease_seconds),
         )
         if lease is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Outra interação está processando esta sessão",
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT, "Outra interação está processando esta sessão"
             )
 
         stop_renewal = asyncio.Event()
@@ -318,9 +311,8 @@ class MongoSessionService:
                         return await self._replay_or_reject(duplicate, session)
                 raise
             if accepted_message is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A posse da sessão mudou antes da aceitação",
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT, "A posse da sessão mudou antes da aceitação"
                 )
 
             running = replace(
@@ -332,9 +324,8 @@ class MongoSessionService:
             if not await self._interactions.save_result(
                 running, expected_version=interaction.version
             ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A interação mudou durante o processamento",
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT, "A interação mudou durante o processamento"
                 )
 
             failed = False
@@ -373,9 +364,7 @@ class MongoSessionService:
                         self._observation_collector,
                         operation_kind=OperationKind.GRAPH,
                         operation_name=(
-                            "graph.execute"
-                            if isinstance(body, MessageInteraction)
-                            else "graph.resume"
+                            "graph.execute" if isinstance(body, MessageCommand) else "graph.resume"
                         ),
                         operation_phase=OperationPhase.EXECUTION,
                         observation_level=ObservationLevel.LOCAL_OPERATION,
@@ -401,7 +390,7 @@ class MongoSessionService:
                     if self._langsmith_callback is not None:
                         graph_config["callbacks"] = [self._langsmith_callback]
                         graph_config["metadata"] = {"argos_operation": "session.interaction"}
-                    if isinstance(body, MessageInteraction):
+                    if isinstance(body, MessageCommand):
                         with execution_limits_scope(execution_limits):
                             async with asyncio.timeout(self._execution_timeout_seconds):
                                 state = await executar_fluxo(
@@ -448,9 +437,9 @@ class MongoSessionService:
                 state = {"final_answer": SAFE_ANSWER}
 
             if lease_lost.is_set():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A posse da sessão expirou durante o processamento",
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT,
+                    "A posse da sessão expirou durante o processamento",
                 )
 
             response = _response_from_state(
@@ -483,9 +472,8 @@ class MongoSessionService:
                 now=finished_at,
             )
             if committed_message is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A posse da sessão mudou antes da finalização",
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT, "A posse da sessão mudou antes da finalização"
                 )
             await self._publish_due_summary(
                 session_id=session_id,
@@ -564,15 +552,15 @@ class MongoSessionService:
             deduplication_key=deduplication_key,
         )
         if existing is not None and existing.input_hash != input_hash:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A chave da requisição já foi usada com outro conteúdo",
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT,
+                "A chave da requisição já foi usada com outro conteúdo",
             )
         return existing
 
     async def _replay_or_reject(
         self, interaction: InteractionRecord, session: SessionRecord
-    ) -> InteractionResult:
+    ) -> InteractionOutcome:
         recorder = (
             OperationRecorder(
                 self._observation_collector,
@@ -608,10 +596,10 @@ class MongoSessionService:
 
     async def _resolve_existing_interaction(
         self, interaction: InteractionRecord, session: SessionRecord
-    ) -> InteractionResult:
+    ) -> InteractionOutcome:
         if interaction.status in {InteractionStatus.COMPLETED, InteractionStatus.FAILED}:
             if interaction.result_json:
-                return InteractionResult.model_validate_json(interaction.result_json)
+                return InteractionOutcome.model_validate_json(interaction.result_json)
         now = _utcnow()
         lease = session.processing_lease
         if interaction.status in {InteractionStatus.ACCEPTED, InteractionStatus.RUNNING} and (
@@ -624,19 +612,18 @@ class MongoSessionService:
                 version=interaction.version + 1,
             )
             await self._interactions.save_result(interrupted, expected_version=interaction.version)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A interação anterior foi interrompida e não será reexecutada",
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT,
+                "A interação anterior foi interrompida e não será reexecutada",
             )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A interação está em andamento ou foi interrompida",
+        raise ApplicationError(
+            ApplicationErrorCode.CONFLICT, "A interação está em andamento ou foi interrompida"
         )
 
     async def _validate_answer(
         self,
         session: SessionRecord,
-        body: AnswerInteraction,
+        body: AnswerCommand,
         graph: Any,
         *,
         new_recipient_selectors: dict[str, dict[str, str]],
@@ -648,30 +635,26 @@ class MongoSessionService:
             or source.status != InteractionStatus.COMPLETED
             or not source.result_json
         ):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Pergunta inválida")
+            raise ApplicationError(ApplicationErrorCode.CONFLICT, "Pergunta inválida")
         try:
-            source_result = InteractionResult.model_validate_json(source.result_json)
+            source_result = InteractionOutcome.model_validate_json(source.result_json)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Pergunta inválida"
-            ) from exc
+            raise ApplicationError(ApplicationErrorCode.CONFLICT, "Pergunta inválida") from exc
         question = source_result.response
         now = _utcnow()
         if (
-            not isinstance(question, QuestionResponse)
+            not isinstance(question, QuestionResult)
             or question.question_id != body.question_id
             or question.expires_at <= now
         ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A pergunta não está mais pendente",
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT, "A pergunta não está mais pendente"
             )
         pending_recipient_resolution = None
         if question.reason_code in {"RECIPIENT_AMBIGUOUS", "RECIPIENT_NOT_FOUND"}:
             if self._email_preparations is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A resolução de destinatário não está disponível",
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT, "A resolução de destinatário não está disponível"
                 )
             try:
                 pending_recipient_resolution = (
@@ -683,25 +666,24 @@ class MongoSessionService:
                     )
                 )
             except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="A resolução de destinatário está indisponível",
+                raise ApplicationError(
+                    ApplicationErrorCode.UNAVAILABLE,
+                    "A resolução de destinatário está indisponível",
                 ) from exc
             if (
                 pending_recipient_resolution is None
                 or pending_recipient_resolution.reason_code != question.reason_code
                 or pending_recipient_resolution.input_type != question.input_type
             ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A resolução de destinatário expirou ou não corresponde à pergunta",
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT,
+                    "A resolução de destinatário expirou ou não corresponde à pergunta",
                 )
         recipient_update: dict[str, dict[str, str]] = new_recipient_selectors
-        if isinstance(body.answer, AnswerText):
+        if isinstance(body.answer, TextAnswer):
             if question.input_type != "free_text":
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Tipo de resposta incompatível",
+                raise ApplicationError(
+                    ApplicationErrorCode.INVALID_INPUT, "Tipo de resposta incompatível"
                 )
             if pending_recipient_resolution is not None:
                 value = body.answer.text.strip()
@@ -711,28 +693,24 @@ class MongoSessionService:
                         value=value,
                     )
                 except ValueError as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Destinatário inválido",
+                    raise ApplicationError(
+                        ApplicationErrorCode.INVALID_INPUT, "Destinatário inválido"
                     ) from exc
                 graph_answer = "[DESTINATARIO_1]"
                 recipient_update = {"[DESTINATARIO_1]": selector.model_dump(mode="json")}
             else:
                 protected_answer = protect_user_input(body.answer.text)
                 graph_answer = protected_answer.sanitized_text
-        elif isinstance(body.answer, AnswerChoice):
+        elif isinstance(body.answer, ChoiceAnswer):
             if question.input_type != "single_choice":
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Tipo de resposta incompatível",
+                raise ApplicationError(
+                    ApplicationErrorCode.INVALID_INPUT, "Tipo de resposta incompatível"
                 )
             option = next(
                 (item for item in question.options if item.option_id == body.answer.option_id), None
             )
             if option is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Opção inválida"
-                )
+                raise ApplicationError(ApplicationErrorCode.INVALID_INPUT, "Opção inválida")
             if pending_recipient_resolution is not None:
                 selected = next(
                     (
@@ -743,25 +721,21 @@ class MongoSessionService:
                     None,
                 )
                 if selected is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Opção de destinatário inválida",
+                    raise ApplicationError(
+                        ApplicationErrorCode.INVALID_INPUT, "Opção de destinatário inválida"
                     )
                 graph_answer = "[DESTINATARIO_1]"
                 recipient_update = {"[DESTINATARIO_1]": selected.selector.model_dump(mode="json")}
             else:
                 graph_answer = option.label
-        elif isinstance(body.answer, AnswerConfirmation):
+        elif isinstance(body.answer, ConfirmationAnswer):
             if question.input_type != "confirmation":
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Tipo de resposta incompatível",
+                raise ApplicationError(
+                    ApplicationErrorCode.INVALID_INPUT, "Tipo de resposta incompatível"
                 )
             graph_answer = "Sim" if body.answer.confirm else "Não"
         else:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Resposta inválida"
-            )
+            raise ApplicationError(ApplicationErrorCode.INVALID_INPUT, "Resposta inválida")
 
         try:
             snapshot = await graph.aget_state(
@@ -773,14 +747,14 @@ class MongoSessionService:
                 }
             )
         except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="O estado da pergunta não está disponível para retomada",
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT,
+                "O estado da pergunta não está disponível para retomada",
             ) from exc
         if getattr(snapshot, "values", {}).get("question_id") != str(body.question_id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A pergunta não corresponde ao estado atual da sessão",
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT,
+                "A pergunta não corresponde ao estado atual da sessão",
             )
         values = getattr(snapshot, "values", {})
         saved_recipient_selectors = dict(values.get("recipient_selectors") or {})
@@ -839,24 +813,28 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _authorized_farm_ids(session: SessionRecord, current_farms: list[UUID]) -> tuple[UUID, ...]:
+def _authorized_farm_ids(
+    session: SessionRecord, current_farms: Collection[UUID]
+) -> tuple[UUID, ...]:
     current = set(current_farms)
     return tuple(farm_id for farm_id in session.farm_ids if farm_id in current)
 
 
-def _session_response(session: SessionRecord, current_farms: list[UUID]) -> Session | None:
+def _session_response(
+    session: SessionRecord, current_farms: Collection[UUID]
+) -> SessionView | None:
     farm_ids = _authorized_farm_ids(session, current_farms)
     if not farm_ids:
         return None
-    return Session(
+    return SessionView(
         session_id=session.session_id,
-        farm_ids=list(farm_ids),
+        farm_ids=farm_ids,
         created_at=session.created_at,
     )
 
 
 def _normalize_input(
-    body: InteractionInput,
+    body: InteractionCommand,
 ) -> tuple[
     InteractionKind,
     str,
@@ -869,15 +847,14 @@ def _normalize_input(
 ]:
     recipient_selectors: dict[str, dict[str, str]] = {}
     send_intent_requested = False
-    if isinstance(body, MessageInteraction):
+    if isinstance(body, MessageCommand):
         protected = protect_user_input(body.message)
         sanitized = protected.sanitized_text
         recipient_selectors = protected.recipient_selectors
         send_intent_requested = protected.send_intent_requested
         if not sanitized.strip():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="A mensagem não pode estar vazia",
+            raise ApplicationError(
+                ApplicationErrorCode.INVALID_INPUT, "A mensagem não pode estar vazia"
             )
         payload = {"kind": "message", "message": sanitized}
         key = str(body.client_message_id)
@@ -886,19 +863,18 @@ def _normalize_input(
         content = sanitized
     else:
         answer = body.answer.model_dump(mode="json")
-        if isinstance(body.answer, AnswerText):
+        if isinstance(body.answer, TextAnswer):
             protected = protect_user_input(body.answer.text)
             answer["text"] = protected.sanitized_text
             recipient_selectors = protected.recipient_selectors
             content = answer["text"]
-        elif isinstance(body.answer, AnswerChoice):
+        elif isinstance(body.answer, ChoiceAnswer):
             content = f"Opção selecionada: {body.answer.option_id}"
         else:
             content = "Sim" if body.answer.confirm else "Não"
         if not content.strip():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="A resposta não pode estar vazia",
+            raise ApplicationError(
+                ApplicationErrorCode.INVALID_INPUT, "A resposta não pode estar vazia"
             )
         payload = {
             "kind": "answer",
@@ -928,13 +904,13 @@ def _normalize_input(
 
 
 def _memory_input(
-    body: InteractionInput,
+    body: InteractionCommand,
     sanitized_input: str,
     answer_text: str | None,
 ) -> str | None:
-    if isinstance(body, MessageInteraction):
+    if isinstance(body, MessageCommand):
         return sanitized_input
-    if isinstance(body, AnswerInteraction) and isinstance(body.answer, AnswerText):
+    if isinstance(body, AnswerCommand) and isinstance(body.answer, TextAnswer):
         return answer_text or sanitized_input
     return None
 
@@ -955,7 +931,7 @@ def _response_from_state(
     public_request_id: UUID,
     state: dict[str, Any],
     now: datetime,
-) -> InteractionResult:
+) -> InteractionOutcome:
     request = state.get("clarification_request")
     prompt = state.get("clarification_question")
     question_id = state.get("question_id")
@@ -968,28 +944,29 @@ def _response_from_state(
             except TypeError, ValueError:
                 expires_at = now
         if expires_at <= now:
-            response = AnswerResponse(
+            response = AnswerResult(
                 kind="answer",
                 text="A pergunta expirou. Inicie uma nova solicitação para continuar.",
             )
         else:
-            response = QuestionResponse(
+            response = QuestionResult(
                 kind="question",
                 question_id=UUID(str(question_id)),
                 input_type=request.input_type,
                 prompt=minimize_pii(prompt),
                 reason_code=request.reason_code,
                 options=[
-                    QuestionOption.model_validate(item.model_dump()) for item in request.options
+                    QuestionOptionResult.model_validate(item.model_dump())
+                    for item in request.options
                 ],
                 expires_at=expires_at,
             )
     else:
-        response = AnswerResponse(
+        response = AnswerResult(
             kind="answer",
             text=minimize_pii(state.get("final_answer") or SAFE_ANSWER),
         )
-    return InteractionResult(
+    return InteractionOutcome(
         session_id=session_id,
         interaction_id=interaction_id,
         public_request_id=public_request_id,
@@ -1001,10 +978,10 @@ def _assistant_message(
     *,
     session_id: UUID,
     interaction_id: UUID,
-    response: InteractionResult,
+    response: InteractionOutcome,
     created_at: datetime,
 ) -> ConversationMessage:
-    is_question = isinstance(response.response, QuestionResponse)
+    is_question = isinstance(response.response, QuestionResult)
     content = response.response.prompt if is_question else response.response.text
     return ConversationMessage(
         message_id=uuid5(interaction_id, "assistant"),
