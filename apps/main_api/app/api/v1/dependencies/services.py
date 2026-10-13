@@ -82,6 +82,7 @@ def _graph_provider(request: Request):
                 models,
                 execution_events=execution_events,
                 mcp_clients=mcp_clients,
+                documental_a2a_client=getattr(app_state, "documental_a2a_client", None),
                 observation_collector=observation_collector,
                 delegation_issuer=getattr(app_state, "mcp_delegation_token_issuer", None),
                 report_artifacts=(

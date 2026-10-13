@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
+from app.infrastructure.a2a import DocumentA2AClient
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
 from app.infrastructure.mcp import (
     McpDelegationTokenIssuer,
@@ -52,6 +53,10 @@ def create_app(
         app.state.mcp_clients = bind_observation_collector(
             app.state.mcp_clients, app.state.observability_collector
         )
+        if app.state.documental_a2a_client is not None:
+            app.state.documental_a2a_client.bind_observation_collector(
+                app.state.observability_collector
+            )
         app.state.checkpointer = (
             checkpointer
             if checkpointer is not None
@@ -60,8 +65,12 @@ def create_app(
         try:
             yield
         finally:
-            if runtime:
-                await runtime.close()
+            try:
+                if runtime:
+                    await runtime.close()
+            finally:
+                if app.state.documental_a2a_client is not None:
+                    await app.state.documental_a2a_client.aclose()
 
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
     app.state.agent_graph = agent_graph
@@ -72,6 +81,9 @@ def create_app(
     app.state.settings = configured
     app.state.observability_collector = DisabledObservationCollector()
     app.state.mcp_clients = create_mcp_clients(configured)
+    app.state.documental_a2a_client = (
+        DocumentA2AClient(configured) if configured.document_a2a_url else None
+    )
     app.state.mcp_delegation_token_issuer = (
         McpDelegationTokenIssuer(configured)
         if configured.mcp_delegation_key_id and configured.mcp_delegation_private_key

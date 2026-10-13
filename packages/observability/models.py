@@ -134,6 +134,7 @@ class HttpMetadata(_ObservabilityModel):
 class ProtocolMetadata(_ObservabilityModel):
     name: Literal["mcp", "a2a"]
     operation: BoundedName
+    skill: BoundedName | None = None
     task_state: Annotated[StrictStr, Field(min_length=1, max_length=80)] | None = None
     error_code: OptionalCode | None = None
 

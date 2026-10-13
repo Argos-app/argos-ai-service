@@ -32,6 +32,7 @@ _TIMEOUT_EXCEPTION_NAMES = frozenset(
         "WriteTimeout",
         "PoolTimeout",
         "DocumentAgentDeadlineError",
+        "A2AClientTimeoutError",
     }
 )
 _CONNECTION_EXCEPTION_NAMES = frozenset({"ConnectError", "NetworkError", "RemoteProtocolError"})

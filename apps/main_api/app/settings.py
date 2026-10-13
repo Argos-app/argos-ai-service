@@ -57,6 +57,10 @@ class Settings:
     mcp_delegation_key_id: str | None = None
     mcp_delegation_private_key: str | None = field(default=None, repr=False)
     mcp_delegation_ttl_seconds: int = 240
+    document_a2a_url: str | None = None
+    document_a2a_service_token: str | None = field(default=None, repr=False)
+    document_a2a_timeout_seconds: float = 25.0
+    document_a2a_response_max_bytes: int = 1_000_000
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -123,6 +127,14 @@ class Settings:
             mcp_delegation_key_id=os.getenv("MAIN_API_MCP_DELEGATION_KEY_ID") or None,
             mcp_delegation_private_key=os.getenv("MAIN_API_MCP_DELEGATION_PRIVATE_KEY") or None,
             mcp_delegation_ttl_seconds=int(os.getenv("MAIN_API_MCP_DELEGATION_TTL_SECONDS", "240")),
+            document_a2a_url=os.getenv("MAIN_API_DOCUMENT_A2A_URL") or None,
+            document_a2a_service_token=os.getenv("MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN") or None,
+            document_a2a_timeout_seconds=float(
+                os.getenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "25")
+            ),
+            document_a2a_response_max_bytes=int(
+                os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
+            ),
         )
 
     def __post_init__(self) -> None:
@@ -140,6 +152,8 @@ class Settings:
             or not 0 <= self.auth_clock_skew_seconds <= 60
             or not self.mcp_delegation_issuer.strip()
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
+            or not 0 < self.document_a2a_timeout_seconds <= 30
+            or self.document_a2a_response_max_bytes < 1
         ):
             raise ValueError("limites e timeouts devem ser positivos")
         if bool(self.mcp_delegation_key_id) != bool(self.mcp_delegation_private_key):
@@ -147,3 +161,39 @@ class Settings:
                 "MAIN_API_MCP_DELEGATION_KEY_ID e "
                 "MAIN_API_MCP_DELEGATION_PRIVATE_KEY devem ser configurados juntos"
             )
+        if bool(self.document_a2a_url) != bool(self.document_a2a_service_token):
+            raise ValueError(
+                "MAIN_API_DOCUMENT_A2A_URL e MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN "
+                "devem ser configurados juntos"
+            )
+        if self.document_a2a_url is not None:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed = urlsplit(self.document_a2a_url)
+                local_http = parsed.scheme == "http" and parsed.hostname in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                }
+                valid_url = (
+                    (parsed.scheme == "https" or local_http)
+                    and bool(parsed.hostname)
+                    and parsed.username is None
+                    and parsed.password is None
+                    and parsed.path.rstrip("/").endswith("/a2a")
+                    and not parsed.query
+                    and not parsed.fragment
+                    and (parsed.port is None or 1 <= parsed.port <= 65535)
+                )
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                raise ValueError(
+                    "MAIN_API_DOCUMENT_A2A_URL deve usar HTTPS ou HTTP local e terminar em /a2a"
+                )
+            if not self.mcp_delegation_key_id or not self.mcp_delegation_private_key:
+                raise ValueError(
+                    "a delegação A2A exige MAIN_API_MCP_DELEGATION_KEY_ID e "
+                    "MAIN_API_MCP_DELEGATION_PRIVATE_KEY"
+                )
