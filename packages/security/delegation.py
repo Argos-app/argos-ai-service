@@ -12,7 +12,7 @@ from uuid import UUID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from packages.security.access import AccessContext
+from packages.security.access import AccessContext, DocumentAccessContext
 from packages.security.errors import AccessContextError
 from packages.security.limits import MAX_PROPERTY_IDS
 
@@ -189,3 +189,98 @@ class DelegationTokenVerifier:
     @staticmethod
     def _valid_identifier(value: Any) -> bool:
         return isinstance(value, str) and 1 <= len(value) <= 128
+
+
+class GlobalDocumentDelegationTokenVerifier(DelegationTokenVerifier):
+    """Verifica delegação global documental com a mesma assinatura Ed25519.
+
+    Este contexto não transporta propriedades e não pode ser usado pelas
+    políticas de acesso que exigem escopo de propriedade.
+    """
+
+    def __init__(
+        self,
+        trusted_keys: dict[str, str],
+        *,
+        issuer: str,
+        audience: str,
+        max_ttl_seconds: int = 300,
+        clock_skew_seconds: int = 30,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        super().__init__(
+            trusted_keys,
+            issuer=issuer,
+            audience=audience,
+            agent_operations={"informacoes": frozenset({"documents.read"})},
+            max_ttl_seconds=max_ttl_seconds,
+            clock_skew_seconds=clock_skew_seconds,
+            clock=clock,
+        )
+
+    def verify(self, token: str) -> DocumentAccessContext:
+        # O método-base valida estrutura, assinatura, tamanho e claims comuns;
+        # a sobrescrita de _parse_claims aplica o formato global sem propriedades.
+        return super().verify(token)  # type: ignore[return-value]
+
+    def _parse_claims(self, claims: dict[str, Any]) -> DocumentAccessContext:
+        now = int(self._clock())
+        issued_at = claims.get("iat")
+        not_before = claims.get("nbf", issued_at)
+        expires_at = claims.get("exp")
+        if any(type(value) is not int for value in (issued_at, not_before, expires_at)):
+            raise AccessContextError("contexto delegado inválido")
+        if (
+            issued_at > now + self._clock_skew_seconds
+            or not_before > now + self._clock_skew_seconds
+        ):
+            raise AccessContextError("contexto delegado inválido")
+        if expires_at <= now or expires_at <= issued_at or not_before > expires_at:
+            raise AccessContextError("contexto delegado expirado")
+        if expires_at - issued_at > self._max_ttl_seconds:
+            raise AccessContextError("contexto delegado inválido")
+        if claims.get("iss") != self._issuer:
+            raise AccessContextError("contexto delegado inválido")
+        audience = claims.get("aud")
+        if audience != self._audience and audience != [self._audience]:
+            raise AccessContextError("contexto delegado inválido")
+        if claims.get("v") != 1 or type(claims.get("v")) is not int:
+            raise AccessContextError("contexto delegado inválido")
+
+        try:
+            subject = claims["sub"]
+            if not isinstance(subject, str):
+                raise ValueError
+            user_id = UUID(subject)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AccessContextError("contexto delegado inválido") from exc
+
+        agent_id = claims.get("agent")
+        operations_raw = claims.get("operations")
+        if not isinstance(agent_id, str) or agent_id not in self._agent_operations:
+            raise AccessContextError("contexto delegado inválido")
+        if (
+            not isinstance(operations_raw, list)
+            or not 1 <= len(operations_raw) <= 64
+            or not all(
+                isinstance(item, str) and _OPERATION.fullmatch(item) for item in operations_raw
+            )
+            or len(set(operations_raw)) != len(operations_raw)
+        ):
+            raise AccessContextError("contexto delegado inválido")
+        if not set(operations_raw).issubset(self._agent_operations[agent_id]):
+            raise AccessContextError("contexto delegado inválido")
+        token_id = claims.get("jti")
+        request_id = claims.get("request_id")
+        if not self._valid_identifier(token_id) or not self._valid_identifier(request_id):
+            raise AccessContextError("contexto delegado inválido")
+
+        return DocumentAccessContext(
+            user_id=user_id,
+            operations=frozenset(operations_raw),
+            agent_id=agent_id,
+            issued_at=datetime.fromtimestamp(issued_at, UTC),
+            expires_at=datetime.fromtimestamp(expires_at, UTC),
+            token_id=token_id,
+            request_id=request_id,
+        )

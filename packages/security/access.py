@@ -21,6 +21,19 @@ class AccessContext:
 
 
 @dataclass(frozen=True, slots=True)
+class DocumentAccessContext:
+    """Delegação de leitura ao catálogo global, sem escopo de propriedades."""
+
+    user_id: UUID
+    operations: frozenset[str]
+    agent_id: str
+    issued_at: datetime
+    expires_at: datetime
+    token_id: str
+    request_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class AuthorizedScope:
     """Escopo já revalidado, obrigatório para leituras vinculadas a propriedade."""
 
