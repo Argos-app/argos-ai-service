@@ -2,9 +2,12 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 
 from packages.contracts import DataOrigin
+
+_COVERAGE_RELATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +22,7 @@ class Settings:
     delegation_clock_skew_seconds: int = 30
     sql_timeout_seconds: int = 5
     data_origin: DataOrigin = DataOrigin.UNKNOWN
+    coverage_relation: str | None = None
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
 
@@ -59,6 +63,7 @@ class Settings:
             delegation_clock_skew_seconds=read_int("MCP_PREDICTION_DELEGATION_CLOCK_SKEW", 30),
             sql_timeout_seconds=read_int("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", 5),
             data_origin=data_origin,
+            coverage_relation=os.getenv("MCP_PREDICTION_COVERAGE_RELATION") or None,
             mcp_host=os.getenv("MCP_PREDICTION_HOST", "0.0.0.0"),
             mcp_port=read_int("MCP_PREDICTION_PORT", 8000),
         )
@@ -76,6 +81,10 @@ class Settings:
             missing.append("MCP_PREDICTION_TRUSTED_DELEGATION_KEYS")
         if not isinstance(self.data_origin, DataOrigin):
             raise ValueError("MCP_PREDICTION_DATA_ORIGIN inválida")
+        if self.coverage_relation is not None and not _COVERAGE_RELATION.fullmatch(
+            self.coverage_relation
+        ):
+            raise ValueError("MCP_PREDICTION_COVERAGE_RELATION deve ser schema.view ou view")
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.mcp_port <= 65535:

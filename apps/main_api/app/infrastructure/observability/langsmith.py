@@ -53,6 +53,17 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
                     "pattern": r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b",
                     "replace": "[CPF]",
                 },
+                {
+                    "pattern": r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b",
+                    "replace": "[CNPJ]",
+                },
+                {
+                    "pattern": (
+                        r"(?<!\d)(?:\+?55[\s.-]?)?\(?[1-9]\d\)?[\s.-]?"
+                        r"9?\d{4}[\s.-]?\d{4}(?!\d)"
+                    ),
+                    "replace": "[TELEFONE]",
+                },
             ]
         )
 

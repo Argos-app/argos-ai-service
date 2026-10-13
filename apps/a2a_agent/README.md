@@ -38,7 +38,9 @@ O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
 uma revisão imutável do modelo de embeddings. Essa revisão participa do
 fingerprint de indexação; alterá-la força o sincronizador a criar uma nova
 geração compatível com Qdrant. O modelo e a dimensão devem ser os mesmos usados
-para indexar e consultar.
+para indexar e consultar. Cada chamada de resposta também recebe o teto
+`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 1200); o deadline delegado e os timeouts
+existentes limitam a duração da tarefa.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
 os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o
@@ -70,14 +72,20 @@ O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
 para registrar o despacho do agente A2A e a chamada de geração de resposta no
 projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
 ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
-perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs e
-tokens Bearer são anonimizados antes do envio. O endpoint HTTPS pode ser
-definido por `A2A_LANGSMITH_ENDPOINT`.
+perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs,
+CNPJs, telefones e tokens Bearer são anonimizados antes do envio. O endpoint
+HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`.
 
 ## Operação e recuperação
 
-- `GET /health/live` verifica o processo; `GET /health/ready` também depende da
-  disponibilidade do Qdrant e exige Bearer de serviço.
+- Tasks A2A usam InMemoryTaskStore e não sobrevivem ao reinício do processo.
+  Após reinício, uma task anterior não pode ser consultada nem retomada; o
+  cliente deve iniciar uma nova consulta somente quando necessário. O executor
+  não repete tasks automaticamente. A persistência de tasks não faz parte do
+  contrato atual.
+- `GET /health/live` verifica o processo; `GET /health/ready` exige Bearer de
+  serviço, runtime de agentes configurado e disponibilidade do Qdrant. A
+  prontidão não executa uma inferência de teste no provider.
 - Preserve o volume `a2a-state` em reinícios. O manifesto é estado técnico da
   sincronização; não edite seu conteúdo manualmente.
 - Fonte local (`data/documents` por padrão) é montada somente para leitura. A

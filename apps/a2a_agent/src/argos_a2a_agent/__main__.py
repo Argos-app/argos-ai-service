@@ -8,7 +8,7 @@ from argos_a2a_agent.settings import Settings
 
 async def main() -> None:
     settings = Settings.from_env()
-    settings.validate_runtime()
+    settings.validate_runtime(require_providers=settings.model_mode != "simulated")
     await run_server(settings)
 
 

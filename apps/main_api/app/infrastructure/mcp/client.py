@@ -68,7 +68,12 @@ class McpResponseTooLargeError(RuntimeError):
     """A resposta MCP excedeu o limite configurado para o principal."""
 
 
-def _validate_endpoint(url: str, service_name: str) -> None:
+def _validate_endpoint(
+    url: str,
+    service_name: str,
+    *,
+    allow_compose_http: bool = False,
+) -> None:
     try:
         parsed = urlsplit(url)
         hostname = parsed.hostname
@@ -95,7 +100,10 @@ def _validate_endpoint(url: str, service_name: str) -> None:
             )
         except ValueError:
             is_loopback = False
-        if not is_loopback:
+        compose_hosts = {"data": "mcp_data", "prediction": "mcp_prediction", "email": "mcp_email"}
+        if not is_loopback and not (
+            allow_compose_http and hostname.casefold() == compose_hosts[service_name]
+        ):
             raise McpClientConfigurationError(
                 f"o MCP {service_name} deve usar HTTPS fora do loopback"
             )
@@ -113,6 +121,7 @@ class McpToolServerClient:
     allowed_tools: frozenset[str]
     timeout_seconds: float = 10.0
     response_max_bytes: int = 1_000_000
+    allow_compose_http: bool = field(default=False, repr=False, compare=False)
     observation_collector: ObservationCollector | None = field(
         default=None, repr=False, compare=False
     )
@@ -120,7 +129,11 @@ class McpToolServerClient:
     def __post_init__(self) -> None:
         if self.service_name not in MCP_TOOL_ALLOWLISTS:
             raise McpClientConfigurationError(f"serviço MCP desconhecido: {self.service_name}")
-        _validate_endpoint(self.url, self.service_name)
+        _validate_endpoint(
+            self.url,
+            self.service_name,
+            allow_compose_http=self.allow_compose_http,
+        )
         if not self.service_token.strip():
             raise McpClientConfigurationError(f"token do MCP {self.service_name} está vazio")
         if (
@@ -337,5 +350,6 @@ def create_mcp_clients(settings: Settings) -> McpClients:
             allowed_tools=MCP_TOOL_ALLOWLISTS[service_name],
             timeout_seconds=settings.mcp_timeout_seconds,
             response_max_bytes=settings.mcp_response_max_bytes,
+            allow_compose_http=settings.app_env == "local",
         )
     return McpClients(**clients)

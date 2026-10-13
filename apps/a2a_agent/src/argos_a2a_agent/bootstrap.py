@@ -19,6 +19,8 @@ from argos_a2a_agent.adapters.observability.langsmith import create_langsmith_tr
 from argos_a2a_agent.adapters.providers import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleEmbeddingProvider,
+    SimulatedAnswerGenerator,
+    SimulatedEmbeddingProvider,
 )
 from argos_a2a_agent.adapters.storage import LocalDocumentSource, LocalManifestRepository
 from argos_a2a_agent.agents.factory import DocumentAgentFactory
@@ -173,6 +175,24 @@ async def create_runtime_dependencies(
         if str(read_only).lower() != "on":
             raise RuntimeError("a conexão de autorização PostgreSQL não está somente leitura")
 
+        permission_directory = PostgresDocumentPermissionDirectory(
+            pool,
+            observation_collector=observation_collector,
+        )
+        if settings.model_mode == "simulated":
+            embeddings = SimulatedEmbeddingProvider(settings.qdrant_vector_size)
+            answer_generator = SimulatedAnswerGenerator()
+            fingerprint_material = f"argos-simulated-embedding-v1:{settings.qdrant_vector_size}"
+            return RuntimeDependencies(
+                embeddings=embeddings,
+                embedding_fingerprint=hashlib.sha256(
+                    fingerprint_material.encode("utf-8")
+                ).hexdigest(),
+                embedding_vector_size=settings.qdrant_vector_size,
+                answer_generator=answer_generator,
+                permission_directory=permission_directory,
+            )
+
         embeddings = OpenAICompatibleEmbeddingProvider(
             settings.embeddings_api_url,
             settings.embeddings_api_key,
@@ -186,13 +206,10 @@ async def create_runtime_dependencies(
             settings.answer_api_key,
             settings.answer_model,
             settings.model_timeout_seconds,
+            max_output_tokens=settings.model_max_output_tokens,
             observation_collector=observation_collector,
         )
         provider_resources.append(answer_generator)
-        permission_directory = PostgresDocumentPermissionDirectory(
-            pool,
-            observation_collector=observation_collector,
-        )
         fingerprint_material = (
             f"openai-compatible:{settings.embeddings_model}:{settings.embeddings_model_revision}"
         )
@@ -217,7 +234,9 @@ async def create_runtime(
     """Valida e conecta segurança, atualização, consulta, agentes e protocolo."""
 
     configured = settings or Settings.from_env()
-    configured.validate_runtime(require_providers=dependencies is None)
+    configured.validate_runtime(
+        require_providers=dependencies is None and configured.model_mode != "simulated"
+    )
     if configured.document_source_root is None or configured.manifest_path is None:
         raise ValueError("fonte local e caminho do manifesto são obrigatórios")
     raw_source = LocalDocumentSource(

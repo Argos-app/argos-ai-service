@@ -74,6 +74,17 @@ def create_configured_models(
     ou credencial, sem expor detalhes do segredo no healthcheck.
     """
     model_names = (settings.model_fast_name, settings.model_specialist_name)
+    if settings.model_mode == "simulated":
+        from app.infrastructure.agents.simulated_model import SimulatedChatModel
+
+        fast_model = SimulatedChatModel()
+        specialist_model = SimulatedChatModel()
+        models = {
+            policy: fast_model if policy in FAST_POLICIES else specialist_model
+            for policy in ModelPolicyId
+        }
+        validate_model_capabilities(models)
+        return models, None
     if all(value is None for value in model_names):
         return None, "model_runtime_not_configured"
     if any(
@@ -96,6 +107,7 @@ def create_configured_models(
         "api_key": settings.model_api_key,
         "timeout": settings.model_timeout_seconds,
         "max_retries": 0,
+        "max_tokens": settings.model_max_output_tokens,
     }
     if settings.model_api_base_url is not None:
         shared_options["base_url"] = settings.model_api_base_url

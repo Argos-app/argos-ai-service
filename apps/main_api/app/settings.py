@@ -83,6 +83,7 @@ class MongoCollectionSettings:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    app_env: str = "production"
     mongo_uri: str | None = None
     mongo_database: str = "argos_ai"
     mongo_collections: MongoCollectionSettings = field(default_factory=MongoCollectionSettings)
@@ -100,6 +101,7 @@ class Settings:
     session_summary_input_max_tokens: int = SESSION_SUMMARY_INPUT_MAX_TOKENS
     auth_issuer: str = "argos-backend-service"
     auth_audience: str = "argos-ai-service"
+    auth_mode: str = "jwt"
     auth_trusted_public_keys: tuple[tuple[str, str], ...] = ()
     auth_token_max_ttl_seconds: int = 300
     auth_clock_skew_seconds: int = 30
@@ -121,10 +123,15 @@ class Settings:
     document_a2a_timeout_seconds: float = 25.0
     document_a2a_response_max_bytes: int = 1_000_000
     model_api_base_url: str | None = None
+    model_mode: str = "provider"
     model_api_key: str | None = field(default=None, repr=False)
     model_fast_name: str | None = None
     model_specialist_name: str | None = None
     model_timeout_seconds: float = 30.0
+    model_max_output_tokens: int = 1200
+    execution_max_model_calls: int = 12
+    execution_max_tool_calls: int = 12
+    execution_timeout_seconds: float = 90.0
     langsmith_api_key: str | None = field(default=None, repr=False)
     langsmith_project: str = "argos-ai-service"
     langsmith_endpoint: str | None = None
@@ -158,6 +165,7 @@ class Settings:
             )
 
         return cls(
+            app_env=os.getenv("APP_ENV", "production").strip().casefold(),
             mongo_uri=os.getenv("MAIN_API_MONGO_URI") or None,
             mongo_database=os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai"),
             mongo_collections=MongoCollectionSettings.from_env(),
@@ -194,6 +202,7 @@ class Settings:
             ),
             auth_issuer=os.getenv("MAIN_API_AUTH_ISSUER", "argos-backend-service"),
             auth_audience=os.getenv("MAIN_API_AUTH_AUDIENCE", "argos-ai-service"),
+            auth_mode=os.getenv("AUTH_MODE", "jwt").strip().casefold(),
             auth_trusted_public_keys=tuple(auth_keys.items()),
             auth_token_max_ttl_seconds=int(os.getenv("MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS", "300")),
             auth_clock_skew_seconds=int(os.getenv("MAIN_API_AUTH_CLOCK_SKEW_SECONDS", "30")),
@@ -219,10 +228,15 @@ class Settings:
                 os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
             ),
             model_api_base_url=os.getenv("MAIN_API_MODEL_API_BASE_URL") or None,
+            model_mode=os.getenv("MAIN_API_MODEL_MODE", "provider").strip().casefold(),
             model_api_key=os.getenv("MAIN_API_MODEL_API_KEY") or None,
             model_fast_name=os.getenv("MAIN_API_MODEL_FAST") or None,
             model_specialist_name=os.getenv("MAIN_API_MODEL_SPECIALIST") or None,
             model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "30")),
+            model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "1200")),
+            execution_max_model_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "12")),
+            execution_max_tool_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "12")),
+            execution_timeout_seconds=float(os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "90")),
             langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
             langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
             langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
@@ -251,9 +265,19 @@ class Settings:
             or not 0 < self.document_a2a_timeout_seconds <= 30
             or self.document_a2a_response_max_bytes < 1
             or not 0 < self.model_timeout_seconds <= 120
+            or not 1 <= self.model_max_output_tokens <= 8192
+            or not 1 <= self.execution_max_model_calls <= 100
+            or not 1 <= self.execution_max_tool_calls <= 100
+            or not 1 <= self.execution_timeout_seconds <= 300
             or not self.langsmith_project.strip()
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if self.model_mode not in {"provider", "simulated"}:
+            raise ValueError("MAIN_API_MODEL_MODE deve ser provider ou simulated")
+        if self.auth_mode not in {"jwt", "stub"}:
+            raise ValueError("AUTH_MODE deve ser jwt ou stub")
+        if self.auth_mode == "stub" and self.app_env != "local":
+            raise ValueError("AUTH_MODE=stub só pode ser usado com APP_ENV=local")
         if self.model_api_base_url is not None:
             from urllib.parse import urlsplit
 
@@ -313,11 +337,11 @@ class Settings:
 
             try:
                 parsed = urlsplit(self.document_a2a_url)
-                local_http = parsed.scheme == "http" and parsed.hostname in {
-                    "localhost",
-                    "127.0.0.1",
-                    "::1",
-                }
+                local_http = parsed.scheme == "http" and (
+                    parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+                    or self.app_env == "local"
+                    and parsed.hostname == "a2a_agent"
+                )
                 valid_url = (
                     (parsed.scheme == "https" or local_http)
                     and bool(parsed.hostname)

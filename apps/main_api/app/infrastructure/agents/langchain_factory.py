@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
+from app.infrastructure.agents.execution_limits import ExecutionLimitCallback, ExecutionLimits
 from app.infrastructure.agents.execution_observer import ExecutionObserver
 from app.infrastructure.observability.langchain_callbacks import ObservabilityToolCallback
 from app.infrastructure.observability.model_callbacks import ModelUsageCallback
@@ -123,6 +124,9 @@ class _LangChainAgent(Agent[Any, BaseModel]):
             callbacks.append(
                 ModelUsageCallback(self._observation_collector, agent=self._agent_id.value)
             )
+        limits = (context or {}).get("argos_execution_limits")
+        if isinstance(limits, ExecutionLimits):
+            callbacks.append(ExecutionLimitCallback(limits, self._agent_id.value))
         if callbacks:
             config = config or {}
             config["callbacks"] = callbacks

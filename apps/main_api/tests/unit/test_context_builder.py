@@ -21,8 +21,6 @@ class FakeConversations:
     async def list_after_sequence(
         self, session_id, user_id, *, after_sequence, through_sequence, limit
     ):
-        assert after_sequence == 2
-        assert through_sequence == 5
         assert limit == 100
         return tuple(
             message
@@ -184,3 +182,64 @@ async def test_context_uses_summary_profile_and_only_completed_prior_messages():
     )
     assert other_user_context.user_tone is None
     assert other_user_context.user_general_goal is None
+
+
+@pytest.mark.asyncio
+async def test_context_without_summary_is_bounded_by_recent_messages_and_char_budget():
+    now = datetime.now(UTC)
+    user_id, session_id = uuid4(), uuid4()
+    records = []
+    messages = []
+    for index in range(30):
+        interaction_id = uuid4()
+        records.append(
+            InteractionRecord(
+                interaction_id=interaction_id,
+                session_id=session_id,
+                user_id=user_id,
+                deduplication_key=str(index),
+                kind=InteractionKind.MESSAGE,
+                sanitized_input="pergunta",
+                input_hash=f"hash-{index}",
+                status=InteractionStatus.COMPLETED,
+                created_at=now,
+                updated_at=now,
+                result_json="{}",
+            )
+        )
+        messages.append(
+            ConversationMessage(
+                message_id=uuid4(),
+                session_id=session_id,
+                interaction_id=interaction_id,
+                sequence=index * 2 + 1,
+                role=MessageRole.USER,
+                kind=MessageKind.USER_INPUT,
+                sanitized_content=f"registro {index} " + "x" * 900,
+                created_at=now,
+                user_message_number=index + 1,
+            )
+        )
+        messages.append(
+            ConversationMessage(
+                message_id=uuid4(),
+                session_id=session_id,
+                interaction_id=interaction_id,
+                sequence=index * 2 + 2,
+                role=MessageRole.ASSISTANT,
+                kind=MessageKind.ASSISTANT_RESPONSE,
+                sanitized_content=f"resposta {index} " + "y" * 900,
+                created_at=now,
+            )
+        )
+
+    context = await build_session_context(
+        session_id=session_id,
+        user_id=user_id,
+        before_sequence=61,
+        conversations=FakeConversations(messages),
+        interactions=FakeInteractions({item.interaction_id: item for item in records}),
+    )
+
+    assert len(context.recent_messages) <= 20
+    assert sum(len(message.content) for message in context.recent_messages) <= 12_000

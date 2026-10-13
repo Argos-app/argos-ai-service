@@ -62,6 +62,8 @@ class Settings:
     answer_model: str | None = None
     permission_sql_dsn: str | None = field(default=None, repr=False)
     model_timeout_seconds: float = 20
+    model_max_output_tokens: int = 1_200
+    model_mode: str = "provider"
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
     a2a_endpoint_url: str | None = None
@@ -145,6 +147,8 @@ class Settings:
             answer_model=os.getenv("A2A_ANSWER_MODEL"),
             permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
             model_timeout_seconds=model_timeout,
+            model_max_output_tokens=read_int("A2A_MODEL_MAX_OUTPUT_TOKENS", 1_200),
+            model_mode=os.getenv("A2A_MODEL_MODE", "provider").strip().casefold(),
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
             a2a_endpoint_url=os.getenv("A2A_ENDPOINT_URL"),
@@ -196,7 +200,10 @@ class Settings:
             "A2A_RESOURCE_SERVER_URL": self.resource_server_url,
             "A2A_DELEGATION_ISSUER": self.delegation_issuer,
             "A2A_ENDPOINT_URL": self.a2a_endpoint_url,
+            "A2A_PERMISSION_SQL_DSN": self.permission_sql_dsn,
         }
+        if self.model_mode not in {"provider", "simulated"}:
+            raise ValueError("A2A_MODEL_MODE deve ser provider ou simulated")
         if require_providers:
             required.update(
                 {
@@ -207,7 +214,6 @@ class Settings:
                     "A2A_ANSWER_API_URL": self.answer_api_url,
                     "A2A_ANSWER_API_KEY": self.answer_api_key,
                     "A2A_ANSWER_MODEL": self.answer_model,
-                    "A2A_PERMISSION_SQL_DSN": self.permission_sql_dsn,
                 }
             )
         missing = [
@@ -277,6 +283,8 @@ class Settings:
             or not 0 < self.model_timeout_seconds <= 30
         ):
             raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser maior que 0 e até 30")
+        if not 128 <= self.model_max_output_tokens <= 8_192:
+            raise ValueError("A2A_MODEL_MAX_OUTPUT_TOKENS deve estar entre 128 e 8192")
         for name, value in (
             ("A2A_QDRANT_URL", self.qdrant_url),
             ("A2A_RESOURCE_SERVER_URL", self.resource_server_url),

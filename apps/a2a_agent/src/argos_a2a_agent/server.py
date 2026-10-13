@@ -146,6 +146,7 @@ def create_a2a_server(
             raise RuntimeError("instale a2a-sdk[http-server] para publicar o endpoint A2A") from exc
 
         card = create_agent_card(settings.a2a_endpoint_url)
+        # Task recovery after process restart is not part of the current contract.
         handler = DefaultRequestHandler(
             agent_executor=DocumentA2AExecutor(
                 agent_registry,

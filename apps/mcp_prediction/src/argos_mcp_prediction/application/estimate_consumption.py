@@ -38,7 +38,8 @@ from packages.security.errors import AccessDeniedError
 _OPERATION = "prediction.read"
 _LIMITATIONS = (
     "A estimativa repete o padrão mensal observado em um único ano e não prevê mudanças de manejo.",
-    "A completude do histórico não foi verificada; meses sem registros são tratados como zero.",
+    "Sem cobertura histórica confirmada, meses sem registros não são tratados como zero.",
+    "A estimativa não é apresentada quando a cobertura não está confirmada.",
     "Cabeças-administrações representam aplicações acumuladas, não animais únicos tratados.",
     "Medicamentos e unidades permanecem separados, sem conversão ou recomendação clínica.",
 )
@@ -88,6 +89,11 @@ class EstimateMedicineConsumption:
         )
         coverage_by_property = self._index_coverage(scope, coverage_records)
         coverage_response = self._coverage_response(scope, coverage_by_property, windows)
+        reasons = [
+            item.reason or "cobertura histórica não confirmada"
+            for item in coverage_response
+            if item.status != CoverageStatus.CONFIRMED
+        ]
 
         try:
             records = await self._consumption_repository.aggregate_monthly(
@@ -120,7 +126,6 @@ class EstimateMedicineConsumption:
             groups[record.group].append(record)
 
         calculations = []
-        reasons = []
         if request.medicine_names is not None:
             matched_names = {
                 (group.property_id, name.casefold())

@@ -87,6 +87,8 @@ Thumbs.db
 # ─────────────────────────────────────────────
 *.md
 !README.md
+!apps/mcp_data/MCP.md
 !docs/agent-integration-handoff.md
 !docs/plano-persistencia-sessoes-memoria.md
 !docs/configuracao-mongodb.md
+!docs/docker-local.md

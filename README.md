@@ -13,10 +13,11 @@ preferências limitadas do usuário. A API valida identidade JWT EdDSA do backen
 e vincula ferramentas LangChain aos MCPs configurados, com delegação por
 usuário, propriedade, agente e operação. O backend ainda não inclui `farm_ids`,
 então a criação de sessão permanece bloqueada até delegar o escopo autorizado. O
-MCP de dados oferece consultas somente leitura; a projeção assinada para
-relatórios e o fluxo completo principal → dados → e-mail ainda não estão
-implementados. O MCP de e-mail permite preparar relatórios e consultar estado
-pelo Secretário; o envio não está exposto ao LLM.
+runtime principal cria modelos rápido e especialista a partir das configurações
+`MAIN_API_MODEL_*`, usando um provider compatível com a API OpenAI. A chave é
+independente dos nomes dos modelos e fica fora do repositório. Sem runtime
+válido, `/health/ready` retorna indisponível. Os testes injetam modelos
+simulados explicitamente por `create_app(models=...)`.
 
 ## Agentes
 
@@ -48,17 +49,51 @@ uma aplicação separada e valida o acesso aos dados solicitados.
 
 | MCP                         | Função                                                                                                                                                                                                                                                       |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Dados — implementado        | Expõe consultas de propriedades, rebanhos, lotes, aplicações, exceções, ocorrências, documentos e catálogo de medicamentos. As tools Fazenda e Doutor usam delegações curtas por chamada. A projeção assinada `LotReportEnvelope` segue pendente.            |
-| E-mail — integração parcial | O Secretário pode preparar relatórios e consultar estado com identidade do usuário vinculada pelo principal. `send_report` permanece fora do conjunto de tools do LLM até haver autorização determinística de envio.                                         |
+| Dados — implementado        | Expõe consultas de propriedades, rebanhos, lotes, aplicações, exceções, ocorrências, documentos, catálogo e `get_lot_report_source`. A origem `LotReportEnvelope` é filtrada pelo escopo vigente e assinada por Ed25519.                                     |
+| E-mail — integração parcial | O Secretário prepara relatórios com a origem assinada, pode solicitar envio após autorização determinística explícita e consulta o estado. A entrega ainda depende de SMTP e chaves internas confiáveis.                                                     |
 | Predição — integrado        | Estima consumo de medicamentos por propriedade e unidade, repetindo a média diária mensal de um histórico anual por até 28 dias. A tool Analista envia delegação curta com `prediction.read`; não usa modelo treinado nem prevê produção, doenças ou mortes. |
 
 ## Sessões e memória do principal
+
+O MCP de predição só confirma cobertura quando a variável
+MCP_PREDICTION_COVERAGE_RELATION aponta para uma view PostgreSQL administrada
+pelo pipeline de dados e com as colunas property_id, coverage_start,
+coverage_end e evidence_source. As janelas precisam formar uma sequência sem
+lacunas. Sem view configurada ou evidência completa, a tool informa cobertura
+desconhecida/incompleta e não apresenta estimativa; primeiro e último evento não
+são usados como prova.
+
+O contexto enviado aos agentes é limitado a 12.000 caracteres, até 20 mensagens
+recentes e uma leitura de no máximo 200 mensagens, mesmo se o sumarizador
+falhar. Por interação, o principal limita a 12 chamadas de modelo, 12 chamadas
+de ferramenta, 48.000 caracteres totais de saídas de ferramentas, 1.200 tokens
+de saída por chamada e 90 segundos de execução. Isso restringe o consumo, mas
+não define um teto monetário exato, pois preço e uso reportado variam por
+provider e modelo. A telemetria de uso existente permanece de melhor esforço;
+não foi criado um ledger durável de custo. Fazenda, Doutor, Analista e
+Informações não podem retornar respostas de sucesso sem ao menos uma chamada
+externa bem-sucedida; referências geradas pelo modelo são substituídas por
+referências opacas das chamadas observadas.
 
 O `main_api` grava sessões e interações no Mongo, sem armazenar as mensagens
 originais em paralelo. O conteúdo persistido é sanitizado. A cada 15 entradas
 únicas do usuário, o serviço publica um resumo progressivo com teto de 2.000
 tokens; o perfil entre sessões é restrito ao tom de comunicação e ao objetivo
 geral declarado. Sessões e preferências não expiram automaticamente.
+
+O contexto enviado aos agentes é limitado a 12.000 caracteres, no máximo 20
+mensagens recentes e uma leitura de até 200 mensagens para montar a janela;
+essas restrições também valem quando o sumarizador está indisponível. Por
+interação, o principal limita a 12 chamadas de modelo, 12 chamadas de
+ferramenta, 48.000 caracteres totais de respostas de ferramentas, 1.200 tokens
+de saída por chamada e 90 segundos de execução. Esses limites restringem
+consumo, mas não definem valor monetário exato: preços e uso reportado variam
+por provider/modelo. A telemetria de uso existente continua de melhor esforço;
+não foi criado um ledger durável de custo.
+
+Respostas de Fazenda, Doutor, Analista e Informações ficam indisponíveis se não
+houver chamada externa bem-sucedida. Citações geradas pelo modelo são
+substituídas por referências opacas da chamada, sem persistir seu conteúdo.
 
 O tracing LangSmith do `main_api` é opcional e só é ativado quando
 `MAIN_API_LANGSMITH_API_KEY` está configurada. Por padrão, traces de agentes,
@@ -101,10 +136,11 @@ aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
 registrados separadamente. Sem `MAIN_API_LANGSMITH_API_KEY`, nada é enviado.
 Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
 habilita prompts, respostas e argumentos de ferramentas após aprovação. Com a
-captura ativa, e-mails, UUIDs, CPFs e tokens Bearer são anonimizados. O projeto
-é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
-`MAIN_API_LANGSMITH_ENDPOINT`. O serviço A2A possui configuração própria; os
-traces dos dois processos não recebem um vínculo distribuído entre serviços.
+captura ativa, e-mails, UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
+anonimizados. O projeto é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o
+endpoint HTTPS opcional por `MAIN_API_LANGSMITH_ENDPOINT`. O serviço A2A possui
+configuração própria; os traces dos dois processos não recebem um vínculo
+distribuído entre serviços.
 
 Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
 persistência e retomada com Mongo replica set descartável: siga
@@ -140,6 +176,21 @@ transporte. Recuperações reusam o mesmo `report_id` e chave de idempotência.
 deve ser reenviada automaticamente, pois outros destinatários podem já ter
 recebido o e-mail.
 
+O transporte SMTP usa STARTTLS com validação de cadeia de certificados e nome do
+servidor pelo trust store padrão do sistema. `MCP_EMAIL_SMTP_USE_TLS=false` é
+reservado a serviços locais de captura, como Mailpit; não use em ambientes com
+entrega real. Uma conexão com certificado inválido falha antes do envio.
+
+Se o processo cair depois de reservar uma operação, ela permanece `pending`; se
+a conexão cair após o provedor possivelmente aceitar a mensagem, o MCP marca
+`unknown`. Repetir a mesma chave de idempotência devolve o estado existente e
+nunca chama o SMTP de novo. A operação deve ser reconciliada por uma pessoa
+operadora usando o `operation_id`/`provider_message_id` e os registros do
+provedor. Não libere nem repita automaticamente uma operação ambígua: só após
+confirmar no provedor que nenhum destinatário recebeu a mensagem, uma nova
+solicitação explícita pode gerar outra operação. `accepted` significa aceite do
+provedor, não entrega ou leitura.
+
 ## A2A
 
 A2A é o protocolo de comunicação com o serviço dos especialistas Documental e
@@ -152,7 +203,7 @@ informam a data do documento e sua última atualização conhecida. PDFs de test
 ficam no repositório.
 
 O serviço tem build independente em `apps/a2a_agent/Dockerfile` e Compose
-operacional documentado em
+individual documentado em
 [`apps/a2a_agent/README.md`](apps/a2a_agent/README.md). O runtime implementa
 adapters HTTP OpenAI-compatible para embeddings e geração, além de uma consulta
 PostgreSQL somente leitura para autorização documental. Endpoints, modelos,
@@ -179,14 +230,18 @@ argos-ai-service/
 ├── config/               # Modelos e fallbacks fixos por agente
 ├── infrastructure/       # Configuração dos serviços locais
 ├── docs/                 # Planejamento e documentação
-├── compose.yaml          # Execução integrada — planejado
+├── compose.yaml          # Dependências locais e perfil integrado de serviços
 └── .github/workflows/    # CI no GitHub Actions
 ```
 
 Cada aplicação terá configuração, dependências e execução próprias, com deploy
 independente. Os contratos compartilhados precisam acompanhar o artefato de cada
 serviço que os consome; o processo não depende do código de outro serviço
-montado em runtime. O Compose integrado da raiz ainda é planejado.
+montado em runtime. O perfil Docker integrado, o schema e os dados sintéticos
+PostgreSQL, e os providers de modelo simulados estão documentados em
+[`docs/docker-local.md`](docs/docker-local.md). O modo simulado permite
+exercitar o fluxo sem chaves externas e identifica suas respostas como
+ilustrativas.
 
 No principal, a organização separa API, domínio, orquestração, agentes e
 infraestrutura. **Protocol + Factory + Registry** padroniza a criação dos

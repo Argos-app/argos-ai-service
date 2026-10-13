@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from app.api.v1.models.interactions import MessageInteraction
 from app.application.session_service import _normalize_input
-from app.privacy import merge_recipient_selectors, protect_user_input
+from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 
 
 def test_protect_user_input_keeps_explicit_recipient_as_unique_reference():
@@ -37,6 +37,15 @@ def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name()
         "[DESTINATARIO_1]": {"kind": "name", "value": "Ana Silva"}
     }
     assert protected.send_intent_requested is False
+
+
+def test_minimize_pii_redacts_cnpj_and_brazilian_phone():
+    sanitized = minimize_pii("CNPJ 12.345.678/0001-90, telefone (11) 98765-4321")
+
+    assert "12.345.678/0001-90" not in sanitized
+    assert "(11) 98765-4321" not in sanitized
+    assert "[CNPJ]" in sanitized
+    assert "[TELEFONE]" in sanitized
 
 
 def test_negated_send_language_does_not_record_an_explicit_send_intent():

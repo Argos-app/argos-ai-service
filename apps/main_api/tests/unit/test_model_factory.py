@@ -1,12 +1,16 @@
 """Configuração e capacidades do runtime de modelos do principal."""
 
+from dataclasses import replace
+
 import pytest
+from app.agent_schemas.results import RoutePlan, SpecialistAgentId
 from app.agents.registry import ModelPolicyId
 from app.infrastructure.agents.model_factory import (
     ModelRuntimeConfigurationError,
     create_configured_models,
     validate_model_capabilities,
 )
+from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.settings import Settings
 
 
@@ -38,6 +42,21 @@ def test_partial_model_configuration_is_reported_without_starting_provider():
     assert reason == "model_configuration_incomplete"
 
 
+def test_simulated_mode_builds_models_without_external_credentials():
+    models, reason = create_configured_models(Settings(model_mode="simulated"))
+
+    assert reason is None
+    assert models is not None
+    validate_model_capabilities(models)
+    assert models[ModelPolicyId.ROUTER]._llm_type == "argos_simulated"
+
+
+def test_simulated_model_emits_a_valid_route_plan():
+    route = SimulatedChatModel().with_structured_output(RoutePlan).invoke("listar propriedades")
+
+    assert route.tasks[0].agent is SpecialistAgentId.FARM
+
+
 def test_factory_maps_internal_policies_to_fast_and_specialist_models():
     calls = []
 
@@ -64,6 +83,36 @@ def test_factory_maps_internal_policies_to_fast_and_specialist_models():
     assert models[ModelPolicyId.ROUTER] is not models[ModelPolicyId.FARM]
     assert calls[0]["api_key"] == "test-secret"
     assert calls[0]["max_retries"] == 0
+    assert calls[0]["max_tokens"] == 1200
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"model_max_output_tokens": 0},
+        {"model_max_output_tokens": 8193},
+        {"execution_max_model_calls": 0},
+        {"execution_max_tool_calls": 101},
+        {"execution_timeout_seconds": 301},
+    ],
+)
+def test_execution_limits_are_validated(overrides):
+    with pytest.raises(ValueError):
+        replace(Settings(), **overrides)
+
+
+def test_execution_limits_are_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "900")
+    monkeypatch.setenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "8")
+    monkeypatch.setenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "7")
+    monkeypatch.setenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "45")
+
+    settings = Settings.from_env()
+
+    assert settings.model_max_output_tokens == 900
+    assert settings.execution_max_model_calls == 8
+    assert settings.execution_max_tool_calls == 7
+    assert settings.execution_timeout_seconds == 45
 
 
 def test_model_factory_rejects_models_without_structured_output():

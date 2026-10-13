@@ -39,6 +39,10 @@ from app.domain.report_artifacts import (
     ReportArtifactNotFoundError,
 )
 from app.graph.state import AgentState
+from app.infrastructure.agents.execution_limits import (
+    ExecutionLimits,
+    current_execution_limits,
+)
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.email_preparation_repository import EmailPreparationRepository
@@ -86,6 +90,9 @@ def build_agent_context(
         context["argos_authorized_property_ids"] = configurable["argos_authorized_property_ids"]
     if configurable.get("argos_request_id"):
         context["argos_request_id"] = configurable["argos_request_id"]
+    limits = current_execution_limits()
+    if isinstance(limits, ExecutionLimits):
+        context["argos_execution_limits"] = limits
     if report_artifact_scopes:
         context["argos_report_artifact_scopes"] = report_artifact_scopes
     if recipient_selectors is not None:
@@ -588,6 +595,43 @@ async def no_especialista(
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")
+            if agent_id in {
+                AgentId.FARM,
+                AgentId.DOCTOR,
+                AgentId.ANALYST,
+                AgentId.INFORMATION,
+            }:
+                limits = context.get("argos_execution_limits")
+                evidence = (
+                    limits.evidence_for(agent_id.value)
+                    if isinstance(limits, ExecutionLimits)
+                    else ()
+                )
+                if not evidence and result.status in {
+                    SpecialistStatus.SUCCESS,
+                    SpecialistStatus.PARTIAL,
+                }:
+                    result = result.model_copy(
+                        update={
+                            "status": SpecialistStatus.UNAVAILABLE,
+                            "answer": SAFE_ANSWER,
+                            "sources": (),
+                            "error": "required_external_evidence_missing",
+                        }
+                    )
+                    errors.append(f"{agent_id.value}_external_evidence_missing")
+                elif evidence:
+                    result = result.model_copy(
+                        update={
+                            "sources": tuple(
+                                SourceReference(
+                                    title=f"Consulta externa: {tool_name}",
+                                    reference=reference,
+                                )
+                                for tool_name, reference in evidence
+                            )
+                        }
+                    )
         except ExecutionEventWriteError:
             raise
         except Exception:
@@ -838,7 +882,7 @@ async def no_formatador(
 def no_guardrail_pergunta(state: AgentState) -> dict:
     question = minimize_pii(state.get("clarification_question") or SAFE_ANSWER)
     for identifier in build_agent_context(state).values():
-        if identifier:
+        if isinstance(identifier, str) and identifier:
             question = question.replace(identifier, "[identificador protegido]")
     return {"clarification_question": question, "messages": [AIMessage(content=question)]}
 
@@ -856,7 +900,7 @@ def no_guardrail_saida(state: AgentState) -> dict:
     else:
         answer = minimize_pii(draft.draft_answer)
         for identifier in build_agent_context(state).values():
-            if identifier:
+            if isinstance(identifier, str) and identifier:
                 answer = answer.replace(identifier, "[identificador protegido]")
     answer = _include_email_action_summary(answer, state.get("email_action_summary"))
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}

@@ -1,0 +1,11 @@
+**
+!apps/
+!apps/mcp_email/
+!apps/mcp_email/requirements.txt
+!apps/mcp_email/src/
+!apps/mcp_email/src/**
+!packages/
+!packages/contracts/
+!packages/contracts/**
+!packages/security/
+!packages/security/**

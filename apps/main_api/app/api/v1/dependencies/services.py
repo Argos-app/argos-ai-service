@@ -65,9 +65,6 @@ def _graph_provider(request: Request):
                 preparations=persistence.email_preparations,
                 report_artifacts=persistence.report_artifacts,
                 observation_collector=observation_collector,
-                report_signature_checker=getattr(
-                    app_state, "report_source_signature_verifier", None
-                ),
             )
         graph = build_graph(
             build_agent_factory(
@@ -185,6 +182,15 @@ def get_session_service(request: Request) -> SessionService:
         summary_generator_provider=lambda: _summary_generator_provider(request),
         user_memory_extractor_provider=lambda: _user_memory_extractor_provider(request),
         graph_provider=lambda: _graph_provider(request),
+        execution_max_model_calls=getattr(
+            getattr(request.app.state, "settings", None), "execution_max_model_calls", 12
+        ),
+        execution_max_tool_calls=getattr(
+            getattr(request.app.state, "settings", None), "execution_max_tool_calls", 12
+        ),
+        execution_timeout_seconds=getattr(
+            getattr(request.app.state, "settings", None), "execution_timeout_seconds", 90.0
+        ),
     )
 
 

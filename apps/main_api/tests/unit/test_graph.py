@@ -26,9 +26,12 @@ from app.graph.workflow import (
     executar_fluxo,
     executar_resposta,
     initial_state,
+    no_especialista,
     no_guardrail_entrada,
+    no_guardrail_saida,
     no_saida_segura,
 )
+from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventWriteError
 from langchain_core.messages import HumanMessage
@@ -63,10 +66,79 @@ def test_safe_response_preserves_recovered_email_action_outcome() -> None:
             "email_action_summary": "O MCP confirmou o recebimento do envio.",
         }
     )
-
     assert result["final_answer"] == (
         f"{SAFE_ANSWER}\n\nEstado do envio: O MCP confirmou o recebimento do envio."
     )
+
+
+def test_output_guardrail_skips_non_text_execution_context_values():
+    state = request_state()
+    state.update(
+        judge_result=JudgeResult(decision=JudgeDecision.APPROVED, reason="Fonte verificada"),
+        draft_result=OrchestratorResult(draft_answer="Consulta local concluída."),
+        called_agents=[],
+    )
+
+    with execution_limits_scope(ExecutionLimits(4, 4)):
+        result = no_guardrail_saida(state)
+
+    assert result["final_answer"] == "Consulta local concluída."
+
+
+@pytest.mark.asyncio
+async def test_data_agent_must_have_real_external_tool_evidence():
+    state = request_state()
+    state.update(
+        ordered_tasks=(task(agent="analyst"),),
+        current_task_index=0,
+        task_outcomes=(),
+        errors=[],
+        called_agents=[],
+        sources=[],
+    )
+    result = SpecialistResult(agent="analyst", status="success", answer="Estimativa")
+    factory = FakeFactory(analyst=FakeAgent(result))
+
+    with execution_limits_scope(ExecutionLimits(4, 4)):
+        update = await no_especialista(
+            state,
+            factory=factory,
+            agent_id=AgentId.ANALYST,
+        )
+
+    assert update["task_outcomes"][0].result.status == "unavailable"
+    assert update["task_outcomes"][0].result.answer == SAFE_ANSWER
+    assert "analyst_external_evidence_missing" in update["errors"]
+
+
+@pytest.mark.asyncio
+async def test_successful_external_tool_call_is_attached_as_runtime_evidence():
+    state = request_state()
+    state.update(
+        ordered_tasks=(task(agent="analyst"),),
+        current_task_index=0,
+        task_outcomes=(),
+        errors=[],
+        called_agents=[],
+        sources=[],
+    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("analyst", "estimate_medicine_consumption")
+    factory = FakeFactory(
+        analyst=FakeAgent(SpecialistResult(agent="analyst", status="success", answer="Estimativa"))
+    )
+
+    with execution_limits_scope(limits):
+        update = await no_especialista(
+            state,
+            factory=factory,
+            agent_id=AgentId.ANALYST,
+        )
+
+    evidence = update["task_outcomes"][0].result.sources
+    assert len(evidence) == 1
+    assert evidence[0].title == "Consulta externa: estimate_medicine_consumption"
+    assert evidence[0].reference.startswith("tool-call:")
 
 
 def request_state(message: str = "Quais aplicações existem?") -> dict:

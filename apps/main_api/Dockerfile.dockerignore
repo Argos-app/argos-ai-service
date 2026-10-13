@@ -1,0 +1,13 @@
+**
+!apps/
+!apps/main_api/
+!apps/main_api/requirements.txt
+!apps/main_api/app/
+!apps/main_api/app/**
+!packages/
+!packages/contracts/
+!packages/contracts/**
+!packages/security/
+!packages/security/**
+!packages/observability/
+!packages/observability/**

@@ -2,7 +2,7 @@
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
@@ -27,6 +27,37 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
 )
+
+_PERSONAL_PATTERNS = (
+    (re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"), "[EMAIL]"),
+    (re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"), "[CPF]"),
+    (re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b"), "[CNPJ]"),
+    (
+        re.compile(r"(?<!\d)(?:\+?55[\s.-]?)?\(?[1-9]\d\)?[\s.-]?9?\d{4}[\s.-]?\d{4}(?!\d)"),
+        "[TELEFONE]",
+    ),
+    (
+        re.compile(
+            r"(?i)(\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|token)\b\s*[:= ]\s*)"
+            r"([^\s,;]+)"
+        ),
+        r"\1[REDACTED]",
+    ),
+)
+
+
+def _minimize_prompt_value(value: Any) -> Any:
+    if isinstance(value, str):
+        for pattern, replacement in _PERSONAL_PATTERNS:
+            value = pattern.sub(replacement, value)
+        return value
+    if isinstance(value, list):
+        return [_minimize_prompt_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_minimize_prompt_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return {key: _minimize_prompt_value(item) for key, item in value.items()}
+    return value
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -136,7 +167,9 @@ class OpenAICompatibleAnswerGenerator:
                         {"role": "system", "content": system},
                         {
                             "role": "user",
-                            "content": json.dumps(user_payload, ensure_ascii=False),
+                            "content": json.dumps(
+                                _minimize_prompt_value(user_payload), ensure_ascii=False
+                            ),
                         },
                     ],
                 },

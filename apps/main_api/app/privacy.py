@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 CPF_PATTERN = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
+CNPJ_PATTERN = re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b")
+PHONE_PATTERN = re.compile(r"(?<!\d)(?:\+?55[\s.-]?)?\(?[1-9]\d\)?[\s.-]?9?\d{4}[\s.-]?\d{4}(?!\d)")
 SECRET_VALUE_PATTERN = re.compile(
     r"(?i)(\b(?:bearer|password|passwd|secret|api[_-]?key|access[_-]?token|token)\b\s*[:= ]\s*)"
     r"([^\s,;]+)"
@@ -121,12 +123,13 @@ def _has_positive_send_intent(text: str) -> bool:
 
 
 def minimize_pii(text: str) -> str:
-    """Remove os identificadores pessoais cobertos pelo guardrail atual."""
-    return CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
+    """Remove e-mail, CPF, CNPJ e telefone antes do conteúdo seguir adiante."""
+    return PHONE_PATTERN.sub(
+        "[TELEFONE]",
+        CNPJ_PATTERN.sub("[CNPJ]", CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))),
+    )
 
 
 def minimize_sensitive_memory_input(text: str) -> str:
     """Remove PII e valores com aparência de credencial antes de extrair perfil."""
-    return SECRET_VALUE_PATTERN.sub(
-        r"\1[REDACTED]", CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
-    )
+    return SECRET_VALUE_PATTERN.sub(r"\1[REDACTED]", minimize_pii(text))

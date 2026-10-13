@@ -186,7 +186,9 @@ def create_app(
                 status_code=503,
                 content={"status": "unavailable", "reason": "session_store_not_configured"},
             )
-        if not configured.auth_trusted_public_keys:
+        if not configured.auth_trusted_public_keys and not (
+            configured.app_env == "local" and configured.auth_mode == "stub"
+        ):
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "identity_not_configured"},

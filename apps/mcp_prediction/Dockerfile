@@ -20,4 +20,6 @@ RUN addgroup --system --gid 10001 argos \
 USER argos:argos
 
 EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 --start-period=20s \
+    CMD ["python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=2).close()"]
 CMD ["python", "-m", "argos_mcp_prediction"]

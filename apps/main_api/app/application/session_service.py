@@ -41,6 +41,7 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
+from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.infrastructure.observability.recording import OperationRecorder, observe_operation
 from app.ports.conversation_repository import ConversationRepository
 from app.ports.email_preparation_repository import EmailPreparationRepository
@@ -95,12 +96,18 @@ class MongoSessionService:
         user_memory_extractor_provider: MemoryExtractorProvider | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
         renew_seconds: int = SESSION_LEASE_RENEW_SECONDS,
+        execution_max_model_calls: int = 12,
+        execution_max_tool_calls: int = 12,
+        execution_timeout_seconds: float = 90.0,
     ) -> None:
         self._sessions = sessions
         self._interactions = interactions
         self._conversations = conversations
         self._session_work = session_work
         self._graph_provider = graph_provider
+        self._execution_max_model_calls = execution_max_model_calls
+        self._execution_max_tool_calls = execution_max_tool_calls
+        self._execution_timeout_seconds = execution_timeout_seconds
         self._observation_collector = observation_collector
         self._langsmith_callback = langsmith_callback
         self._email_preparations = email_preparations
@@ -378,6 +385,10 @@ class MongoSessionService:
                     else None
                 )
                 try:
+                    execution_limits = ExecutionLimits(
+                        max_model_calls=self._execution_max_model_calls,
+                        max_tool_calls=self._execution_max_tool_calls,
+                    )
                     graph_config = {
                         "configurable": {
                             "argos_user_id": str(principal.user_id),
@@ -391,32 +402,36 @@ class MongoSessionService:
                         graph_config["callbacks"] = [self._langsmith_callback]
                         graph_config["metadata"] = {"argos_operation": "session.interaction"}
                     if isinstance(body, MessageInteraction):
-                        state = await executar_fluxo(
-                            graph,
-                            sanitized_input,
-                            user_id=str(principal.user_id),
-                            farm_id=str(authorized_farms[0]),
-                            session_id=str(session_id),
-                            interaction_id=str(interaction_id),
-                            session_context=session_context,
-                            recipient_selectors=recipient_selectors,
-                            send_intent_requested=send_intent_requested,
-                            config=graph_config,
-                        )
+                        with execution_limits_scope(execution_limits):
+                            async with asyncio.timeout(self._execution_timeout_seconds):
+                                state = await executar_fluxo(
+                                    graph,
+                                    sanitized_input,
+                                    user_id=str(principal.user_id),
+                                    farm_id=str(authorized_farms[0]),
+                                    session_id=str(session_id),
+                                    interaction_id=str(interaction_id),
+                                    session_context=session_context,
+                                    recipient_selectors=recipient_selectors,
+                                    send_intent_requested=send_intent_requested,
+                                    config=graph_config,
+                                )
                     else:
-                        state = await executar_resposta(
-                            graph,
-                            answer_text or sanitized_input,
-                            question_id=str(body.question_id),
-                            session_id=str(session_id),
-                            interaction_id=str(interaction_id),
-                            checkpoint_namespace=str(body.interaction_id),
-                            session_context=session_context,
-                            recipient_selectors=recipient_selectors,
-                            send_intent_requested=send_intent_requested,
-                            send_intent_source_interaction_id=send_intent_source_interaction_id,
-                            config=graph_config,
-                        )
+                        with execution_limits_scope(execution_limits):
+                            async with asyncio.timeout(self._execution_timeout_seconds):
+                                state = await executar_resposta(
+                                    graph,
+                                    answer_text or sanitized_input,
+                                    question_id=str(body.question_id),
+                                    session_id=str(session_id),
+                                    interaction_id=str(interaction_id),
+                                    checkpoint_namespace=str(body.interaction_id),
+                                    session_context=session_context,
+                                    recipient_selectors=recipient_selectors,
+                                    send_intent_requested=send_intent_requested,
+                                    send_intent_source_interaction_id=send_intent_source_interaction_id,
+                                    config=graph_config,
+                                )
                 except BaseException as exc:
                     if graph_recorder is not None:
                         graph_recorder.finish(error=exc, error_origin=ErrorOrigin.APPLICATION)
@@ -424,7 +439,11 @@ class MongoSessionService:
                 else:
                     if graph_recorder is not None:
                         graph_recorder.finish()
-            except Exception:
+            except Exception as exc:
+                logger.error(
+                    "session interaction graph failed",
+                    extra={"error_type": type(exc).__name__},
+                )
                 failed = True
                 state = {"final_answer": SAFE_ANSWER}
 
