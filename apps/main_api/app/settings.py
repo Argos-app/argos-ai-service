@@ -3,7 +3,8 @@
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, fields
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
 
@@ -37,10 +38,54 @@ def _environment_bool(name: str, default: bool = False) -> bool:
     return default
 
 
+_MONGO_COLLECTION_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+
+
+@dataclass(frozen=True, slots=True)
+class MongoCollectionSettings:
+    """Nomes das collections pertencentes ao serviço principal."""
+
+    sessions: str = "ai_sessions"
+    interactions: str = "ai_interactions"
+    messages: str = "ai_messages"
+    execution_events: str = "ai_execution_events"
+    session_summaries: str = "ai_session_summaries"
+    user_memory: str = "ai_user_memory"
+    report_artifacts: str = "ai_report_artifacts"
+    email_preparations: str = "ai_email_preparations"
+    pending_recipient_resolutions: str = "ai_pending_recipient_resolutions"
+    email_send_authorizations: str = "ai_email_send_authorizations"
+    email_operation_references: str = "ai_email_operation_references"
+    langgraph_checkpoints: str = "ai_langgraph_checkpoints"
+    langgraph_checkpoint_writes: str = "ai_langgraph_checkpoint_writes"
+
+    def __post_init__(self) -> None:
+        names = [getattr(self, item.name) for item in fields(self)]
+        for name in names:
+            if not _MONGO_COLLECTION_NAME.fullmatch(name) or name.startswith("system."):
+                raise ValueError("nome de collection Mongo inválido")
+        if len(names) != len(set(names)):
+            raise ValueError("collections Mongo do main_api devem ter nomes distintos")
+
+    @classmethod
+    def from_env(cls) -> MongoCollectionSettings:
+        defaults = cls()
+        return cls(
+            **{
+                item.name: os.getenv(
+                    f"MAIN_API_MONGO_COLLECTION_{item.name.upper()}",
+                    getattr(defaults, item.name),
+                )
+                for item in fields(cls)
+            }
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     mongo_uri: str | None = None
     mongo_database: str = "argos_ai"
+    mongo_collections: MongoCollectionSettings = field(default_factory=MongoCollectionSettings)
     mongo_server_selection_timeout_ms: int = 5_000
     mongo_write_timeout_ms: int = 5_000
     observability_collection: str | None = None
@@ -96,6 +141,7 @@ class Settings:
         return cls(
             mongo_uri=os.getenv("MAIN_API_MONGO_URI") or None,
             mongo_database=os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai"),
+            mongo_collections=MongoCollectionSettings.from_env(),
             mongo_server_selection_timeout_ms=int(
                 os.getenv("MAIN_API_MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
             ),
@@ -161,6 +207,10 @@ class Settings:
     def __post_init__(self) -> None:
         if not self.mongo_database.strip():
             raise ValueError("MAIN_API_MONGO_DATABASE não pode estar vazio")
+        if self.observability_collection is not None and self.observability_collection in {
+            getattr(self.mongo_collections, item.name) for item in fields(self.mongo_collections)
+        }:
+            raise ValueError("MAIN_API_OBSERVABILITY_COLLECTION colide com collection do main_api")
         if (
             self.mongo_server_selection_timeout_ms < 1
             or self.mongo_write_timeout_ms < 1

@@ -2,14 +2,17 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass
+
+_MONGO_COLLECTION_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     sql_dsn: str | None = None
     mongo_uri: str | None = None
-    mongo_database: str | None = None
+    mongo_database: str | None = "argos_ai"
     mongo_cattle_collection: str | None = None
     mongo_relational_id_format: str | None = None
     mongo_medicine_collection: str | None = None
@@ -50,7 +53,7 @@ class Settings:
         return cls(
             sql_dsn=os.getenv("MCP_DATA_SQL_DSN"),
             mongo_uri=os.getenv("MCP_DATA_MONGO_URI"),
-            mongo_database=os.getenv("MCP_DATA_MONGO_DATABASE"),
+            mongo_database=os.getenv("MCP_DATA_MONGO_DATABASE", "argos_ai"),
             mongo_cattle_collection=os.getenv("MCP_DATA_MONGO_CATTLE_COLLECTION"),
             mongo_relational_id_format=os.getenv("MCP_DATA_MONGO_RELATIONAL_ID_FORMAT"),
             mongo_medicine_collection=os.getenv("MCP_DATA_MONGO_MEDICINE_COLLECTION"),
@@ -93,6 +96,14 @@ class Settings:
             raise ValueError(
                 "MCP_DATA_MONGO_MEDICINE_ID_FORMAT deve ser 'string' ou 'uuid_standard'"
             )
+        collection_names = (self.mongo_cattle_collection, self.mongo_medicine_collection)
+        if any(
+            not _MONGO_COLLECTION_NAME.fullmatch(name or "") or name.startswith("system.")
+            for name in collection_names
+        ):
+            raise ValueError("nome de collection Mongo inválido")
+        if len(set(collection_names)) != len(collection_names):
+            raise ValueError("collections Mongo do MCP de dados devem ter nomes distintos")
         if not 1 <= self.delegation_max_ttl_seconds <= 300:
             raise ValueError("MCP_DATA_DELEGATION_MAX_TTL deve estar entre 1 e 300 segundos")
         if not 0 <= self.delegation_clock_skew_seconds <= 60:

@@ -70,7 +70,7 @@ async def create_runtime(settings: Settings) -> ServiceRuntime:
             settings.mongo_database,
             write_concern=WriteConcern(w="majority", wtimeout=settings.mongo_write_timeout_ms),
         )
-        persistence = MongoPersistence(database)
+        persistence = MongoPersistence(database, settings.mongo_collections)
         await persistence.ensure_indexes()
         checkpoints = await asyncio.to_thread(create_mongo_checkpointer, settings)
         writer, collector = await _create_observability_runtime(settings, database)

@@ -80,11 +80,16 @@ LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
 (padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
 público.
 
-O serviço precisa de Mongo em replica set para transações e checkpointer. As
-configurações principais são `MAIN_API_MONGO_URI` e `MAIN_API_MONGO_DATABASE`;
-veja [`apps/main_api/.env.example`](apps/main_api/.env.example). Em testes
-locais executados no host contra o Compose, use o URI de conexão direta
-documentado no README dos testes de integração. O stub de identidade continua
+O serviço precisa de Mongo em replica set para transações e checkpointer. Os
+serviços com persistência própria compartilham o banco `argos_ai` e separam os
+dados por collections. A configuração por sistema, variáveis, URIs para host e
+Compose, precedência e migração das collections antigas de e-mail estão em
+[`docs/configuracao-mongodb.md`](docs/configuracao-mongodb.md); exemplos:
+[`apps/main_api/.env.example`](apps/main_api/.env.example),
+[`apps/mcp_data/.env.example`](apps/mcp_data/.env.example) e
+[`apps/mcp_email/.env.example`](apps/mcp_email/.env.example). Em execução local
+no host contra o Compose de testes, o URI usa `directConnection=true` porque o
+replica set anuncia um nome de host interno. O stub de identidade continua
 disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
 desse modo, configure a chave pública Ed25519 do backend em
 `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
