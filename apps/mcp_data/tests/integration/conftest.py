@@ -103,6 +103,11 @@ class McpDataHarness:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
+        private_key_der = self.private_key.private_bytes(
+            serialization.Encoding.DER,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
         env = dict(os.environ)
         env.update(
             PYTHONPATH=os.pathsep.join((str(ROOT / "apps/mcp_data/src"), str(ROOT))),
@@ -121,6 +126,8 @@ class McpDataHarness:
             MCP_DATA_TRUSTED_DELEGATION_KEYS=json.dumps(
                 {"integration-key": base64.b64encode(public_key).decode("ascii")}
             ),
+            MCP_DATA_REPORT_SIGNING_KEY_ID="integration-key",
+            MCP_DATA_REPORT_SIGNING_PRIVATE_KEY=base64.b64encode(private_key_der).decode("ascii"),
             MCP_DATA_HOST="127.0.0.1",
             MCP_DATA_PORT=str(self.port),
         )

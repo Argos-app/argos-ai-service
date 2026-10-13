@@ -162,6 +162,35 @@ async def test_provider_exception_becomes_unknown_without_retry():
     assert result.error_code == "provider_result_unknown"
 
 
+@pytest.mark.parametrize("state", [DispatchState.PENDING, DispatchState.UNKNOWN])
+@pytest.mark.asyncio
+async def test_replay_of_pending_or_unknown_operation_never_calls_provider(state):
+    report = prepared_report()
+    existing = DispatchRecord(
+        operation_id=uuid4(),
+        report_id=report.report_id,
+        requested_by=REQUESTER,
+        idempotency_key="ambiguous-operation",
+        state=state,
+        provider_message_id=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    dispatch = FakeDispatchRepository(existing=existing)
+    provider = FakeProvider(ProviderSendResult(accepted=True, provider_message_id="unexpected"))
+
+    result = await use_case(report, dispatch, provider).execute(
+        SendReportRequest(
+            report_id=report.report_id,
+            requested_by=REQUESTER,
+            idempotency_key="ambiguous-operation",
+        )
+    )
+
+    assert result.status == DispatchStatus(state.value)
+    assert provider.calls == []
+
+
 @pytest.mark.asyncio
 async def test_missing_report_is_rejected_before_provider_call():
     dispatch = FakeDispatchRepository()

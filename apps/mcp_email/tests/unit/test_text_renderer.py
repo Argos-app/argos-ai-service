@@ -40,7 +40,7 @@ def test_renderer_fills_controlled_lot_template() -> None:
                 route="INTRAMUSCULAR",
                 head_count_applied=10,
                 meat_withdrawal_end=date(2026, 9, 11),
-                status="Concluida",
+                active=True,
             ),
         ),
         queried_at=datetime(2026, 10, 3, 12, 0, tzinfo=UTC),

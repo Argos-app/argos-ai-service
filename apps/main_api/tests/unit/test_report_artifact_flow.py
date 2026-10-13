@@ -181,7 +181,7 @@ async def test_farm_tool_stores_envelope_and_returns_only_its_opaque_reference()
             return envelope
 
     repository = _FakeArtifactRepository()
-    tool = build_farm_report_tool(FakeDataClient(), repository)
+    tool = build_farm_report_tool(FakeDataClient(), repository, signature_checker=lambda *_: True)
     config["configurable"].update(
         {
             "session_id": str(session_id),

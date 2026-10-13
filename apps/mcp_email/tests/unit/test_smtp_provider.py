@@ -8,6 +8,7 @@ from packages.contracts import RecipientRef
 
 class FakeSmtp:
     messages = []
+    tls_contexts = []
 
     def __init__(self, host, port, timeout):
         self.host = host
@@ -20,8 +21,8 @@ class FakeSmtp:
     def __exit__(self, *_):
         return False
 
-    def starttls(self):
-        pass
+    def starttls(self, *, context=None):
+        self.tls_contexts.append(context)
 
     def login(self, username, password):
         self.credentials = (username, password)
@@ -51,3 +52,5 @@ async def test_smtp_provider_sends_from_configured_sender():
     assert result.accepted is True
     assert FakeSmtp.messages[-1]["From"] == "no-reply@argos.com"
     assert FakeSmtp.messages[-1]["To"] == "luis@example.com"
+    assert FakeSmtp.tls_contexts[-1].verify_mode == 2
+    assert FakeSmtp.tls_contexts[-1].check_hostname is True
