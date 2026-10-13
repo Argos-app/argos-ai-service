@@ -60,6 +60,19 @@ originais em paralelo. O conteúdo persistido é sanitizado. A cada 15 entradas
 tokens; o perfil entre sessões é restrito ao tom de comunicação e ao objetivo
 geral declarado. Sessões e preferências não expiram automaticamente.
 
+O tracing LangSmith do `main_api` é opcional e só é ativado quando
+`MAIN_API_LANGSMITH_API_KEY` está configurada. Por padrão, traces de agentes,
+chamadas a modelos e ferramentas ocultam entradas e saídas; habilite
+`MAIN_API_LANGSMITH_CAPTURE_CONTENT=true` somente após aprovar o envio de
+prompts, respostas e argumentos de ferramentas ao projeto LangSmith configurado.
+A chave deve ficar no gerenciador de secrets do ambiente.
+`MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e `MAIN_API_LANGSMITH_ENDPOINT`
+permite apontar para uma instância aprovada. O Mongo continua armazenando apenas
+os eventos brutos sanitizados existentes; conteúdo de trace é armazenado
+separadamente pelo LangSmith. Avaliações e feedback podem ser feitos sobre os
+traces na plataforma; esta integração não define critérios automáticos de
+qualidade.
+
 As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
 `POST /v1/sessions/{session_id}/interactions` e
 `GET /v1/sessions/{session_id}/messages`. A consulta de mensagens não chama o
@@ -77,6 +90,16 @@ desse modo, configure a chave pública Ed25519 do backend em
 `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
 agente e operações delegadas. O backend deve incluir `farm_ids` no token para
 que a API possa abrir sessões com o escopo autorizado.
+
+O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
+aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
+registrados separadamente. Sem `MAIN_API_LANGSMITH_API_KEY`, nada é enviado.
+Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
+habilita prompts, respostas e argumentos de ferramentas após aprovação. Com a
+captura ativa, e-mails, UUIDs, CPFs e tokens Bearer são anonimizados. O projeto
+é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
+`MAIN_API_LANGSMITH_ENDPOINT`. O serviço A2A possui configuração própria; os
+traces dos dois processos não recebem um vínculo distribuído entre serviços.
 
 Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
 persistência e retomada com Mongo replica set descartável: siga

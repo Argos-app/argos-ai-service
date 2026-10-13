@@ -71,6 +71,6 @@ async def test_invalid_collection_fails_open_without_logging_collection_value(ca
     assert writer is None
     assert isinstance(collector, DisabledObservationCollector)
     assert "observability disabled" in caplog.text
-    assert "MAIN_API_OBSERVABILITY_COLLECTION" in caplog.text
+    assert caplog.records[-1].setting == "MAIN_API_OBSERVABILITY_COLLECTION"
     assert "sensitive" not in caplog.text
     assert database.requested_collections == []

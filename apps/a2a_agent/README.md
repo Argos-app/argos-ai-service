@@ -65,6 +65,14 @@ agentes, provedores HTTP, embeddings, autorização PostgreSQL e adapters de
 documentos/Qdrant, sem persistir argumentos, prompts, respostas ou
 identificadores de usuário/task/contexto.
 
+O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
+para registrar o despacho do agente A2A e a chamada de geração de resposta no
+projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
+ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
+perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs e
+tokens Bearer são anonimizados antes do envio. O endpoint HTTPS pode ser
+definido por `A2A_LANGSMITH_ENDPOINT`.
+
 ## Operação e recuperação
 
 - `GET /health/live` verifica o processo; `GET /health/ready` também depende da
