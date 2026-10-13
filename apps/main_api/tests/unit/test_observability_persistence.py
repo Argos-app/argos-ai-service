@@ -228,6 +228,29 @@ async def test_writer_limits_pending_items_and_drains_on_close():
 
 
 @pytest.mark.asyncio
+async def test_writer_limits_queued_bytes_per_process():
+    repository = FakeRepository()
+    observation = _observation()
+    _, document_size = MongoObservationRepository.document_for(observation)
+    writer = MongoObservationWriter(
+        repository,
+        max_items=10,
+        max_bytes=document_size,
+        max_document_bytes=document_size,
+        batch_size=10,
+        batch_interval_ms=250,
+        max_attempts=1,
+    )
+    await writer.start()
+
+    assert writer.try_submit(observation) == SubmissionResult.ACCEPTED
+    assert writer.try_submit(_observation()) == SubmissionResult.QUEUE_FULL
+    await writer.close()
+
+    assert len(repository.documents) == 1
+
+
+@pytest.mark.asyncio
 async def test_writer_retries_transient_failures_and_releases_queue_capacity():
     repository = FakeRepository()
     repository.failures_remaining = 2
@@ -285,3 +308,35 @@ async def test_writer_drops_permanent_mongo_failure_and_keeps_close_available():
     await writer.close()
 
     assert reports == ["mongo_write_failed"]
+
+
+@pytest.mark.asyncio
+async def test_writer_shutdown_is_bounded_when_mongo_write_stalls():
+    entered_write = asyncio.Event()
+    reports: list[str] = []
+    repository = FakeRepository()
+
+    async def stalled_write(_document):
+        entered_write.set()
+        await asyncio.Event().wait()
+
+    repository.write_document = stalled_write
+    writer = MongoObservationWriter(
+        repository,
+        max_items=1,
+        max_bytes=16 * 1024,
+        max_document_bytes=16 * 1024,
+        batch_size=1,
+        batch_interval_ms=1,
+        max_attempts=1,
+        shutdown_timeout_ms=20,
+        report_failure=reports.append,
+    )
+    await writer.start()
+    assert writer.try_submit(_observation()) == SubmissionResult.ACCEPTED
+    await asyncio.wait_for(entered_write.wait(), timeout=1)
+
+    await asyncio.wait_for(writer.close(), timeout=0.5)
+
+    assert reports == ["shutdown_pending"]
+    assert writer.try_submit(_observation()) == SubmissionResult.NOT_RUNNING

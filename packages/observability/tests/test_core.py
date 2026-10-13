@@ -145,22 +145,22 @@ def test_collector_preserves_functional_path_on_writer_failure_and_reports_safe_
 
 
 def test_collector_sanitizes_untrusted_error_message_before_writer():
-    start = datetime(2026, 10, 12, 12, 0, 0, tzinfo=UTC)
-    end = start + timedelta(seconds=1)
-    observation = Observation(
-        **_observation(
-            ended_at=end,
-            duration_ms=1000.0,
-            updated_at=end,
-            status=ObservationStatus.FAILED,
-            error={
-                "type": "InternalError",
-                "origin": ErrorOrigin.PROVIDER,
-                "code": "email=user@example.com",
-                "message_sanitized": "token=secret user@example.com",
-            },
-        )
+    original = _observation()
+    end = original.started_at + timedelta(seconds=1)
+    observation_data = original.model_dump(by_alias=True)
+    observation_data.update(
+        ended_at=end,
+        duration_ms=1000.0,
+        updated_at=end,
+        status=ObservationStatus.FAILED,
+        error={
+            "type": "InternalError",
+            "origin": ErrorOrigin.PROVIDER,
+            "code": "email=user@example.com",
+            "message_sanitized": "token=secret user@example.com",
+        },
     )
+    observation = Observation.model_validate(observation_data)
     sanitized = sanitize_observation(observation)
     writer = InMemoryObservationWriter()
 
