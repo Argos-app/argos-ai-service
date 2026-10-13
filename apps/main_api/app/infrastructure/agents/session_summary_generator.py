@@ -209,22 +209,15 @@ class LangChainSessionSummaryGenerator:
     async def _invoke(self, system_prompt: str, payload: str) -> SessionSummaryDraft:
         try:
             messages = [SystemMessage(content=system_prompt), HumanMessage(content=payload)]
-            if self._observation_collector is None:
-                callbacks = [self._langsmith_callback] if self._langsmith_callback else []
-                result = await self._structured.ainvoke(
-                    messages,
-                    config={"callbacks": callbacks} if callbacks else None,
-                )
-            else:
-                callbacks = [
+            callbacks = []
+            if self._observation_collector is not None:
+                callbacks.append(
                     ModelUsageCallback(self._observation_collector, agent="session_summary")
-                ]
-                if self._langsmith_callback is not None:
-                    callbacks.append(self._langsmith_callback)
-                result = await self._structured.ainvoke(
-                    messages,
-                    config={"callbacks": callbacks},
                 )
+            if self._langsmith_callback is not None:
+                callbacks.append(self._langsmith_callback)
+            invoke_options = {"config": {"callbacks": callbacks}} if callbacks else {}
+            result = await self._structured.ainvoke(messages, **invoke_options)
             return SessionSummaryDraft.model_validate(result)
         except Exception as exc:
             raise SummaryGenerationError("modelo não gerou um resumo estruturado válido") from exc

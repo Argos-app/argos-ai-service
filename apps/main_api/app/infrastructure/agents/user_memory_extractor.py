@@ -82,20 +82,15 @@ class LangChainUserMemoryExtractor:
                 SystemMessage(content=USER_MEMORY_SYSTEM_PROMPT),
                 HumanMessage(content=payload),
             ]
-            if self._observation_collector is None:
-                callbacks = [self._langsmith_callback] if self._langsmith_callback else []
-                result = await self._structured.ainvoke(
-                    messages,
-                    config={"callbacks": callbacks} if callbacks else None,
+            callbacks = []
+            if self._observation_collector is not None:
+                callbacks.append(
+                    ModelUsageCallback(self._observation_collector, agent="user_memory")
                 )
-            else:
-                callbacks = [ModelUsageCallback(self._observation_collector, agent="user_memory")]
-                if self._langsmith_callback is not None:
-                    callbacks.append(self._langsmith_callback)
-                result = await self._structured.ainvoke(
-                    messages,
-                    config={"callbacks": callbacks},
-                )
+            if self._langsmith_callback is not None:
+                callbacks.append(self._langsmith_callback)
+            invoke_options = {"config": {"callbacks": callbacks}} if callbacks else {}
+            result = await self._structured.ainvoke(messages, **invoke_options)
             return UserMemoryDraft.model_validate(result).to_domain()
         except Exception as exc:
             raise UserMemoryExtractionError(
