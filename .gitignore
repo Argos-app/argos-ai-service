@@ -92,3 +92,5 @@ Thumbs.db
 !docs/plano-persistencia-sessoes-memoria.md
 !docs/configuracao-mongodb.md
 !docs/docker-local.md
+!docs/kubernetes-local.md
+k8s/local/.env.local

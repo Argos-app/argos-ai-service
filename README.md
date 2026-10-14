@@ -109,14 +109,14 @@ inclui `X-Argos-Correlation-ID` na resposta, `correlation_id` nos spans e
 `parent_observation_id` para relacionar chamadas aninhadas. O correlation ID é
 enviado às chamadas MCP e segue assinado para Data, Prediction e A2A; os MCPs
 não persistem observações próprias no momento. Filas limitadas podem perder
-observações, então ausência não significa
-zero uso. Operação, ranking de chamadas e tokens por usuário e limites estão em
+observações, então ausência não significa zero uso. Operação, ranking de
+chamadas e tokens por usuário e limites estão em
 [`docs/operacao-observabilidade.md`](docs/operacao-observabilidade.md); a
 extração e o dicionário BI estão em
 [`docs/observabilidade-extracao-mongo.md`](docs/observabilidade-extracao-mongo.md)
-e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações
-e feedback podem ser feitos sobre traces na plataforma; esta integração não
-define critérios automáticos de qualidade.
+e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações e
+feedback podem ser feitos sobre traces na plataforma; esta integração não define
+critérios automáticos de qualidade.
 
 As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
 `POST /v1/sessions/{session_id}/interactions` e
@@ -311,3 +311,6 @@ deve preceder a chamada ao MCP. A resposta a uma pergunta retoma a sessão após
 nova validação de acesso; falhas não são apresentadas como dados ou operações
 bem-sucedidas. Ao atingir um limite, o controle determinístico encerra a
 execução com conteúdo já validado ou uma mensagem segura.
+
+Para subir a integração em um cluster Kind local, consulte
+[docs/kubernetes-local.md](docs/kubernetes-local.md).
