@@ -155,6 +155,9 @@ def _factory(
         )
 
     async def farm(_input, context):
+        limits = context.get("argos_execution_limits")
+        assert limits is not None
+        limits.record_tool_success("farm", "resolve_report_lot_report_source")
         session_id = UUID(context["session_id"])
         interaction_id = UUID(context["interaction_id"])
         task_id = context["argos_task_id"]

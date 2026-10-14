@@ -13,6 +13,8 @@ from app.infrastructure.agents.model_factory import (
 from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.settings import Settings
 
+from packages.contracts.prediction import EstimateMedicineConsumptionRequest
+
 
 class _FakeChatModel:
     def __init__(self, *, model, **options):
@@ -55,6 +57,15 @@ def test_simulated_model_emits_a_valid_route_plan():
     route = SimulatedChatModel().with_structured_output(RoutePlan).invoke("listar propriedades")
 
     assert route.tasks[0].agent is SpecialistAgentId.FARM
+
+
+def test_simulated_prediction_tool_arguments_match_mcp_contract():
+    from app.infrastructure.agents.simulated_model import _tool_arguments
+
+    payload = _tool_arguments("estimate_medicine_consumption")["payload"]
+    request = EstimateMedicineConsumptionRequest.model_validate(payload)
+
+    assert request.horizon_days == 7
 
 
 def test_factory_maps_internal_policies_to_fast_and_specialist_models():

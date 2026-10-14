@@ -237,7 +237,8 @@ async def create_runtime(
 
     configured = settings or Settings.from_env()
     configured.validate_runtime(
-        require_providers=dependencies is None and configured.model_mode != "simulated"
+        require_providers=dependencies is None and configured.model_mode != "simulated",
+        require_permission_sql=dependencies is None,
     )
     if configured.document_source_root is None or configured.manifest_path is None:
         raise ValueError("fonte local e caminho do manifesto são obrigatórios")
@@ -441,9 +442,7 @@ async def _create_observability_runtime(
                         socket_connect_timeout=1,
                         socket_timeout=1,
                     ),
-                    key_prefix=os.getenv(
-                        "USER_USAGE_REDIS_KEY_PREFIX", "argos:usage:users:v1"
-                    ),
+                    key_prefix=os.getenv("USER_USAGE_REDIS_KEY_PREFIX", "argos:usage:users:v1"),
                 )
             except Exception:
                 _LOGGER.warning("A2A Redis user usage counters could not be configured")

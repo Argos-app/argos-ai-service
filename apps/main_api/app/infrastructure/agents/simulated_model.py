@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -164,5 +165,10 @@ def _tool_arguments(name: str) -> dict[str, Any]:
     if name in {"list_properties", "list_medicines", "list_herds", "list_lots"}:
         return {"payload": {}}
     if name == "estimate_medicine_consumption":
-        return {"payload": {"horizon_days": 7}}
+        return {
+            "payload": {
+                "as_of": (datetime.now(UTC).date() - timedelta(days=1)).isoformat(),
+                "horizon_days": 7,
+            }
+        }
     return {"payload": {}}

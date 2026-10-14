@@ -187,7 +187,12 @@ class Settings:
             langsmith_capture_content=_environment_bool("A2A_LANGSMITH_CAPTURE_CONTENT"),
         )
 
-    def validate_runtime(self, *, require_providers: bool = True) -> None:
+    def validate_runtime(
+        self,
+        *,
+        require_providers: bool = True,
+        require_permission_sql: bool = True,
+    ) -> None:
         required = {
             "A2A_QDRANT_URL": self.qdrant_url,
             "A2A_QDRANT_READ_API_KEY": self.qdrant_read_api_key,
@@ -200,8 +205,9 @@ class Settings:
             "A2A_RESOURCE_SERVER_URL": self.resource_server_url,
             "A2A_DELEGATION_ISSUER": self.delegation_issuer,
             "A2A_ENDPOINT_URL": self.a2a_endpoint_url,
-            "A2A_PERMISSION_SQL_DSN": self.permission_sql_dsn,
         }
+        if require_permission_sql:
+            required["A2A_PERMISSION_SQL_DSN"] = self.permission_sql_dsn
         if self.model_mode not in {"provider", "simulated"}:
             raise ValueError("A2A_MODEL_MODE deve ser provider ou simulated")
         if require_providers:
