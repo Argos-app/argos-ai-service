@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,6 +19,7 @@ from packages.observability import (
     DisabledObservationCollector,
     ObservationCollector,
 )
+from packages.observability.redis_user_usage import RedisUserUsageCounter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ class ServiceRuntime:
     checkpoints: MongoCheckpointerRuntime
     observability_writer: MongoObservationWriter | None
     observation_collector: ObservationCollector
+    user_usage_counter: RedisUserUsageCounter | None
 
     @property
     def checkpointer(self) -> Any:
@@ -41,9 +44,13 @@ class ServiceRuntime:
                 await self.observability_writer.close()
         finally:
             try:
-                self.checkpoints.close()
+                if self.user_usage_counter is not None:
+                    await self.user_usage_counter.close()
             finally:
-                self.mongo_client.close()
+                try:
+                    self.checkpoints.close()
+                finally:
+                    self.mongo_client.close()
 
 
 async def create_runtime(settings: Settings) -> ServiceRuntime:
@@ -73,7 +80,12 @@ async def create_runtime(settings: Settings) -> ServiceRuntime:
         persistence = MongoPersistence(database, settings.mongo_collections)
         await persistence.ensure_indexes()
         checkpoints = await asyncio.to_thread(create_mongo_checkpointer, settings)
-        writer, collector = await _create_observability_runtime(settings, database)
+        user_usage_counter = _create_user_usage_counter(
+            os.getenv("MAIN_API_OBSERVABILITY_REDIS_URL")
+        )
+        writer, collector = await _create_observability_runtime(
+            settings, database, user_usage_counter
+        )
         return ServiceRuntime(
             client,
             database,
@@ -81,6 +93,7 @@ async def create_runtime(settings: Settings) -> ServiceRuntime:
             checkpoints,
             writer,
             collector,
+            user_usage_counter,
         )
     except Exception:
         client.close()
@@ -90,6 +103,7 @@ async def create_runtime(settings: Settings) -> ServiceRuntime:
 async def _create_observability_runtime(
     settings: Settings,
     database: Any,
+    user_usage_counter: RedisUserUsageCounter | None = None,
 ) -> tuple[MongoObservationWriter | None, ObservationCollector]:
     collection_name = settings.observability_collection
     if collection_name is None:
@@ -108,6 +122,7 @@ async def _create_observability_runtime(
         repository = MongoObservationRepository(database[collection_name])
         writer = MongoObservationWriter(
             repository,
+            user_usage_counter=user_usage_counter,
             max_items=settings.observability_queue_max_items,
             max_bytes=settings.observability_queue_max_bytes,
             max_document_bytes=settings.observability_document_max_bytes,
@@ -125,3 +140,20 @@ async def _create_observability_runtime(
             extra={"setting": "MAIN_API_OBSERVABILITY_COLLECTION"},
         )
         return None, DisabledObservationCollector()
+
+
+def _create_user_usage_counter(redis_url: str | None) -> RedisUserUsageCounter | None:
+    if not redis_url:
+        return None
+    try:
+        from redis.asyncio import Redis
+
+        return RedisUserUsageCounter(
+            Redis.from_url(
+                redis_url, decode_responses=False, socket_connect_timeout=1, socket_timeout=1
+            ),
+            key_prefix=os.getenv("USER_USAGE_REDIS_KEY_PREFIX", "argos:usage:users:v1"),
+        )
+    except Exception:
+        _LOGGER.warning("Redis user usage counters could not be configured")
+        return None

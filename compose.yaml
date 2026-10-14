@@ -19,6 +19,17 @@ services:
             retries: 30
             start_period: 10s
 
+    redis:
+        image: redis:7.4-alpine
+        command: ["redis-server", "--save", "", "--appendonly", "no"]
+        ports:
+            - "127.0.0.1:${REDIS_PUBLISHED_PORT:-6379}:6379"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 20
+
     postgres:
         image: postgres:16-alpine
         environment:
@@ -76,6 +87,8 @@ services:
               required: false
         environment:
             MAIN_API_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MAIN_API_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
+            USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
             MAIN_API_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
             MAIN_API_OBSERVABILITY_COLLECTION: ${MAIN_API_OBSERVABILITY_COLLECTION:-ai_observations}
             APP_ENV: local
@@ -95,6 +108,8 @@ services:
             MAIN_API_DOCUMENT_A2A_URL: http://a2a_agent:8000/a2a
         depends_on:
             mongo:
+                condition: service_healthy
+            redis:
                 condition: service_healthy
             mcp_data:
                 condition: service_started
@@ -256,6 +271,8 @@ services:
             A2A_MANIFEST_PATH: /var/lib/argos/a2a/state/manifest.json
         depends_on:
             postgres:
+                condition: service_healthy
+            redis:
                 condition: service_healthy
             qdrant:
                 condition: service_healthy

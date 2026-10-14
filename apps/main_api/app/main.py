@@ -76,6 +76,7 @@ def create_app(
                 runtime = await create_runtime(configured)
             app.state.persistence = runtime.persistence if runtime else None
             app.state.mongo_database = runtime.database if runtime else None
+            app.state.user_usage_counter = runtime.user_usage_counter if runtime else None
             app.state.observability_collector = (
                 getattr(runtime, "observation_collector", DisabledObservationCollector())
                 if runtime
@@ -134,6 +135,7 @@ def create_app(
         else None
     )
     app.state.observability_collector = DisabledObservationCollector()
+    app.state.user_usage_counter = None
     app.state.langsmith_tracing = None
     app.state.mcp_clients = create_mcp_clients(configured)
     app.state.documental_a2a_client = (
