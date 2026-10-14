@@ -717,6 +717,17 @@ url = "https://files.pythonhosted.org/packages/88/f9/16491d7ed2a919954993e48aa94
 sha256 = "c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5"
 
 [[packages]]
+name = "redis"
+version = "5.3.1"
+
+[[packages.wheels]]
+name = "redis-5.3.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/7f/26/5c5fa0e83c3621db835cfc1f1d789b37e7fa99ed54423b5f519beb931aa7/redis-5.3.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "dc1909bd24669cc31b5f67a039700b16ec30571096c5f1f0d9d2324bff31af97"
+
+[[packages]]
 name = "referencing"
 version = "0.37.0"
 
