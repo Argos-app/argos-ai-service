@@ -1,6 +1,14 @@
 """Contrato compartilhado para observações técnicas brutas."""
 
 from .collector import BestEffortObservationCollector, DisabledObservationCollector
+from .context import (
+    bind_user_id,
+    bind_correlation,
+    current_correlation_id,
+    current_parent_observation_id,
+    current_user_id,
+    observation_scope,
+)
 from .models import (
     AttemptReason,
     AttemptVisibility,
@@ -41,6 +49,12 @@ __all__ = [
     "AttemptReason",
     "AttemptVisibility",
     "BestEffortObservationCollector",
+    "bind_user_id",
+    "bind_correlation",
+    "current_correlation_id",
+    "current_parent_observation_id",
+    "current_user_id",
+    "observation_scope",
     "Billing",
     "CancellationState",
     "Clock",

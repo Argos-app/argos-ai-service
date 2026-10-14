@@ -1,5 +1,8 @@
 # MCP de dados
 
+Guia vigente da interface MCP Streamable HTTP. Schemas das tools e contratos
+tipados do código são normativos.
+
 Aplicação independente de consulta para PostgreSQL e MongoDB. Expõe o transporte
 MCP Streamable HTTP em `/mcp` com consultas de pecuária para Fazenda, origem
 assinada de relatórios e catálogo/detalhes de medicamentos para Doutor.
@@ -66,3 +69,15 @@ sem retornar uso ou estoque por propriedade. `list_medicines` consulta o
 cadastro relacional; `list_medicine_documents` lê a coleção Mongo separadamente,
 sem comparar ou validar o documento contra o SQL. Coleções e representações dos
 UUIDs devem refletir a implantação real.
+
+## Diagnóstico e correlação
+
+O principal inclui correlation ID e ID do span pai em claims opcionais da
+delegação Ed25519 validada por este servidor e envia `X-Argos-Correlation-ID`
+como header diagnóstico. Isso permite correlacionar a chamada com a observação
+de saída do `main_api`.
+O MCP de dados não persiste uma observação própria; logs do processo podem ser
+associados pelo ID de delegação/request quando disponíveis. Valores ausentes em
+telemetria não indicam ausência de consulta nem consumo zero. Os IDs não são
+argumentos das tools. Consulte [operação de observabilidade](../../docs/operacao-observabilidade.md)
+e o [dicionário MongoDB BI](../../docs/dicionario-mongodb-bi.md).

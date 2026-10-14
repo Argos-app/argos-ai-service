@@ -180,7 +180,22 @@ class DelegationTokenVerifier:
             expires_at=datetime.fromtimestamp(expires_at, UTC),
             token_id=token_id,
             request_id=request_id,
+            correlation_id=self._optional_uuid_claim(claims, "correlation_id"),
+            parent_observation_id=self._optional_uuid_claim(claims, "parent_observation_id"),
         )
+
+    @staticmethod
+    def _optional_uuid_claim(claims: dict[str, Any], name: str) -> UUID | None:
+        value = claims.get(name)
+        if value is None:
+            return None
+        try:
+            parsed = UUID(value) if isinstance(value, str) else None
+        except ValueError as exc:
+            raise AccessContextError("contexto delegado inválido") from exc
+        if parsed is None or str(parsed) != value.lower():
+            raise AccessContextError("contexto delegado inválido")
+        return parsed
 
     @staticmethod
     def _valid_identifier(value: Any) -> bool:
@@ -279,4 +294,6 @@ class GlobalDocumentDelegationTokenVerifier(DelegationTokenVerifier):
             expires_at=datetime.fromtimestamp(expires_at, UTC),
             token_id=token_id,
             request_id=request_id,
+            correlation_id=self._optional_uuid_claim(claims, "correlation_id"),
+            parent_observation_id=self._optional_uuid_claim(claims, "parent_observation_id"),
         )

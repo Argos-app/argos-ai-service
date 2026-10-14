@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from packages.contracts.a2a import CorpusRefreshStatus, DocumentAnswerResponse
-from packages.observability import ObservationStatus
+from packages.observability import ObservationStatus, bind_correlation
 from packages.security.delegation import GlobalDocumentDelegationTokenVerifier
 
 
@@ -60,6 +60,7 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     collector = Collector()
     client = DocumentA2AClient(settings, observation_collector=collector)
     user_id = uuid4()
+    correlation_id = uuid4()
 
     class FakeClient:
         def __init__(self) -> None:
@@ -98,7 +99,8 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     client._factory = SimpleNamespace(create=lambda _card: fake)
     question = "question containing private user text"
 
-    result = json.loads(run_immediate(client.ask(question, user_id=user_id)))
+    with bind_correlation(correlation_id):
+        result = json.loads(run_immediate(client.ask(question, user_id=user_id)))
 
     assert result["status"] == "unavailable"
     assert fake.request.message.parts[0].media_type == "application/json"
@@ -110,6 +112,8 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     ).verify(token)
     assert delegated.user_id == user_id
     assert delegated.operations == frozenset({"documents.read"})
+    assert delegated.correlation_id == correlation_id
+    assert str(delegated.parent_observation_id) == collector.observations[0].id
     assert not hasattr(delegated, "authorized_property_ids")
 
     terminal = collector.observations[-1]

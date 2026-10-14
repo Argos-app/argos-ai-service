@@ -88,6 +88,8 @@ def test_provider_usage_preserves_only_returned_numeric_categories() -> None:
 def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> None:
     collector = Collector()
     request_id = uuid4()
+    correlation_id = uuid4()
+    parent_observation_id = uuid4()
     request = {
         "request_id": str(request_id),
         "question": "Pergunta de teste",
@@ -102,6 +104,8 @@ def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> No
         expires_at=datetime.now(UTC) + timedelta(minutes=1),
         token_id="token-test",
         request_id="request-test",
+        correlation_id=correlation_id,
+        parent_observation_id=parent_observation_id,
     )
 
     class FakeUpdater:
@@ -150,3 +154,5 @@ def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> No
     assert terminal.status == ObservationStatus.SUCCEEDED
     assert terminal.protocol.task_state == "completed"
     assert terminal.result.code == DocumentAnswerStatus.UNAVAILABLE.value
+    assert terminal.correlation_id == correlation_id
+    assert terminal.parent_observation_id == parent_observation_id

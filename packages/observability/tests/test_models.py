@@ -149,3 +149,43 @@ def test_reported_cost_requires_provider_source_and_currency():
 
     with pytest.raises(ValidationError):
         Billing(reported_cost=Decimal("0.0123"), currency="USD", cost_source="estimated")
+
+
+def test_observation_accepts_optional_correlation_and_parent_ids():
+    from uuid import uuid4
+
+    correlation_id = uuid4()
+    parent_observation_id = uuid4()
+    observation = Observation(
+        **_observation(),
+        correlation_id=correlation_id,
+        parent_observation_id=parent_observation_id,
+    )
+
+    assert observation.correlation_id == correlation_id
+    assert observation.parent_observation_id == parent_observation_id
+
+
+def test_correlation_context_restores_nested_parent_ids():
+    from uuid import uuid4
+
+    from packages.observability import (
+        bind_correlation,
+        current_correlation_id,
+        current_parent_observation_id,
+        observation_scope,
+    )
+
+    correlation_id = uuid4()
+    parent = uuid4()
+    child = uuid4()
+    assert current_correlation_id() is None
+    with bind_correlation(correlation_id):
+        assert current_correlation_id() == correlation_id
+        with observation_scope(parent):
+            assert current_parent_observation_id() == parent
+            with observation_scope(child):
+                assert current_parent_observation_id() == child
+            assert current_parent_observation_id() == parent
+        assert current_parent_observation_id() is None
+    assert current_correlation_id() is None

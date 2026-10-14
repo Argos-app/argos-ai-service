@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
 from bson import BSON, Decimal128
 from pymongo.errors import DuplicateKeyError
@@ -32,6 +33,10 @@ class MongoObservationRepository:
         return document, len(BSON.encode(document))
 
     async def ensure_indexes(self) -> None:
+        await self._collection.create_index(
+            [("correlation_id", 1), ("started_at", 1)],
+            name="ix_observability_correlation_started",
+        )
         await self._collection.create_index(
             [("started_at", 1), ("_id", 1)], name="ix_observability_started_id"
         )
@@ -84,6 +89,8 @@ def _utcnow_millisecond() -> datetime:
 
 
 def _bson_value(value: Any) -> Any:
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, Decimal):
@@ -102,6 +109,8 @@ def _without_updated_at(document: dict[str, Any]) -> dict[str, Any]:
 def _same_attempt_identity(existing: dict[str, Any], incoming: dict[str, Any]) -> bool:
     identity_fields = (
         "_id",
+        "correlation_id",
+        "parent_observation_id",
         "schema_version",
         "service",
         "environment",

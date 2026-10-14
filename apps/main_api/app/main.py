@@ -3,8 +3,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
@@ -33,6 +35,8 @@ from packages.observability import (
     ObservationStatus,
     OperationKind,
     OperationPhase,
+    bind_correlation,
+    observation_scope,
 )
 from packages.security.signatures import TrustedEd25519SignatureVerifier
 
@@ -151,39 +155,46 @@ def create_app(
 
     @app.middleware("http")
     async def observe_http(request: Request, call_next):
-        collector = active_collector(app.state.observability_collector)
-        if collector is None or request.url.path in {"/health/live", "/health/ready"}:
+        if request.url.path in {"/health/live", "/health/ready"}:
             return await call_next(request)
-        recorder = OperationRecorder(
-            collector,
-            operation_kind=OperationKind.HTTP,
-            operation_name="http.request",
-            operation_phase=OperationPhase.EXECUTION,
-            error_origin=ErrorOrigin.APPLICATION,
-        )
-        try:
-            response = await call_next(request)
-        except BaseException as exc:
-            recorder.finish(error=exc)
-            raise
-        route = request.scope.get("route")
-        route_template = getattr(route, "path", "unmatched")
-        status_code = response.status_code
-        recorder.finish(
-            status=(
-                ObservationStatus.FAILED
-                if status_code >= 500
-                else ObservationStatus.REJECTED
-                if status_code >= 400
-                else ObservationStatus.SUCCEEDED
-            ),
-            http=HttpMetadata(
-                method=request.method[:12],
-                route=route_template[:200],
-                status_code=status_code,
-            ),
-        )
-        return response
+        correlation_id = uuid4()
+        collector = active_collector(app.state.observability_collector)
+        with bind_correlation(correlation_id):
+            if collector is None:
+                response = await call_next(request)
+            else:
+                recorder = OperationRecorder(
+                    collector,
+                    operation_kind=OperationKind.HTTP,
+                    operation_name="http.request",
+                    operation_phase=OperationPhase.EXECUTION,
+                    error_origin=ErrorOrigin.APPLICATION,
+                )
+                with observation_scope(recorder.observation_id):
+                    try:
+                        response = await call_next(request)
+                    except BaseException as exc:
+                        recorder.finish(error=exc)
+                        raise
+                route = request.scope.get("route")
+                route_template = getattr(route, "path", "unmatched")
+                status_code = response.status_code
+                recorder.finish(
+                    status=(
+                        ObservationStatus.FAILED
+                        if status_code >= 500
+                        else ObservationStatus.REJECTED
+                        if status_code >= 400
+                        else ObservationStatus.SUCCEEDED
+                    ),
+                    http=HttpMetadata(
+                        method=request.method[:12],
+                        route=route_template[:200],
+                        status_code=status_code,
+                    ),
+                )
+            response.headers["X-Argos-Correlation-ID"] = str(correlation_id)
+            return response
 
     @app.get("/health/live", tags=["health"])
     async def live() -> dict[str, str]:
@@ -246,6 +257,38 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(v1_router)
+
+    def openapi_with_correlation_header() -> dict[str, Any]:
+        if app.openapi_schema is not None:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            routes=app.routes,
+            description=(
+                "Cada resposta da API versionada inclui o cabeçalho "
+                "X-Argos-Correlation-ID para diagnóstico."
+            ),
+        )
+        correlation_header = {
+            "description": "Identificador de correlação desta requisição no serviço Argos.",
+            "schema": {"type": "string", "format": "uuid"},
+        }
+        for path, path_item in schema.get("paths", {}).items():
+            if not path.startswith("/v1/"):
+                continue
+            for operation in path_item.values():
+                if not isinstance(operation, dict):
+                    continue
+                for response in operation.get("responses", {}).values():
+                    if isinstance(response, dict):
+                        response.setdefault("headers", {})["X-Argos-Correlation-ID"] = (
+                            correlation_header
+                        )
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi_with_correlation_header
     return app
 
 

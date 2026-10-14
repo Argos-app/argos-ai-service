@@ -17,6 +17,8 @@ class AccessContext:
     expires_at: datetime
     token_id: str
     request_id: str
+    correlation_id: UUID | None = None
+    parent_observation_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +32,8 @@ class AuthorizedScope:
     token_id: str
     request_id: str
     expires_at: datetime
+    correlation_id: UUID | None = None
+    parent_observation_id: UUID | None = None
 
     @classmethod
     def build(
@@ -66,4 +70,6 @@ class AuthorizedScope:
             token_id=context.token_id,
             request_id=context.request_id,
             expires_at=context.expires_at,
+            correlation_id=context.correlation_id,
+            parent_observation_id=context.parent_observation_id,
         )

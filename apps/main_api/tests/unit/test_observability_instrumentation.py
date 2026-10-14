@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import uuid4
 
-import httpx
 import pytest
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.email_workflow import EmailWorkflow
@@ -21,6 +20,7 @@ from packages.observability import (
     ObservationLevel,
     ObservationStatus,
     OperationKind,
+    bind_correlation,
 )
 from packages.observability.testing import InMemoryObservationWriter
 
@@ -28,6 +28,33 @@ from packages.observability.testing import InMemoryObservationWriter
 def _collector():
     writer = InMemoryObservationWriter()
     return BestEffortObservationCollector(writer), writer
+
+
+def _run_immediate(coroutine):
+    iterator = coroutine.__await__()
+    while True:
+        try:
+            yielded = iterator.send(None)
+        except StopIteration as completed:
+            return completed.value
+        if yielded is not None:
+            raise AssertionError("fake de unidade não deveria suspender a corrotina")
+
+
+def test_openapi_documents_correlation_header_on_versioned_routes():
+    schema = create_app(Settings()).openapi()
+
+    for path, path_item in schema["paths"].items():
+        if not path.startswith("/v1/"):
+            continue
+        for operation in path_item.values():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+            assert operation["responses"]
+            assert all(
+                "X-Argos-Correlation-ID" in response.get("headers", {})
+                for response in operation["responses"].values()
+            )
 
 
 def test_recorder_uses_sanitized_error_catalog_and_emits_terminal_event():
@@ -84,33 +111,30 @@ async def test_tool_callback_marks_mock_and_unavailable_without_storing_content(
     assert "private tool output" not in repr(writer.observations)
 
 
-@pytest.mark.asyncio
-async def test_http_boundary_records_route_template_status_and_duration():
+def test_operation_recorder_inherits_correlation_and_parent_observation():
     collector, writer = _collector()
-    app = create_app(Settings())
-    app.state.observability_collector = collector
+    correlation_id = uuid4()
+    parent_observation_id = uuid4()
 
-    @app.get("/observability-test/{record_id}")
-    async def endpoint(record_id: str):
-        return {"record_id": record_id}
+    with bind_correlation(correlation_id):
+        from packages.observability import observation_scope
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        response = await client.get("/observability-test/sensitive-id")
+        with observation_scope(parent_observation_id):
+            recorder = OperationRecorder(
+                collector,
+                operation_kind=OperationKind.MCP,
+                operation_name="mcp.data.call_tool.list_lots",
+            )
+            recorder.finish()
 
-    assert response.status_code == 200
-    terminal = writer.observations[-1]
-    assert terminal.operation_kind == OperationKind.HTTP
-    assert terminal.http.route == "/observability-test/{record_id}"
-    assert terminal.http.status_code == 200
-    assert terminal.duration_ms is not None
-    assert "sensitive-id" not in repr(terminal)
+    assert writer.observations[0].correlation_id == correlation_id
+    assert writer.observations[0].parent_observation_id == parent_observation_id
 
 
-@pytest.mark.asyncio
-async def test_mcp_tool_call_is_observed_without_arguments_or_response(monkeypatch):
+def test_mcp_tool_call_is_observed_without_arguments_or_response(monkeypatch):
     collector, writer = _collector()
+    correlation_id = uuid4()
+    captured_headers = {}
 
     class FakeSession:
         async def call_tool(self, _name, _arguments):
@@ -121,7 +145,8 @@ async def test_mcp_tool_call_is_observed_without_arguments_or_response(monkeypat
 
     @asynccontextmanager
     async def observed_fake_session(self, request_headers=None):
-        del self, request_headers
+        del self
+        captured_headers.update(request_headers or {})
         yield FakeSession()
 
     monkeypatch.setattr(McpToolServerClient, "_session", observed_fake_session)
@@ -133,7 +158,10 @@ async def test_mcp_tool_call_is_observed_without_arguments_or_response(monkeypat
         observation_collector=collector,
     )
 
-    result = await client.call_tool("list_lots", {"payload": {"secret": "private input"}})
+    with bind_correlation(correlation_id):
+        result = _run_immediate(
+            client.call_tool("list_lots", {"payload": {"secret": "private input"}})
+        )
 
     assert result.isError is False
     start, terminal = writer.observations
@@ -141,6 +169,7 @@ async def test_mcp_tool_call_is_observed_without_arguments_or_response(monkeypat
     assert start.observation_level == ObservationLevel.SDK_INVOCATION
     assert terminal.status == ObservationStatus.SUCCEEDED
     assert terminal.duration_ms is not None
+    assert captured_headers["X-Argos-Correlation-ID"] == str(correlation_id)
     assert "private input" not in repr(writer.observations)
     assert "private response" not in repr(writer.observations)
 

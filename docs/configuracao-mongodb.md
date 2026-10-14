@@ -10,10 +10,10 @@ collections nos parâmetros próprios do serviço.
 
 | Sistema       | Variáveis Mongo                                                                                                                                               | Individual no host                                                                                                                                                  | Integrado em Compose                                                                                                |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `main_api`    | `MAIN_API_MONGO_URI`, `MAIN_API_MONGO_DATABASE`, `MAIN_API_MONGO_COLLECTION_*`                                                                                | Use o endereço publicado do replica set e `directConnection=true` quando o replica set anunciar um DNS interno inacessível pelo host. O processo exige replica set. | Use DNS interno, por exemplo `mongo:27017`, com `replicaSet=rs0`; não use `directConnection=true` entre containers. |
+| `main_api`    | `MAIN_API_MONGO_URI`, `MAIN_API_MONGO_DATABASE`, `MAIN_API_MONGO_COLLECTION_*`, `MAIN_API_OBSERVABILITY_COLLECTION`                                           | Use o endereço publicado do replica set e `directConnection=true` quando o replica set anunciar um DNS interno inacessível pelo host. O processo exige replica set. | Compose integrado habilita `ai_observations` por padrão no mesmo Mongo/database. |
 | MCP de dados  | `MCP_DATA_MONGO_URI`, `MCP_DATA_MONGO_DATABASE`, `MCP_DATA_MONGO_CATTLE_COLLECTION`, `MCP_DATA_MONGO_MEDICINE_COLLECTION` e os formatos de ID correspondentes | Use o endpoint Mongo acessível pelo host e informe os nomes reais das collections de negócio.                                                                       | Use DNS do Mongo na rede do Compose e mantenha os nomes reais das collections de negócio.                           |
 | MCP de e-mail | `MCP_EMAIL_MONGO_URI`, `MCP_EMAIL_MONGO_DATABASE`, `MCP_EMAIL_REPORTS_COLLECTION`, `MCP_EMAIL_DISPATCH_COLLECTION`                                            | Use o endpoint acessível pelo host.                                                                                                                                 | Use DNS do Mongo na rede do Compose.                                                                                |
-| A2A           | `A2A_OBSERVABILITY_MONGO_URI`, `A2A_OBSERVABILITY_MONGO_DATABASE`, `A2A_OBSERVABILITY_COLLECTION`                                                             | Opcional; URI e collection precisam ser fornecidas juntas.                                                                                                          | Opcional; use o DNS interno e forneça URI e collection juntas.                                                      |
+| A2A           | `A2A_OBSERVABILITY_MONGO_URI`, `A2A_OBSERVABILITY_MONGO_DATABASE`, `A2A_OBSERVABILITY_COLLECTION`                                                             | Opcional; URI e collection precisam ser fornecidas juntas.                                                                                                          | Compose integrado habilita `ai_a2a_observations` no mesmo Mongo/database.                                            |
 
 `MAIN_API_MONGO_DATABASE`, `MCP_DATA_MONGO_DATABASE` e
 `MCP_EMAIL_MONGO_DATABASE` têm padrão `argos_ai`. Configure o mesmo valor nos
@@ -22,16 +22,21 @@ As collections de persistência principal e e-mail têm nomes padrão prefixados
 por `ai_`; as duas collections de origem do MCP de dados devem ser nomeadas
 explicitamente para corresponder ao ambiente.
 
-O `.env.example` da raiz contém as variáveis Mongo comuns para execução local.
+O dicionário das collections, campos, origem, relações e retenção está em
+[dicionario-mongodb-bi.md](dicionario-mongodb-bi.md). A consulta operacional
+de observabilidade está em [operacao-observabilidade.md](operacao-observabilidade.md).
+
+O `.env.example` da raiz contém as variáveis Mongo comuns e nomes de collections
+de observabilidade usados pelo Compose integrado.
 Cada aplicação também tem um exemplo próprio em `apps/<serviço>/.env.example`. O
 Python lê somente o ambiente do processo e não carrega arquivos `.env`
 automaticamente. Em execução individual, exporte as variáveis (ou use uma
 ferramenta como `dotenv` no comando de inicialização). No Compose, `env_file`
 injeta as variáveis no container; valores declarados em `environment` têm
 precedência sobre `env_file`. O padrão no código é usado quando nenhuma variável
-é fornecida. O Compose integrado do monorepo ainda está planejado; os exemplos
-de URI para Compose documentam os endereços esperados, não um comando já
-disponível.
+é fornecida. Use os arquivos Compose vigentes na raiz e em cada aplicação para
+identificar os serviços integrados; exemplos de URI nesta tabela indicam o DNS
+interno esperado, não substituem a configuração declarada nesses arquivos.
 
 ## Collections do `main_api`
 

@@ -77,6 +77,7 @@ services:
         environment:
             MAIN_API_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
             MAIN_API_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            MAIN_API_OBSERVABILITY_COLLECTION: ${MAIN_API_OBSERVABILITY_COLLECTION:-ai_observations}
             APP_ENV: local
             AUTH_MODE: stub
             MAIN_API_MODEL_MODE: simulated
@@ -235,6 +236,11 @@ services:
             A2A_HOST: 0.0.0.0
             A2A_PORT: 8000
             A2A_ENDPOINT_URL: http://a2a_agent:8000/a2a
+            A2A_OBSERVABILITY_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            A2A_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
+            USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
+            A2A_OBSERVABILITY_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            A2A_OBSERVABILITY_COLLECTION: ${A2A_OBSERVABILITY_COLLECTION:-ai_a2a_observations}
             A2A_QDRANT_URL: http://qdrant:6333
             A2A_QDRANT_READ_API_KEY: local-qdrant-read-only
             A2A_QDRANT_WRITE_API_KEY: local-qdrant-index-writer

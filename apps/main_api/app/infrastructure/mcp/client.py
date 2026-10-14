@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 
@@ -22,6 +23,7 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
     ProtocolMetadata,
+    current_correlation_id,
 )
 
 MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
@@ -150,17 +152,33 @@ class McpToolServerClient:
         from mcp.client.streamable_http import streamable_http_client
 
         headers = {"Authorization": f"Bearer {self.service_token}"}
-        delegation_headers = [
-            value
-            for name, value in (request_headers or {}).items()
-            if name.casefold() == "x-argos-delegation"
-        ]
-        if len(delegation_headers) > 1 or any(not value.strip() for value in delegation_headers):
-            raise ValueError("delegação ausente ou duplicada na chamada MCP")
+        supported_headers = {"x-argos-delegation", "x-argos-correlation-id"}
+        seen_headers: set[str] = set()
         for name, value in (request_headers or {}).items():
-            if name.casefold() != "x-argos-delegation" or not value.strip():
-                raise ValueError("somente o header de delegação pode variar por chamada MCP")
-            headers["X-Argos-Delegation"] = value
+            normalized_name = name.casefold()
+            if normalized_name not in supported_headers or not value.strip():
+                raise ValueError("header variável não permitido na chamada MCP")
+            if normalized_name in seen_headers:
+                raise ValueError("header duplicado na chamada MCP")
+            seen_headers.add(normalized_name)
+            if normalized_name == "x-argos-correlation-id":
+                try:
+                    parsed_correlation_id = UUID(value)
+                except (TypeError, ValueError, AttributeError) as exc:
+                    raise ValueError("correlation ID inválido na chamada MCP") from exc
+                if str(parsed_correlation_id) != value.lower():
+                    raise ValueError("correlation ID deve usar formato UUID canônico")
+                active_correlation_id = current_correlation_id()
+                if active_correlation_id and parsed_correlation_id != active_correlation_id:
+                    raise ValueError("correlation ID diverge do contexto da chamada")
+            headers[
+                "X-Argos-Delegation"
+                if normalized_name == "x-argos-delegation"
+                else "X-Argos-Correlation-ID"
+            ] = value
+        correlation_id = current_correlation_id()
+        if correlation_id is not None:
+            headers.setdefault("X-Argos-Correlation-ID", str(correlation_id))
 
         options = {
             "operation_kind": OperationKind.MCP,
@@ -260,7 +278,14 @@ class McpToolServerClient:
                 raise TypeError("arguments deve ser um objeto")
 
             try:
-                async with self._session(request_headers) as session:
+                propagated_headers = dict(request_headers or {})
+                correlation_id = current_correlation_id()
+                if correlation_id is not None and not any(
+                    name.casefold() == "x-argos-correlation-id"
+                    for name in propagated_headers
+                ):
+                    propagated_headers["X-Argos-Correlation-ID"] = str(correlation_id)
+                async with self._session(propagated_headers) as session:
                     result = await session.call_tool(name, dict(arguments))
             except McpConnectionError:
                 raise

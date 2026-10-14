@@ -118,6 +118,7 @@ async def test_repository_indexes_only_for_period_and_incremental_extraction():
     await repository.ensure_indexes()
 
     assert collection.indexes == [
+        ([("correlation_id", 1), ("started_at", 1)], "ix_observability_correlation_started"),
         ([("started_at", 1), ("_id", 1)], "ix_observability_started_id"),
         ([("updated_at", 1), ("_id", 1)], "ix_observability_updated_id"),
     ]
@@ -181,13 +182,17 @@ async def test_replayed_start_does_not_regress_terminal_and_conflict_is_reported
 
 def test_bson_document_preserves_dates_decimal_and_size():
     observation = _observation(status=ObservationStatus.SUCCEEDED)
+    correlation_id = uuid4()
+    parent_observation_id = uuid4()
     observation = observation.model_copy(
         update={
             "billing": Billing(
                 reported_cost=Decimal("0.0123"),
                 currency="USD",
                 cost_source="provider",
-            )
+            ),
+            "correlation_id": correlation_id,
+            "parent_observation_id": parent_observation_id,
         }
     )
 
@@ -198,6 +203,8 @@ def test_bson_document_preserves_dates_decimal_and_size():
     decoded_document = BSON(decoded).decode()
     assert isinstance(decoded_document["started_at"], datetime)
     assert isinstance(decoded_document["billing"]["reported_cost"], Decimal128)
+    assert decoded_document["correlation_id"] == str(correlation_id)
+    assert decoded_document["parent_observation_id"] == str(parent_observation_id)
     assert "expires_at" not in document
 
 

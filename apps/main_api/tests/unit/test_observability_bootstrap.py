@@ -54,6 +54,7 @@ async def test_configured_collection_starts_writer_and_collector():
             await writer.close()
 
     assert {name for _, name in database.collection.indexes} == {
+        "ix_observability_correlation_started",
         "ix_observability_started_id",
         "ix_observability_updated_id",
     }

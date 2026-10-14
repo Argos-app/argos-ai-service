@@ -200,6 +200,8 @@ class Observation(_ObservabilityModel):
 
     id: str = Field(alias="_id", min_length=36, max_length=36)
     schema_version: Literal["1"] = "1"
+    correlation_id: UUID | None = None
+    parent_observation_id: UUID | None = None
     service: BoundedName
     environment: BoundedName
     service_version: Annotated[StrictStr, Field(min_length=1, max_length=120)] | None = None

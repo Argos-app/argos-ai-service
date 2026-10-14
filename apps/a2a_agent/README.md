@@ -1,5 +1,8 @@
 # Argos A2A de Informações
 
+Guia vigente da interface A2A JSON-RPC 1.0.0. Contratos tipados em
+`packages/contracts/a2a.py` são normativos.
+
 Serviço isolado que expõe as skills Documental e Legal por A2A e consulta o
 corpus global de leis e termos/condições. O artefato contém somente
 `apps/a2a_agent` e os contratos e primitivas de segurança compartilhados; não
@@ -68,6 +71,14 @@ agentes, provedores HTTP, embeddings, autorização PostgreSQL e adapters de
 documentos/Qdrant, sem persistir argumentos, prompts, respostas ou
 identificadores de usuário/task/contexto.
 
+O principal inclui correlation ID e ID do span pai na delegação assinada. O
+executor valida esses claims, grava `correlation_id` e `parent_observation_id`
+na observação A2A e associa os spans de execução. O ID de protocolo da task
+continua distinto. A resposta da API principal expõe
+`X-Argos-Correlation-ID`; veja o guia de
+[operação](../../docs/operacao-observabilidade.md) para seguir a requisição nas
+collections de ambos os serviços. A coleta Mongo funciona sem LangSmith.
+
 O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
 para registrar o despacho do agente A2A e a chamada de geração de resposta no
 projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
@@ -75,6 +86,37 @@ ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
 perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs,
 CNPJs, telefones e tokens Bearer são anonimizados antes do envio. O endpoint
 HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`.
+
+## Contrato A2A
+
+`GET /.well-known/agent-card.json` publica o Agent Card JSON com protocolo
+JSON-RPC A2A 1.0.0, skills `documental` e `legal`, autenticação Bearer e modos
+`application/json`. O endpoint JSON-RPC é o valor configurado em
+`A2A_ENDPOINT_URL` (termina em `/a2a`). Cada chamada exige Bearer interno e
+`X-Argos-Delegation` assinado, válido para `documents.read`; chamadas de task
+também ficam limitadas ao usuário autenticado.
+
+O conteúdo JSON da mensagem segue `DocumentQuestionRequest` em
+`packages/contracts/a2a.py`. Exemplo reduzido para uso via SDK A2A:
+
+```json
+{
+  "request_id": "00000000-0000-0000-0000-000000000001",
+  "question": "Quais condições constam no documento?",
+  "skill": "documental",
+  "document_types": ["terms_conditions"],
+  "evidence_requirements": ["source", "page"],
+  "deadline_at": "2026-10-13T15:00:00Z"
+}
+```
+
+O SDK encapsula esse JSON em uma mensagem A2A JSON-RPC com media type
+`application/json`; envie a delegação em `X-Argos-Delegation`, fora do payload.
+`DocumentAnswerResponse` retorna `request_id`, `status`, resposta, fontes com
+documento/revisão/páginas/trecho, limitações, campos ausentes e estado de
+atualização do corpus. `success` exige fonte; `needs_clarification` exige
+`missing_fields`; indisponibilidade inclui limitações. Tasks vivem em memória e
+não podem ser retomadas após reinício.
 
 ## Operação e recuperação
 

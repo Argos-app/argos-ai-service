@@ -104,9 +104,19 @@ A chave deve ficar no gerenciador de secrets do ambiente.
 `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e `MAIN_API_LANGSMITH_ENDPOINT`
 permite apontar para uma instância aprovada. O Mongo continua armazenando apenas
 os eventos brutos sanitizados existentes; conteúdo de trace é armazenado
-separadamente pelo LangSmith. Avaliações e feedback podem ser feitos sobre os
-traces na plataforma; esta integração não define critérios automáticos de
-qualidade.
+separadamente pelo LangSmith. A coleta local no Mongo independe do LangSmith e
+inclui `X-Argos-Correlation-ID` na resposta, `correlation_id` nos spans e
+`parent_observation_id` para relacionar chamadas aninhadas. O correlation ID é
+enviado às chamadas MCP e segue assinado para Data, Prediction e A2A; os MCPs
+não persistem observações próprias no momento. Filas limitadas podem perder
+observações, então ausência não significa
+zero uso. Operação, ranking de chamadas e tokens por usuário e limites estão em
+[`docs/operacao-observabilidade.md`](docs/operacao-observabilidade.md); a
+extração e o dicionário BI estão em
+[`docs/observabilidade-extracao-mongo.md`](docs/observabilidade-extracao-mongo.md)
+e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações
+e feedback podem ser feitos sobre traces na plataforma; esta integração não
+define critérios automáticos de qualidade.
 
 As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
 `POST /v1/sessions/{session_id}/interactions` e
@@ -114,6 +124,10 @@ As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
 LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
 (padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
 público.
+
+O contrato OpenAPI e exemplos de autenticação, erros e correlação estão em
+[`docs/api-main-api.md`](docs/api-main-api.md) e
+[`docs/openapi-main-api.json`](docs/openapi-main-api.json).
 
 O serviço precisa de Mongo em replica set para transações e checkpointer. Os
 serviços com persistência própria compartilham o banco `argos_ai` e separam os
@@ -139,8 +153,9 @@ habilita prompts, respostas e argumentos de ferramentas após aprovação. Com a
 captura ativa, e-mails, UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
 anonimizados. O projeto é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o
 endpoint HTTPS opcional por `MAIN_API_LANGSMITH_ENDPOINT`. O serviço A2A possui
-configuração própria; os traces dos dois processos não recebem um vínculo
-distribuído entre serviços.
+configuração própria; IDs assinados de correlação e pai permitem relacionar a
+observação de chamada do principal às observações A2A quando ambas as
+persistências estiverem habilitadas.
 
 Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
 persistência e retomada com Mongo replica set descartável: siga

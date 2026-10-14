@@ -65,6 +65,7 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
     ResultMetadata,
+    current_correlation_id,
 )
 
 GraphProvider = Callable[[], Any]
@@ -384,7 +385,7 @@ class SessionApplicationService:
                             "argos_authorized_property_ids": tuple(
                                 str(farm_id) for farm_id in authorized_farms
                             ),
-                            "argos_request_id": str(interaction_id),
+                            "argos_request_id": str(current_correlation_id() or interaction_id),
                         }
                     }
                     if self._langsmith_callback is not None:

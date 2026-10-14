@@ -36,6 +36,8 @@ from packages.observability import (
     OperationPhase,
     ProtocolMetadata,
     ResultMetadata,
+    current_correlation_id,
+    current_parent_observation_id,
 )
 
 _TASK_STATES = {
@@ -256,6 +258,12 @@ class DocumentA2AClient:
             "agent": "informacoes",
             "operations": ["documents.read"],
             "request_id": request_id,
+            "correlation_id": str(current_correlation_id() or request_id),
+            "parent_observation_id": (
+                str(current_parent_observation_id())
+                if current_parent_observation_id() is not None
+                else None
+            ),
             "jti": str(uuid4()),
             "iat": issued_at,
             "nbf": issued_at,

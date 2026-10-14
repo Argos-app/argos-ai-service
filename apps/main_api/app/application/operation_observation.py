@@ -6,7 +6,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from packages.observability import (
     CancellationState,
@@ -25,6 +25,9 @@ from packages.observability import (
     ResultMetadata,
     Usage,
     classify_exception,
+    current_correlation_id,
+    current_parent_observation_id,
+    observation_scope,
 )
 
 
@@ -67,6 +70,8 @@ class OperationRecorder:
         error_origin: ErrorOrigin = ErrorOrigin.UNKNOWN,
         provider: str | None = None,
         model_requested: str | None = None,
+        correlation_id: UUID | None = None,
+        parent_observation_id: UUID | None = None,
     ) -> None:
         self._collector = collector
         self._error_origin = error_origin
@@ -74,6 +79,8 @@ class OperationRecorder:
         self._finished = False
         self._started = Observation(
             _id=str(uuid4()),
+            correlation_id=correlation_id or current_correlation_id(),
+            parent_observation_id=parent_observation_id or current_parent_observation_id(),
             service="main_api",
             environment=_environment(),
             operation_kind=operation_kind,
@@ -155,6 +162,10 @@ class OperationRecorder:
         except Exception:
             return
 
+    @property
+    def observation_id(self) -> UUID:
+        return self._started.id
+
 
 @asynccontextmanager
 async def observe_operation(
@@ -162,10 +173,11 @@ async def observe_operation(
     **recorder_options: Any,
 ) -> AsyncIterator[OperationRecorder]:
     recorder = OperationRecorder(collector, **recorder_options)
-    try:
-        yield recorder
-    except BaseException as exc:
-        recorder.finish(error=exc)
-        raise
-    else:
-        recorder.finish()
+    with observation_scope(recorder.observation_id):
+        try:
+            yield recorder
+        except BaseException as exc:
+            recorder.finish(error=exc)
+            raise
+        else:
+            recorder.finish()
