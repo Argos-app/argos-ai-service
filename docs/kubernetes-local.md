@@ -1,11 +1,12 @@
-# Integração local em Kubernetes (Kind)
+# Integração local em Kubernetes
 
-Este guia sobe as cinco aplicações do `argos-ai-service` em um cluster Kind de
+Este guia sobe as cinco aplicações do `argos-ai-service` em um cluster local de
 um nó, com MongoDB replica set, PostgreSQL inicializado pelos módulos SQL do
-repositório, Redis, Qdrant e Mailpit. `MAIN_API_MODEL_MODE` e `A2A_MODEL_MODE`
-ficam em `simulated`; não são necessárias chaves de modelos, e-mail ou
-LangSmith. Os resultados de IA são simulados e não representam uma avaliação de
-qualidade do modelo.
+repositório, Redis, Qdrant e Mailpit. É possível usar Kind ou o Kubernetes
+integrado ao Docker Desktop com provisionador Kubeadm. `MAIN_API_MODEL_MODE` e
+`A2A_MODEL_MODE` ficam em `simulated`; não são necessárias chaves de modelos,
+e-mail ou LangSmith. Os resultados de IA são simulados e não representam uma
+avaliação de qualidade do modelo.
 
 O alvo reproduz a pilha local do Compose, não um deployment de produção. Mongo,
 PostgreSQL e Qdrant não têm autenticação habilitada neste cluster local. Não
@@ -13,7 +14,7 @@ reutilize credenciais ou dados de produção. Os PVCs preservam Mongo, PostgreSQ
 Qdrant e o manifesto de estado do A2A durante recriações de Pods. Redis e caixa
 de entrada do Mailpit são efêmeros; tarefas A2A em andamento continuam em
 memória e não são recuperadas após reinício, conforme o contrato atual. Remover
-o cluster Kind remove os dados hospedados dentro do nó.
+o cluster remove os dados hospedados dentro do nó.
 
 O Compose atual não inclui Collector OpenTelemetry, Prometheus, Grafana ou
 Tempo, apesar de esses componentes aparecerem na descrição histórica do plano
@@ -22,25 +23,37 @@ aplicação mantém as configurações locais atuais e não depende do LangSmith
 
 ## Pré-requisitos
 
-- Windows com Docker Desktop iniciado e backend Linux disponível; siga a
-  instalação oficial de
-  [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) e
-  [kubectl](https://kubernetes.io/docs/tasks/tools/).
+- Windows com Docker Desktop iniciado e backend Linux disponível. Para usar o
+  Kubernetes integrado, veja a
+  [documentação do Docker Desktop](https://docs.docker.com/desktop/use-desktop/kubernetes/)
+  e selecione o provisionador **Kubeadm**. Alternativamente, instale
+  [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
+- `kubectl`; veja a [instalação oficial](https://kubernetes.io/docs/tasks/tools/).
 - Python 3.14 com `cryptography` e acesso para baixar as imagens base na
   primeira construção.
 - Recursos locais suficientes para seis imagens de aplicação/infraestrutura,
   PostgreSQL, MongoDB e Qdrant. Ajuste os requests/limits dos manifests se a
   máquina tiver menos memória.
 
-Execute os comandos a partir da raiz do repositório em PowerShell:
+Escolha uma das opções de cluster. Para o Kubernetes integrado ao Docker
+Desktop, crie o cluster pelo dashboard em **Kubernetes → Create cluster** e
+escolha **Kubeadm**. No PowerShell, selecione o contexto e confirme o nó:
+
+```powershell
+kubectl config use-context docker-desktop
+kubectl get nodes
+```
+
+Para Kind, execute a partir da raiz do repositório:
 
 ```powershell
 kind create cluster --config k8s/local/kind-config.yaml
 kubectl cluster-info --context kind-argos-local
 ```
 
-O nome `argos-local` e o nó único são necessários para os PVs `hostPath` desta
-configuração estática local. Não aplique estes PVs em um cluster compartilhado.
+Os PVs `hostPath` desta configuração são estáticos e esperam um cluster de nó
+único. O nome `argos-local` identifica o cluster Kind do exemplo. Não aplique
+estes PVs em um cluster compartilhado.
 
 ## Secrets locais e imagens
 
@@ -59,7 +72,8 @@ credenciais reais. Para descartar os arquivos locais, remova `.env.local` e
 `k8s/local/.env.local` manualmente depois de encerrar o ambiente.
 
 Construa as cinco imagens do serviço e a imagem PostgreSQL que incorpora os
-scripts SQL versionados, e carregue-as no cluster:
+scripts SQL versionados. Com Kind, use o auxiliar, que também carrega as
+imagens:
 
 ```powershell
 ./scripts/kubernetes/build-load-images.ps1
@@ -67,6 +81,25 @@ scripts SQL versionados, e carregue-as no cluster:
 
 O script termina com erro se qualquer build ou o carregamento no Kind falhar. As
 imagens são locais e usam `imagePullPolicy: IfNotPresent`.
+
+Com o Kubernetes do Docker Desktop e provisionador Kubeadm, não use esse
+auxiliar porque ele chama `kind load`. Construa as mesmas imagens diretamente
+no Docker Desktop, cujo image store está disponível ao cluster Kubeadm:
+
+```powershell
+$images = @(
+    @{ Name = 'argos-main-api:local'; Dockerfile = 'apps/main_api/Dockerfile' },
+    @{ Name = 'argos-mcp-data:local'; Dockerfile = 'apps/mcp_data/Dockerfile' },
+    @{ Name = 'argos-mcp-prediction:local'; Dockerfile = 'apps/mcp_prediction/Dockerfile' },
+    @{ Name = 'argos-mcp-email:local'; Dockerfile = 'apps/mcp_email/Dockerfile' },
+    @{ Name = 'argos-a2a-agent:local'; Dockerfile = 'apps/a2a_agent/Dockerfile' },
+    @{ Name = 'argos-postgres-init:local'; Dockerfile = 'infrastructure/docker/postgres/Dockerfile.local' }
+)
+foreach ($image in $images) {
+    docker build --tag $image.Name --file $image.Dockerfile .
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao construir $($image.Name)" }
+}
+```
 
 ## Subida e validação
 
@@ -159,11 +192,17 @@ kubectl -n argos-local rollout status statefulset/postgres --timeout=5m
 
 Validar também reinício de Qdrant e A2A e confirmar que o corpus/manifests
 continuam disponíveis. Os fluxos A2A em andamento não são persistidos. Para
-encerrar e descartar todos os dados locais:
+encerrar e descartar todos os dados locais, use a opção correspondente ao
+provisionador:
 
 ```powershell
 kind delete cluster --name argos-local
 ```
+
+O comando acima remove somente o cluster Kind de exemplo. Para o Kubernetes
+integrado ao Docker Desktop, encerre ou remova o cluster pela interface do
+Docker Desktop em **Kubernetes**. A remoção do cluster descarta os dados locais
+armazenados nos volumes do nó.
 
 Este passo não executa a suíte integrada automaticamente. Depois de todos os
 Pods estarem prontos, execute os testes E2E documentados pelo API principal e os
