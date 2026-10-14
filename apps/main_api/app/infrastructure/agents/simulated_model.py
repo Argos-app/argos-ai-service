@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -35,11 +37,16 @@ class SimulatedChatModel(BaseChatModel):
         business_tools = [name for name in names if name and name not in _STRUCTURED_NAMES]
         tool_result_seen = any(isinstance(message, ToolMessage) for message in messages)
         if structured == "SpecialistResult" and business_tools and not tool_result_seen:
-            tool_name = business_tools[0]
+            specialist_input = _specialist_input(messages)
+            tool_name = _select_tool(business_tools, specialist_input)
             message = AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": tool_name, "args": _tool_arguments(tool_name), "id": str(uuid4())}
+                    {
+                        "name": tool_name,
+                        "args": _tool_arguments(tool_name, specialist_input),
+                        "id": str(uuid4()),
+                    }
                 ],
             )
         elif structured:
@@ -63,14 +70,58 @@ class SimulatedChatModel(BaseChatModel):
     @staticmethod
     def _structured_call(name: str, messages: list[BaseMessage]) -> tuple[str, dict[str, Any]]:
         if name == "RoutePlan":
-            request = _last_human_text(messages).casefold()
+            request = _last_human_text(messages)
+            normalized_request = request.casefold()
+            lot_code = _extract_lot_code(request)
+            is_report_request = any(
+                term in normalized_request
+                for term in ("relatório", "relatorio", "envie", "enviar")
+            ) and any(term in normalized_request for term in ("relatório", "relatorio"))
+            if is_report_request and lot_code:
+                return name, {
+                    "intent": "preparar relatório do lote",
+                    "tasks": [
+                        {
+                            "task_id": "simulated_farm_report",
+                            "agent": "farm",
+                            "goal": f"Resolver a origem do relatório do lote {lot_code}.",
+                            "brief_sanitized": (
+                                "Consultar o lote e obter a origem autorizada do relatório."
+                            ),
+                            "required_evidence": ["origem autorizada do relatório"],
+                        },
+                        {
+                            "task_id": "simulated_secretary_report",
+                            "agent": "secretary",
+                            "goal": (
+                                "Preparar o relatório solicitado a partir da origem autorizada."
+                            ),
+                            "brief_sanitized": (
+                                "Preparar o relatório usando a referência retornada por Fazenda."
+                            ),
+                            "depends_on": ["simulated_farm_report"],
+                            "required_evidence": ["resultado da preparação do relatório"],
+                        },
+                    ],
+                }
+            if is_report_request and not lot_code:
+                return name, {
+                    "intent": "preparar relatório",
+                    "missing_slots": ["código do lote"],
+                }
             agent = "farm"
-            if any(term in request for term in ("consumo", "previsão", "previsao")):
+            if any(
+                term in normalized_request for term in ("consumo", "previsão", "previsao")
+            ):
                 agent = "analyst"
-            elif any(term in request for term in ("medicamento", "remédio", "remedio", "bula")):
+            elif any(
+                term in normalized_request
+                for term in ("medicamento", "remédio", "remedio", "bula")
+            ):
                 agent = "doctor"
             elif any(
-                term in request for term in ("lei", "contrato", "documento", "juríd", "jurid")
+                term in normalized_request
+                for term in ("lei", "contrato", "documento", "juríd", "jurid")
             ):
                 agent = "information"
             return name, {
@@ -88,24 +139,45 @@ class SimulatedChatModel(BaseChatModel):
         if name == "SpecialistResult":
             agent = "farm"
             tool_result_seen = False
+            tool_failed = False
             for message in reversed(messages):
                 if isinstance(message, ToolMessage):
                     tool_result_seen = True
                     agent = _agent_for_tool(getattr(message, "name", ""))
+                    tool_failed = getattr(message, "status", "success") == "error"
                     break
             return name, {
                 "agent": agent,
-                "status": "success" if tool_result_seen else "unavailable",
+                "status": (
+                    "error"
+                    if tool_failed
+                    else "success"
+                    if tool_result_seen
+                    else "unavailable"
+                ),
                 "answer": (
-                    "Consulta local concluída usando o resultado da ferramenta."
+                    "A consulta falhou; não há resultado verificável para responder."
+                    if tool_failed
+                    else "Consulta local concluída usando o resultado da ferramenta."
                     if tool_result_seen
                     else "Nenhuma consulta foi executada."
                 ),
                 "sources": [],
             }
         if name == "OrchestratorResult":
+            outcomes = _specialist_input(messages).get("outcomes", ())
+            failed_outcome = any(
+                isinstance(outcome, dict)
+                and isinstance(outcome.get("result"), dict)
+                and outcome["result"].get("status") not in {"success", "partial"}
+                for outcome in outcomes
+            )
             return name, {
-                "draft_answer": "Consulta local simulada concluída com os resultados disponíveis.",
+                "draft_answer": (
+                    "Não tenho informação suficiente para responder com segurança agora."
+                    if failed_outcome
+                    else "Consulta local simulada concluída com os resultados disponíveis."
+                ),
                 "sources": [],
             }
         if name == "JudgeResult":
@@ -159,7 +231,8 @@ def _agent_for_tool(name: str) -> str:
     return "farm"
 
 
-def _tool_arguments(name: str) -> dict[str, Any]:
+def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -> dict[str, Any]:
+    specialist_input = specialist_input or {}
     if name == "consultar_documental":
         return {"question": "Consulte os documentos sintéticos disponíveis."}
     if name in {"list_properties", "list_medicines", "list_herds", "list_lots"}:
@@ -171,4 +244,49 @@ def _tool_arguments(name: str) -> dict[str, Any]:
                 "horizon_days": 7,
             }
         }
+    if name == "resolve_report_lot_report_source":
+        lot_code = _extract_lot_code(
+            str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
+        )
+        return {"lot_code": lot_code or "HC-LOTE-076"}
+    if name == "prepare_report":
+        references = []
+        for dependency in specialist_input.get("dependency_results", ()):
+            if isinstance(dependency, dict):
+                references.extend(dependency.get("report_artifact_refs", ()))
+        if references:
+            return {
+                "report_artifact_ref": references[0],
+                "report_title": "Relatório do lote solicitado",
+            }
     return {"payload": {}}
+
+
+def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str:
+    task_id = str(specialist_input.get("task_id") or "")
+    if task_id == "simulated_farm_report" and "resolve_report_lot_report_source" in names:
+        return "resolve_report_lot_report_source"
+    if "prepare_report" in names:
+        return "prepare_report"
+    return names[0]
+
+
+def _specialist_input(messages: list[BaseMessage]) -> dict[str, Any]:
+    for message in reversed(messages):
+        if message.type != "human":
+            continue
+        content = message.content
+        if not isinstance(content, str):
+            continue
+        try:
+            value = json.loads(content)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _extract_lot_code(value: str) -> str | None:
+    match = re.search(r"\b[A-Z0-9]{2,}-[A-Z0-9][A-Z0-9-]{1,18}\b", value, re.IGNORECASE)
+    return match.group(0) if match else None

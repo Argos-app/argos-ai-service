@@ -1,5 +1,6 @@
 """Configuração e capacidades do runtime de modelos do principal."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -12,6 +13,7 @@ from app.infrastructure.agents.model_factory import (
 )
 from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.settings import Settings
+from langchain_core.messages import HumanMessage, ToolMessage
 
 from packages.contracts.prediction import EstimateMedicineConsumptionRequest
 
@@ -57,6 +59,86 @@ def test_simulated_model_emits_a_valid_route_plan():
     route = SimulatedChatModel().with_structured_output(RoutePlan).invoke("listar propriedades")
 
     assert route.tasks[0].agent is SpecialistAgentId.FARM
+
+
+def test_simulated_model_routes_report_through_farm_then_secretary():
+    route = SimulatedChatModel().with_structured_output(RoutePlan).invoke(
+        "Envie o relatório do lote HC-LOTE-076 para usuario.teste@argos.local."
+    )
+
+    assert [task.agent for task in route.tasks] == [
+        SpecialistAgentId.FARM,
+        SpecialistAgentId.SECRETARY,
+    ]
+    assert route.tasks[1].depends_on == (route.tasks[0].task_id,)
+    assert route.tasks[0].goal.endswith("HC-LOTE-076.")
+
+
+def test_simulated_model_requests_lot_code_when_report_request_omits_it():
+    route = SimulatedChatModel().with_structured_output(RoutePlan).invoke(
+        "Envie o relatório por e-mail, por favor."
+    )
+
+    assert not route.tasks
+    assert route.missing_slots == ("código do lote",)
+
+
+def test_simulated_secretary_uses_report_artifact_from_farm_dependency():
+    from app.infrastructure.agents.simulated_model import _tool_arguments
+
+    reference = "ba0e1be8-62b1-4a48-ad62-17fa8f8a8048"
+    messages = [
+        HumanMessage(
+            content=json.dumps(
+                {
+                    "task_id": "simulated_secretary_report",
+                    "dependency_results": [
+                        {"task_id": "simulated_farm_report", "report_artifact_refs": [reference]}
+                    ],
+                }
+            )
+        )
+    ]
+
+    payload = json.loads(messages[0].content)
+    assert _tool_arguments("prepare_report", payload) == {
+        "report_artifact_ref": reference,
+        "report_title": "Relatório do lote solicitado",
+    }
+
+
+def test_simulated_specialist_preserves_tool_failure_instead_of_reporting_success():
+    result = SimulatedChatModel._structured_call(
+        "SpecialistResult",
+        [
+            ToolMessage(
+                content="falha de execução",
+                tool_call_id="tool-call-1",
+                name="resolve_report_lot_report_source",
+                status="error",
+            )
+        ],
+    )[1]
+
+    assert result["status"] == "error"
+    assert "falhou" in result["answer"]
+
+
+def test_simulated_orchestrator_does_not_claim_success_for_failed_specialist():
+    result = SimulatedChatModel._structured_call(
+        "OrchestratorResult",
+        [
+            HumanMessage(
+                content=json.dumps(
+                    {"outcomes": [{"result": {"status": "error"}}]}
+                )
+            )
+        ],
+    )[1]
+
+    assert result["draft_answer"] == (
+        "Não tenho informação suficiente para responder com segurança agora."
+    )
 
 
 def test_simulated_prediction_tool_arguments_match_mcp_contract():
