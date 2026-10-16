@@ -17,6 +17,7 @@ testpaths = ["tests", "apps", "packages"]
 python_files = ["test_*.py", "*_test.py"]
 pythonpath = [
     ".",
+    "apps/main_api",
     "apps/a2a_agent/src",
     "apps/mcp_email/src",
     "apps/mcp_data/src",

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.agent_schemas.inputs import QuestionFormattingRequest
+from app.agent_schemas.inputs import ContextMessage, QuestionFormattingRequest, SessionContext
 from app.agent_schemas.results import (
     JudgeDecision,
     JudgeResult,
@@ -27,6 +27,7 @@ from app.graph.workflow import (
     initial_state,
 )
 from app.ports.agent import AgentId
+from app.ports.execution_event_repository import ExecutionEventWriteError
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -144,6 +145,36 @@ async def test_executar_resposta_resumes_the_requested_question_thread() -> None
 
 
 @pytest.mark.asyncio
+async def test_session_checkpoint_is_scoped_to_interaction_for_safe_recovery() -> None:
+    graph = RecordingGraph()
+    await executar_fluxo(
+        graph,
+        "Quais aplicações existem?",
+        user_id="user-demo",
+        farm_id="farm-demo",
+        session_id="session-demo",
+        interaction_id="message-interaction",
+    )
+    await executar_resposta(
+        graph,
+        "setembro",
+        question_id="question-demo",
+        session_id="session-demo",
+        interaction_id="answer-interaction",
+        checkpoint_namespace="message-interaction",
+    )
+
+    assert graph.calls[0][1]["configurable"] == {
+        "thread_id": "session-demo",
+        "checkpoint_ns": "interaction-message-interaction",
+    }
+    assert graph.calls[1][1]["configurable"] == {
+        "thread_id": "session-demo",
+        "checkpoint_ns": "interaction-message-interaction",
+    }
+
+
+@pytest.mark.asyncio
 async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
     source = SourceReference(title="Registro sintético", reference="mock://farm-demo/1")
     router = FakeAgent(RoutePlan(intent="consulta", tasks=(task(),)))
@@ -160,7 +191,15 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         FakeFactory(router=router, farm=farm, orchestrator=orchestrator, judge=judge)
     )
 
-    result = await graph.ainvoke(request_state())
+    session_context = SessionContext(
+        session_summary="Continuidade da tarefa",
+        recent_messages=(ContextMessage(role="user", content="Relatório de janeiro"),),
+        user_tone="simples e acolhedor",
+        user_general_goal="entender os medicamentos",
+    )
+    state = request_state()
+    state["session_context"] = session_context
+    result = await graph.ainvoke(state)
 
     assert result["final_answer"] == "Resultado simulado, não é dado real."
     assert result["called_agents"] == ["router", "farm", "orchestrator", "judge"]
@@ -171,6 +210,22 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         "session_id": "session-demo",
     }
     assert judge.calls[0][0].sources == (source,)
+    assert router.calls[0][0].session_context.session_summary == "Continuidade da tarefa"
+    assert router.calls[0][0].session_context.user_tone is None
+    assert farm.calls[0][0].session_context.recent_messages == (
+        ContextMessage(role="user", content="Relatório de janeiro"),
+    )
+    assert farm.calls[0][0].session_context.session_summary == "Continuidade da tarefa"
+    assert orchestrator.calls[0][0].session_context.session_summary is None
+    assert orchestrator.calls[0][0].session_context.user_tone == "simples e acolhedor"
+
+
+@pytest.mark.asyncio
+async def test_event_persistence_failure_is_not_converted_to_safe_success() -> None:
+    graph = build_graph(FakeFactory(router=FakeAgent(ExecutionEventWriteError("event write"))))
+
+    with pytest.raises(ExecutionEventWriteError):
+        await graph.ainvoke(request_state())
 
 
 @pytest.mark.asyncio

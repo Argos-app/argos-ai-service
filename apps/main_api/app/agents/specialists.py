@@ -16,6 +16,7 @@ from app.infrastructure.agents.langchain_factory import (
     validate_agent_configuration,
 )
 from app.ports.agent import AgentId
+from app.ports.execution_event_repository import ExecutionEventRepository
 from app.prompts.judge import JUDGE_SYSTEM_PROMPT
 from app.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from app.prompts.question_formatter import QUESTION_FORMATTER_SYSTEM_PROMPT
@@ -81,6 +82,7 @@ def build_agent_factory(
     models: Mapping[ModelPolicyId, Any],
     registry: AgentRegistry = DEFAULT_AGENT_REGISTRY,
     tool_bindings: AgentToolBindings | None = None,
+    execution_events: ExecutionEventRepository | None = None,
 ) -> LangChainAgentFactory:
     resolved_tool_bindings = resolve_tool_bindings(registry, tool_bindings)
 
@@ -194,4 +196,5 @@ def build_agent_factory(
             AgentId.JUDGE: judge_app,
             AgentId.QUESTION_FORMATTER: question_formatter_app,
         },
+        execution_events=execution_events,
     )

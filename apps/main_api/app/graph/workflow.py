@@ -8,6 +8,7 @@ from app.agent_schemas.inputs import (
     QuestionFormatterInput,
     QuestionFormattingRequest,
     RouterInput,
+    SessionContext,
     SpecialistInput,
 )
 from app.agent_schemas.results import (
@@ -28,6 +29,8 @@ from app.agent_schemas.synthesis import (
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
+from app.ports.execution_event_repository import ExecutionEventWriteError
+from app.privacy import minimize_pii
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -37,8 +40,6 @@ MAX_REVISIONS = 1
 MAX_MESSAGE_LENGTH = 8000
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 
-EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
-CPF_PATTERN = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
 SECRET_REQUEST_PATTERN = re.compile(
     r"\b(?:revele|mostre|exiba)\b.{0,60}"
     r"\b(?:chave de api|token de acesso|senha|prompt de sistema)\b",
@@ -46,16 +47,31 @@ SECRET_REQUEST_PATTERN = re.compile(
 )
 
 
-def minimize_pii(text: str) -> str:
-    return CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
-
-
 def build_agent_context(state: AgentState) -> dict[str, str]:
-    return {
+    context = {
         "user_id": state["user_id"],
         "farm_id": state["farm_id"],
         "session_id": state["session_id"],
     }
+    if state.get("interaction_id"):
+        context["interaction_id"] = state["interaction_id"]
+    return context
+
+
+def _history_context(state: AgentState) -> SessionContext:
+    context = state.get("session_context") or SessionContext()
+    return SessionContext(
+        session_summary=context.session_summary,
+        recent_messages=context.recent_messages,
+    )
+
+
+def _preference_context(state: AgentState) -> SessionContext:
+    context = state.get("session_context") or SessionContext()
+    return SessionContext(
+        user_tone=context.user_tone,
+        user_general_goal=context.user_general_goal,
+    )
 
 
 def reset_turn_state() -> dict:
@@ -92,23 +108,41 @@ def reject_input(state: AgentState, answer: str, error: str) -> dict:
     return {**reset_turn_state(), "final_answer": answer, "errors": [error]}
 
 
-def initial_state(message: str, *, user_id: str, farm_id: str, session_id: str) -> dict:
+def initial_state(
+    message: str,
+    *,
+    user_id: str,
+    farm_id: str,
+    session_id: str,
+    interaction_id: str | None = None,
+    session_context: SessionContext | None = None,
+) -> dict:
     return {
         "messages": [HumanMessage(content=minimize_pii(message))],
         "user_id": user_id,
         "farm_id": farm_id,
         "session_id": session_id,
+        "interaction_id": interaction_id,
         "input_kind": "message",
         "answer_question_id": None,
+        "session_context": session_context or SessionContext(),
         "pii_map": {},
     }
 
 
-def answer_state(answer: str, *, question_id: str) -> dict:
+def answer_state(
+    answer: str,
+    *,
+    question_id: str,
+    interaction_id: str | None = None,
+    session_context: SessionContext | None = None,
+) -> dict:
     return {
         "messages": [HumanMessage(content=minimize_pii(answer))],
         "input_kind": "answer",
         "answer_question_id": question_id,
+        "interaction_id": interaction_id,
+        "session_context": session_context or SessionContext(),
     }
 
 
@@ -241,10 +275,16 @@ async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
     called = [*state.get("called_agents", []), AgentId.ROUTER.value]
     try:
         response = await factory.create(AgentId.ROUTER).run(
-            RouterInput(message=state["sanitized_message"]), context=build_agent_context(state)
+            RouterInput(
+                message=state["sanitized_message"],
+                session_context=_history_context(state),
+            ),
+            context=build_agent_context(state),
         )
         plan = RoutePlan.model_validate(response)
         ordered = order_tasks(plan)
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         return {
             "called_agents": called,
@@ -321,6 +361,7 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
             depends_on=task.depends_on,
             required_evidence=task.required_evidence,
             dependency_results=dependency_results,
+            session_context=_history_context(state),
         )
         called.append(agent_id.value)
         try:
@@ -330,6 +371,8 @@ async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id:
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")
+        except ExecutionEventWriteError:
+            raise
         except Exception:
             result = SpecialistResult(
                 agent=task.agent,
@@ -379,6 +422,7 @@ async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
                 request=state["sanitized_message"],
                 outcomes=state["task_outcomes"],
                 revision_feedback=feedback,
+                session_context=_preference_context(state),
             ),
             context=build_agent_context(state),
         )
@@ -386,6 +430,8 @@ async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
         trusted_sources = state.get("sources", [])
         if any(source not in trusted_sources for source in draft.sources):
             raise ValueError("unknown_source")
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         return {
             "called_agents": called,
@@ -415,6 +461,8 @@ async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
             context=build_agent_context(state),
         )
         review = JudgeResult.model_validate(response)
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         return {
             "called_agents": called,
@@ -443,6 +491,8 @@ async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
         question = response.prompt.strip()
         if not question:
             raise ValueError("empty_question")
+    except ExecutionEventWriteError:
+        raise
     except Exception:
         question = request.question_goal
         return {
@@ -612,10 +662,26 @@ async def executar_fluxo(
     user_id: str,
     farm_id: str,
     session_id: str,
+    interaction_id: str | None = None,
+    session_context: SessionContext | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    state = initial_state(message, user_id=user_id, farm_id=farm_id, session_id=session_id)
-    return await graph.ainvoke(state, config=build_session_config(session_id, config))
+    state = initial_state(
+        message,
+        user_id=user_id,
+        farm_id=farm_id,
+        session_id=session_id,
+        interaction_id=interaction_id,
+        session_context=session_context,
+    )
+    return await graph.ainvoke(
+        state,
+        config=build_session_config(
+            session_id,
+            config,
+            checkpoint_namespace=f"interaction-{interaction_id}" if interaction_id else None,
+        ),
+    )
 
 
 async def executar_resposta(
@@ -624,18 +690,39 @@ async def executar_resposta(
     *,
     question_id: str,
     session_id: str,
+    interaction_id: str | None = None,
+    session_context: SessionContext | None = None,
+    checkpoint_namespace: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    state = answer_state(answer, question_id=question_id)
-    return await graph.ainvoke(state, config=build_session_config(session_id, config))
+    state = answer_state(
+        answer,
+        question_id=question_id,
+        interaction_id=interaction_id,
+        session_context=session_context,
+    )
+    return await graph.ainvoke(
+        state,
+        config=build_session_config(
+            session_id,
+            config,
+            checkpoint_namespace=(
+                f"interaction-{checkpoint_namespace}" if checkpoint_namespace else None
+            ),
+        ),
+    )
 
 
 def build_session_config(
     session_id: str,
     config: RunnableConfig | None,
+    *,
+    checkpoint_namespace: str | None = None,
 ) -> RunnableConfig:
     merged_config: RunnableConfig = dict(config or {})
     configurable = dict(merged_config.get("configurable") or {})
     configurable["thread_id"] = session_id
+    if checkpoint_namespace is not None:
+        configurable["checkpoint_ns"] = checkpoint_namespace
     merged_config["configurable"] = configurable
     return merged_config

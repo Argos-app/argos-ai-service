@@ -1,4 +1,4 @@
-from app.agent_schemas.inputs import QuestionFormattingRequest
+from app.agent_schemas.inputs import QuestionFormattingRequest, SessionContext
 from app.agent_schemas.results import JudgeResult, RoutePlan, RouteTask, SourceReference
 from app.agent_schemas.synthesis import OrchestratorResult, TaskOutcome
 from langgraph.graph import MessagesState
@@ -8,8 +8,10 @@ class AgentState(MessagesState):
     user_id: str
     farm_id: str
     session_id: str
+    interaction_id: str | None
     input_kind: str
     answer_question_id: str | None
+    session_context: SessionContext | None
 
     pii_map: dict[str, str]
     sanitized_message: str

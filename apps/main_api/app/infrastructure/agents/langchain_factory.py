@@ -3,9 +3,12 @@
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
+from uuid import UUID
 
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
+from app.infrastructure.agents.execution_observer import ExecutionObserver
 from app.ports.agent import Agent, AgentId
+from app.ports.execution_event_repository import ExecutionEventRepository
 from pydantic import BaseModel, ValidationError
 
 
@@ -62,10 +65,17 @@ def validate_agent_configuration(
 
 
 class _LangChainAgent(Agent[Any, BaseModel]):
-    def __init__(self, runnable: Any, definition: AgentDefinition) -> None:
+    def __init__(
+        self,
+        runnable: Any,
+        definition: AgentDefinition,
+        execution_events: ExecutionEventRepository | None = None,
+    ) -> None:
         self._runnable = runnable
         self._input_schema = definition.input_schema
         self._output_schema = definition.output_schema
+        self._agent_id = definition.agent_id
+        self._execution_events = execution_events
 
     async def run(
         self,
@@ -74,28 +84,66 @@ class _LangChainAgent(Agent[Any, BaseModel]):
         context: Mapping[str, str] | None = None,
     ) -> BaseModel:
         validated_input = self._input_schema.model_validate(input)
-        config = {"configurable": dict(context)} if context is not None else None
-
-        result = await self._runnable.ainvoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": validated_input.model_dump_json(),
-                    }
-                ]
-            },
-            config=config,
-        )
-        if not isinstance(result, Mapping):
-            raise AgentResponseError("LangChain retornou um estado inválido")
-
+        observer = _observer_for_context(self._execution_events, context)
+        invocation_id = None
+        if observer is not None:
+            invocation_id = await observer.agent_started(self._agent_id.value, validated_input)
+        config: dict[str, Any] | None = {"configurable": dict(context)} if context else None
+        if observer is not None:
+            config = config or {}
+            config["callbacks"] = [observer.tool_callback()]
         try:
-            return self._output_schema.model_validate(result.get("structured_response"))
-        except ValidationError as exc:
-            raise AgentResponseError(
-                "Resposta do agente não corresponde ao schema registrado"
-            ) from exc
+            result = await self._runnable.ainvoke(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": validated_input.model_dump_json(),
+                        }
+                    ]
+                },
+                config=config,
+            )
+            if not isinstance(result, Mapping):
+                raise AgentResponseError("LangChain retornou um estado inválido")
+            try:
+                response = self._output_schema.model_validate(result.get("structured_response"))
+            except ValidationError as exc:
+                raise AgentResponseError(
+                    "Resposta do agente não corresponde ao schema registrado"
+                ) from exc
+        except BaseException:
+            if observer is not None and invocation_id is not None:
+                import asyncio
+
+                await asyncio.shield(
+                    observer.agent_finished(invocation_id, self._agent_id.value, failed=True)
+                )
+            raise
+        if observer is not None and invocation_id is not None:
+            await observer.agent_finished(
+                invocation_id,
+                self._agent_id.value,
+                output=response,
+            )
+        return response
+
+
+def _observer_for_context(
+    repository: ExecutionEventRepository | None,
+    context: Mapping[str, str] | None,
+) -> ExecutionObserver | None:
+    if repository is None or context is None:
+        return None
+    session_id = context.get("session_id")
+    interaction_id = context.get("interaction_id")
+    if not session_id or not interaction_id:
+        return None
+    return ExecutionObserver(
+        repository,
+        session_id=UUID(session_id),
+        interaction_id=UUID(interaction_id),
+    )
 
 
 class LangChainAgentFactory:
@@ -105,9 +153,11 @@ class LangChainAgentFactory:
         self,
         registry: AgentRegistry,
         runnables: Mapping[AgentId, Any],
+        execution_events: ExecutionEventRepository | None = None,
     ) -> None:
         self._registry = registry
         self._runnables = MappingProxyType(dict(runnables))
+        self._execution_events = execution_events
 
     def create(self, agent_id: AgentId) -> Agent[Any, Any]:
         definition = self._registry.get(agent_id)
@@ -117,4 +167,4 @@ class LangChainAgentFactory:
                 f"Agente não configurado: {definition.agent_id.value}"
             )
 
-        return _LangChainAgent(runnable, definition)
+        return _LangChainAgent(runnable, definition, self._execution_events)
