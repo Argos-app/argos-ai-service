@@ -1,4 +1,4 @@
-"""Converte .env.local do Compose para o env file do Secret Kustomize."""
+"""Converte o .env local oficial para o env file do Secret Kustomize."""
 
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ def parse_env(path: Path) -> dict[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=Path(".env.local"))
-    parser.add_argument("--output", type=Path, default=Path("k8s/local/.env.local"))
+    parser.add_argument("--source", type=Path, default=Path(".env"))
+    parser.add_argument("--output", type=Path, default=Path("k8s/local/secret.env"))
     args = parser.parse_args()
     source = args.source.resolve()
     output = args.output.resolve()

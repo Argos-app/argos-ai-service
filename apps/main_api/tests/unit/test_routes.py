@@ -59,6 +59,7 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
 
     class Runtime:
         persistence = object()
+        user_usage_counter = None
         database = type("Database", (), {"command": lambda self, name: _ping()})()
 
         async def close(self):

@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from app.api.v1.models.interactions import MessageInteraction
+from app.application.contracts.interactions import MessageCommand
 from app.application.session_service import _normalize_input
 from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 
@@ -70,7 +70,7 @@ def test_merge_recipient_selectors_does_not_overwrite_prior_clarification_contex
 
 def test_session_input_persists_only_sanitized_recipient_marker():
     normalized = _normalize_input(
-        MessageInteraction(
+        MessageCommand(
             kind="message",
             client_message_id=uuid4(),
             message="Envie o relatório para Ana Silva <ana@example.com>, CPF 123.456.789-00",

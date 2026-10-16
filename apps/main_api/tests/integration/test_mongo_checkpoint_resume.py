@@ -95,7 +95,6 @@ async def test_pending_question_resumes_after_recreating_mongo_saver():
             question_id=str(first["question_id"]),
             session_id=session_id,
             interaction_id=str(uuid4()),
-            checkpoint_namespace=interaction_id,
         )
     finally:
         checkpointer_runtime.close()

@@ -358,9 +358,10 @@ async def test_answer_is_counted_once_and_conflicting_replay_is_rejected():
     assert sessions.records[session.session_id].user_message_count == 2
     assert sessions.records[session.session_id].next_message_sequence == 5
     assert len(conversations.messages) == 4
-    checkpoint_ns = f"interaction-{question.interaction_id}"
-    assert graph.state_configs[0]["configurable"]["checkpoint_ns"] == checkpoint_ns
-    assert graph.invocations[1][1]["configurable"]["checkpoint_ns"] == checkpoint_ns
+    assert graph.state_configs[0]["configurable"] == {"thread_id": str(session.session_id)}
+    answer_configurable = graph.invocations[1][1]["configurable"]
+    assert answer_configurable["thread_id"] == str(session.session_id)
+    assert "checkpoint_ns" not in answer_configurable
     conflicting = answer.model_copy(update={"answer": TextAnswer(kind="text", text="Setembro")})
     with pytest.raises(ApplicationError) as error:
         await service.create_interaction(principal, session.session_id, conflicting)

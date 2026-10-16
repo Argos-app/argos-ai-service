@@ -48,3 +48,4 @@ async def test_simulated_answer_only_cites_evidence_given_by_the_service():
 
     assert answer.status is DocumentAnswerStatus.SUCCESS
     assert answer.cited_evidence_ids == (evidence.evidence_id,)
+    assert f"[[{evidence.evidence_id}]]" in answer.answer

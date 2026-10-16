@@ -14,4 +14,4 @@ configMapGenerator:
 secretGenerator:
     - name: argos-local-secrets
       envs:
-          - .env.local
+          - secret.env

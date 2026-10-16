@@ -99,9 +99,7 @@ def _reported_token_count(usage: dict[str, Any] | None) -> tuple[int | None, boo
     input_tokens = usage.get("input_tokens")
     output_tokens = usage.get("output_tokens")
     valid_input = (
-        isinstance(input_tokens, int)
-        and not isinstance(input_tokens, bool)
-        and input_tokens >= 0
+        isinstance(input_tokens, int) and not isinstance(input_tokens, bool) and input_tokens >= 0
     )
     valid_output = (
         isinstance(output_tokens, int)

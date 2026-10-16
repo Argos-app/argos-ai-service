@@ -2,8 +2,8 @@
 
 from .collector import BestEffortObservationCollector, DisabledObservationCollector
 from .context import (
-    bind_user_id,
     bind_correlation,
+    bind_user_id,
     current_correlation_id,
     current_parent_observation_id,
     current_user_id,

@@ -28,7 +28,8 @@ aplicação mantém as configurações locais atuais e não depende do LangSmith
   [documentação do Docker Desktop](https://docs.docker.com/desktop/use-desktop/kubernetes/)
   e selecione o provisionador **Kubeadm**. Alternativamente, instale
   [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation).
-- `kubectl`; veja a [instalação oficial](https://kubernetes.io/docs/tasks/tools/).
+- `kubectl`; veja a
+  [instalação oficial](https://kubernetes.io/docs/tasks/tools/).
 - Python 3.14 com `cryptography` e acesso para baixar as imagens base na
   primeira construção.
 - Recursos locais suficientes para seis imagens de aplicação/infraestrutura,
@@ -57,19 +58,23 @@ estes PVs em um cluster compartilhado.
 
 ## Secrets locais e imagens
 
-Gere credenciais locais descartáveis e prepare o arquivo dotenv consumido pelo
-Secret do Kustomize. Ambos os arquivos são ignorados pelo Git:
+O `.env` da raiz é a fonte oficial da configuração local. Gere-o uma vez se
+ainda não existir; o comando cria credenciais internas descartáveis e inclui os
+defaults dos serviços. O Kubernetes consome um arquivo derivado, com apenas as
+variáveis necessárias ao Secret. Ambos são ignorados pelo Git:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/docker/create-local-env.py --output .env.local
-.\.venv\Scripts\python.exe scripts/kubernetes/prepare-local-secrets.py --source .env.local
+.\.venv\Scripts\python.exe scripts/docker/create-local-env.py
+.\.venv\Scripts\python.exe scripts/kubernetes/prepare-local-secrets.py
 ```
 
 O gerador cria chaves de delegação/assinatura e tokens internos aleatórios; o
 script de preparação valida as chaves requeridas e adapta a sintaxe das chaves
-JSON ao formato de env file do Kustomize. Não copie para esses arquivos
-credenciais reais. Para descartar os arquivos locais, remova `.env.local` e
-`k8s/local/.env.local` manualmente depois de encerrar o ambiente.
+JSON ao formato de env file do Kustomize. O `.env` também é usado pelo Docker
+Compose e pode conter credenciais de providers reais; para Kubernetes local,
+mantenha `ARGOS_MODEL_MODE=simulated` e SMTP vazio para usar Mailpit. Para
+descartar os arquivos locais, remova `.env` e `k8s/local/secret.env` depois de
+encerrar o ambiente.
 
 Construa as cinco imagens do serviço e a imagem PostgreSQL que incorpora os
 scripts SQL versionados. Com Kind, use o auxiliar, que também carrega as
@@ -83,8 +88,8 @@ O script termina com erro se qualquer build ou o carregamento no Kind falhar. As
 imagens são locais e usam `imagePullPolicy: IfNotPresent`.
 
 Com o Kubernetes do Docker Desktop e provisionador Kubeadm, não use esse
-auxiliar porque ele chama `kind load`. Construa as mesmas imagens diretamente
-no Docker Desktop, cujo image store está disponível ao cluster Kubeadm:
+auxiliar porque ele chama `kind load`. Construa as mesmas imagens diretamente no
+Docker Desktop, cujo image store está disponível ao cluster Kubeadm:
 
 ```powershell
 $images = @(

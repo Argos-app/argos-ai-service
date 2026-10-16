@@ -65,11 +65,11 @@ jobs:
               run: pip-audit
 
             - name: Generate disposable local secrets
-              run: python scripts/docker/create-local-env.py --output .env.local
+              run: python scripts/docker/create-local-env.py
 
             - name: Validate every Compose file
               run: |
-                  docker compose --env-file .env.local --profile apps --file compose.yaml config --quiet
+                  docker compose --profile apps --file compose.yaml config --quiet
                   docker compose --env-file apps/a2a_agent/.env.example --file apps/a2a_agent/compose.yaml config --quiet
                   docker compose --file apps/main_api/tests/integration/compose.yaml config --quiet
                   docker compose --file apps/mcp_email/tests/integration/compose.yaml config --quiet
@@ -78,19 +78,19 @@ jobs:
                   docker compose --file apps/a2a_agent/tests/integration/compose.yaml config --quiet
 
             - name: Build all five service images
-              run: docker compose --env-file .env.local --profile apps --file compose.yaml build --parallel
+              run: docker compose --profile apps --file compose.yaml build --parallel
 
             - name: Start integrated local stack
-              run: docker compose --env-file .env.local --profile apps --file compose.yaml up --detach --wait
+              run: docker compose --profile apps --file compose.yaml up --detach --wait
 
             - name: Smoke-check integrated APIs
               run: |
                   curl --fail --silent --show-error http://127.0.0.1:8080/health/ready
-                  docker compose --env-file .env.local --profile apps --file compose.yaml exec --no-TTY a2a_agent python -c "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Authorization': 'Bearer ' + os.environ['A2A_INTERNAL_SERVICE_TOKEN']}); urllib.request.urlopen(request, timeout=5)"
+                  docker compose --profile apps --file compose.yaml exec --no-TTY a2a_agent python -c "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Authorization': 'Bearer ' + os.environ['A2A_INTERNAL_SERVICE_TOKEN']}); urllib.request.urlopen(request, timeout=5)"
 
             - name: Stop integrated local stack
               if: always()
-              run: docker compose --env-file .env.local --profile apps --file compose.yaml down --volumes --remove-orphans
+              run: docker compose --profile apps --file compose.yaml down --volumes --remove-orphans
 
             - name: Set up Node.js
               uses: actions/setup-node@v4

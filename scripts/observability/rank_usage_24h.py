@@ -42,7 +42,8 @@ async def _main() -> None:
                 "limitations": [
                     "Contagens são efêmeras e desaparecem 24 horas após a última atualização.",
                     "Falhas de Redis ou da fila de observabilidade podem perder incrementos.",
-                    "Tokens ausentes do provider são contabilizados separadamente como desconhecidos.",
+                    "Tokens ausentes do provider são contabilizados separadamente "
+                    "como desconhecidos.",
                     "Tokens são somados somente uma vez por observação de modelo no Redis.",
                 ],
                 "rankings": _rank_users(users),

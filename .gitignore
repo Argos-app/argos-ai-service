@@ -93,4 +93,5 @@ Thumbs.db
 !docs/configuracao-mongodb.md
 !docs/docker-local.md
 !docs/kubernetes-local.md
-k8s/local/.env.local
+!docs/resultado-homologacao-local.md
+k8s/local/secret.env

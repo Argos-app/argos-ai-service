@@ -271,7 +271,6 @@ async def test_executar_fluxo_preserves_trace_config_and_uses_trusted_session_id
     assert state["user_id"] == "user-demo"
     assert run_config["configurable"] == {
         "thread_id": "session-demo",
-        "checkpoint_ns": "test",
     }
     assert run_config["metadata"] == {"origin": "api"}
     assert run_config["tags"] == ["argos"]
@@ -300,7 +299,7 @@ async def test_executar_resposta_resumes_the_requested_question_thread() -> None
 
 
 @pytest.mark.asyncio
-async def test_session_checkpoint_is_scoped_to_interaction_for_safe_recovery() -> None:
+async def test_session_checkpoint_uses_root_namespace_for_reliable_resume() -> None:
     graph = RecordingGraph()
     await executar_fluxo(
         graph,
@@ -316,16 +315,13 @@ async def test_session_checkpoint_is_scoped_to_interaction_for_safe_recovery() -
         question_id="question-demo",
         session_id="session-demo",
         interaction_id="answer-interaction",
-        checkpoint_namespace="message-interaction",
     )
 
     assert graph.calls[0][1]["configurable"] == {
         "thread_id": "session-demo",
-        "checkpoint_ns": "interaction-message-interaction",
     }
     assert graph.calls[1][1]["configurable"] == {
         "thread_id": "session-demo",
-        "checkpoint_ns": "interaction-message-interaction",
     }
 
 

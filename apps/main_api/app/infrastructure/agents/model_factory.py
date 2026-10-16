@@ -12,14 +12,17 @@ class ModelRuntimeConfigurationError(RuntimeError):
     """O provider não oferece as capacidades exigidas pelos agentes registrados."""
 
 
-FAST_POLICIES = frozenset(
-    {
-        ModelPolicyId.ROUTER,
-        ModelPolicyId.ORCHESTRATOR,
-        ModelPolicyId.JUDGE,
-        ModelPolicyId.QUESTION_FORMATTER,
-    }
-)
+MODEL_POLICY_SETTINGS = {
+    ModelPolicyId.ROUTER: "model_router_name",
+    ModelPolicyId.FARM: "model_farm_name",
+    ModelPolicyId.DOCTOR: "model_doctor_name",
+    ModelPolicyId.ANALYST: "model_analyst_name",
+    ModelPolicyId.SECRETARY: "model_secretary_name",
+    ModelPolicyId.INFORMATION: "model_information_name",
+    ModelPolicyId.ORCHESTRATOR: "model_orchestrator_name",
+    ModelPolicyId.JUDGE: "model_judge_name",
+    ModelPolicyId.QUESTION_FORMATTER: "model_question_formatter_name",
+}
 
 
 def validate_model_capabilities(
@@ -67,28 +70,28 @@ def create_configured_models(
     *,
     chat_model_factory: Callable[..., Any] | None = None,
 ) -> tuple[dict[ModelPolicyId, Any] | None, str | None]:
-    """Cria os modelos rápido/especialista sem consultar o provider no bootstrap.
+    """Cria os modelos configurados por agente sem consultar o provider no bootstrap.
 
     O segundo item indica por que o runtime ainda não está disponível. Isso
     permite manter liveness ativo e readiness fechado enquanto falta configuração
     ou credencial, sem expor detalhes do segredo no healthcheck.
     """
-    model_names = (settings.model_fast_name, settings.model_specialist_name)
+    model_names = {
+        policy: getattr(settings, setting_name)
+        for policy, setting_name in MODEL_POLICY_SETTINGS.items()
+    }
     if settings.model_mode == "simulated":
         from app.infrastructure.agents.simulated_model import SimulatedChatModel
 
-        fast_model = SimulatedChatModel()
-        specialist_model = SimulatedChatModel()
-        models = {
-            policy: fast_model if policy in FAST_POLICIES else specialist_model
-            for policy in ModelPolicyId
-        }
+        simulated_model = SimulatedChatModel()
+        models = {policy: simulated_model for policy in ModelPolicyId}
         validate_model_capabilities(models)
         return models, None
-    if all(value is None for value in model_names):
+    if all(value is None for value in model_names.values()):
         return None, "model_runtime_not_configured"
     if any(
-        not isinstance(value, str) or not value.strip() or len(value) > 200 for value in model_names
+        not isinstance(value, str) or not value.strip() or len(value) > 200
+        for value in model_names.values()
     ):
         return None, "model_configuration_incomplete"
     if not settings.model_api_key:
@@ -113,19 +116,19 @@ def create_configured_models(
         shared_options["base_url"] = settings.model_api_base_url
 
     try:
-        fast_model = chat_model_factory(model=settings.model_fast_name, **shared_options)
-        specialist_model = chat_model_factory(
-            model=settings.model_specialist_name,
-            **shared_options,
-        )
+        model_instances: dict[str, Any] = {}
+        models = {}
+        for policy, model_name in model_names.items():
+            if model_name not in model_instances:
+                model_instances[model_name] = chat_model_factory(
+                    model=model_name,
+                    **shared_options,
+                )
+            models[policy] = model_instances[model_name]
     except Exception as exc:
         raise ModelRuntimeConfigurationError(
             "não foi possível inicializar os modelos configurados"
         ) from exc
 
-    models = {
-        policy: fast_model if policy in FAST_POLICIES else specialist_model
-        for policy in ModelPolicyId
-    }
     validate_model_capabilities(models)
     return models, None

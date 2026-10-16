@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,8 @@ from packages.observability import (
 )
 from packages.security.access import DocumentAccessContext
 from packages.security.errors import AccessContextError
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class DocumentA2AExecutor(AgentExecutor):
@@ -151,7 +154,7 @@ class DocumentA2AExecutor(AgentExecutor):
             if part.media_type and part.media_type != "application/json":
                 raise ValueError("media type não suportado")
             request = DocumentQuestionRequest.model_validate_json(part.text)
-        except (ValidationError, ValueError):
+        except ValidationError, ValueError:
             await updater.reject(
                 updater.new_agent_message(
                     [
@@ -189,9 +192,10 @@ class DocumentA2AExecutor(AgentExecutor):
             return
         try:
             response = await self._registry.execute(request, access_context)
-        except Exception:
+        except Exception as exc:
             # Não retornar mensagens internas, tokens, fontes parciais ou exceções
             # do provedor ao chamador do protocolo.
+            _LOGGER.error("document agent execution failed: %s", type(exc).__name__)
             response = DocumentAnswerResponse(
                 request_id=request.request_id,
                 status="unavailable",

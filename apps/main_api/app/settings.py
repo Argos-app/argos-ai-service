@@ -125,8 +125,15 @@ class Settings:
     model_api_base_url: str | None = None
     model_mode: str = "provider"
     model_api_key: str | None = field(default=None, repr=False)
-    model_fast_name: str | None = None
-    model_specialist_name: str | None = None
+    model_router_name: str | None = None
+    model_farm_name: str | None = None
+    model_doctor_name: str | None = None
+    model_analyst_name: str | None = None
+    model_secretary_name: str | None = None
+    model_information_name: str | None = None
+    model_orchestrator_name: str | None = None
+    model_judge_name: str | None = None
+    model_question_formatter_name: str | None = None
     model_timeout_seconds: float = 30.0
     model_max_output_tokens: int = 1200
     execution_max_model_calls: int = 12
@@ -230,8 +237,15 @@ class Settings:
             model_api_base_url=os.getenv("MAIN_API_MODEL_API_BASE_URL") or None,
             model_mode=os.getenv("MAIN_API_MODEL_MODE", "provider").strip().casefold(),
             model_api_key=os.getenv("MAIN_API_MODEL_API_KEY") or None,
-            model_fast_name=os.getenv("MAIN_API_MODEL_FAST") or None,
-            model_specialist_name=os.getenv("MAIN_API_MODEL_SPECIALIST") or None,
+            model_router_name=os.getenv("MAIN_API_MODEL_ROUTER") or None,
+            model_farm_name=os.getenv("MAIN_API_MODEL_FARM") or None,
+            model_doctor_name=os.getenv("MAIN_API_MODEL_DOCTOR") or None,
+            model_analyst_name=os.getenv("MAIN_API_MODEL_ANALYST") or None,
+            model_secretary_name=os.getenv("MAIN_API_MODEL_SECRETARY") or None,
+            model_information_name=os.getenv("MAIN_API_MODEL_INFORMATION") or None,
+            model_orchestrator_name=os.getenv("MAIN_API_MODEL_ORCHESTRATOR") or None,
+            model_judge_name=os.getenv("MAIN_API_MODEL_JUDGE") or None,
+            model_question_formatter_name=os.getenv("MAIN_API_MODEL_QUESTION_FORMATTER") or None,
             model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "30")),
             model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "1200")),
             execution_max_model_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "12")),
@@ -340,7 +354,7 @@ class Settings:
                 local_http = parsed.scheme == "http" and (
                     parsed.hostname in {"localhost", "127.0.0.1", "::1"}
                     or self.app_env == "local"
-                    and parsed.hostname == "a2a_agent"
+                    and parsed.hostname in {"a2a_agent", "a2a-agent"}
                 )
                 valid_url = (
                     (parsed.scheme == "https" or local_http)

@@ -1,23 +1,35 @@
-"""O HTTP interno do Compose só é permitido em configuração local explícita."""
+"""HTTP em redes locais Compose/Kubernetes exige configuração local explícita."""
 
 import pytest
 from app.infrastructure.mcp.client import McpClientConfigurationError, McpToolServerClient
 
 
-def test_compose_service_host_is_allowed_only_when_local_mode_is_explicit():
+@pytest.mark.parametrize(
+    ("host", "service_name", "tool"),
+    [
+        ("mcp_data", "data", "list_properties"),
+        ("mcp-data", "data", "list_properties"),
+        ("mcp_prediction", "prediction", "estimate_medicine_consumption"),
+        ("mcp-prediction", "prediction", "estimate_medicine_consumption"),
+        ("mcp_email", "email", "prepare_report"),
+        ("mcp-email", "email", "prepare_report"),
+    ],
+)
+def test_local_service_host_requires_explicit_local_mode(host, service_name, tool):
+    url = f"http://{host}:8000/mcp"
     with pytest.raises(McpClientConfigurationError):
         McpToolServerClient(
-            service_name="data",
-            url="http://mcp_data:8000/mcp",
+            service_name=service_name,
+            url=url,
             service_token="local-token",
-            allowed_tools=frozenset({"list_properties"}),
+            allowed_tools=frozenset({tool}),
         )
 
     configured = McpToolServerClient(
-        service_name="data",
-        url="http://mcp_data:8000/mcp",
+        service_name=service_name,
+        url=url,
         service_token="local-token",
-        allowed_tools=frozenset({"list_properties"}),
-        allow_compose_http=True,
+        allowed_tools=frozenset({tool}),
+        allow_local_http=True,
     )
-    assert configured.url == "http://mcp_data:8000/mcp"
+    assert configured.url == url

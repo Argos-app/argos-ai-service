@@ -415,7 +415,6 @@ class SessionApplicationService:
                                     question_id=str(body.question_id),
                                     session_id=str(session_id),
                                     interaction_id=str(interaction_id),
-                                    checkpoint_namespace=str(body.interaction_id),
                                     session_context=session_context,
                                     recipient_selectors=recipient_selectors,
                                     send_intent_requested=send_intent_requested,
@@ -743,7 +742,6 @@ class SessionApplicationService:
                 {
                     "configurable": {
                         "thread_id": str(session.session_id),
-                        "checkpoint_ns": f"interaction-{body.interaction_id}",
                     }
                 }
             )

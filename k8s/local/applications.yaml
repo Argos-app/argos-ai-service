@@ -10,6 +10,7 @@ kind: Deployment
 metadata: { name: main-api }
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector: { matchLabels: { app: main-api } }
     template:
         metadata: { labels: { app: main-api } }
@@ -129,13 +130,15 @@ spec:
                       httpGet: { path: /health/live, port: http }
                       periodSeconds: 5
                       failureThreshold: 30
+                      timeoutSeconds: 10
                   livenessProbe:
                       httpGet: { path: /health/live, port: http }
                       periodSeconds: 10
+                      timeoutSeconds: 10
                   readinessProbe:
                       exec: { command: [python, /opt/argos/health-probe/health_probe.py, main-api] }
                       periodSeconds: 5
-                      timeoutSeconds: 5
+                      timeoutSeconds: 15
                   resources:
                       requests: { cpu: 100m, memory: 256Mi }
                       limits: { cpu: 1, memory: 1Gi }
@@ -164,6 +167,7 @@ kind: Deployment
 metadata: { name: mcp-data }
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector: { matchLabels: { app: mcp-data } }
     template:
         metadata: { labels: { app: mcp-data } }
@@ -268,13 +272,15 @@ spec:
                       tcpSocket: { port: http }
                       periodSeconds: 5
                       failureThreshold: 30
+                      timeoutSeconds: 10
                   livenessProbe:
                       tcpSocket: { port: http }
                       periodSeconds: 10
+                      timeoutSeconds: 10
                   readinessProbe:
                       exec: { command: [python, /opt/argos/health-probe/health_probe.py, mcp-data] }
                       periodSeconds: 5
-                      timeoutSeconds: 5
+                      timeoutSeconds: 15
                   resources:
                       requests: { cpu: 100m, memory: 128Mi }
                       limits: { cpu: 500m, memory: 512Mi }
@@ -303,6 +309,7 @@ kind: Deployment
 metadata: { name: mcp-prediction }
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector: { matchLabels: { app: mcp-prediction } }
     template:
         metadata: { labels: { app: mcp-prediction } }
@@ -377,9 +384,11 @@ spec:
                       tcpSocket: { port: http }
                       periodSeconds: 5
                       failureThreshold: 30
+                      timeoutSeconds: 10
                   livenessProbe:
                       tcpSocket: { port: http }
                       periodSeconds: 10
+                      timeoutSeconds: 10
                   readinessProbe:
                       exec:
                           {
@@ -387,7 +396,7 @@ spec:
                                   [python, /opt/argos/health-probe/health_probe.py, mcp-prediction],
                           }
                       periodSeconds: 5
-                      timeoutSeconds: 5
+                      timeoutSeconds: 15
                   resources:
                       requests: { cpu: 100m, memory: 128Mi }
                       limits: { cpu: 500m, memory: 512Mi }
@@ -416,6 +425,7 @@ kind: Deployment
 metadata: { name: mcp-email }
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector: { matchLabels: { app: mcp-email } }
     template:
         metadata: { labels: { app: mcp-email } }
@@ -492,14 +502,16 @@ spec:
                       tcpSocket: { port: http }
                       periodSeconds: 5
                       failureThreshold: 30
+                      timeoutSeconds: 10
                   livenessProbe:
                       tcpSocket: { port: http }
                       periodSeconds: 10
+                      timeoutSeconds: 10
                   readinessProbe:
                       exec:
                           { command: [python, /opt/argos/health-probe/health_probe.py, mcp-email] }
                       periodSeconds: 5
-                      timeoutSeconds: 5
+                      timeoutSeconds: 15
                   resources:
                       requests: { cpu: 100m, memory: 128Mi }
                       limits: { cpu: 500m, memory: 512Mi }
@@ -528,12 +540,32 @@ kind: Deployment
 metadata: { name: a2a-agent }
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector: { matchLabels: { app: a2a-agent } }
     template:
         metadata: { labels: { app: a2a-agent } }
         spec:
             securityContext:
                 { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001 }
+            initContainers:
+                - name: fix-a2a-state-volume-permissions
+                  image: argos-a2a-agent:local
+                  imagePullPolicy: IfNotPresent
+                  command:
+                      - python
+                      - -c
+                      - "import os; os.chown('/state', 10001, 10001); os.chmod('/state', 0o750)"
+                  securityContext:
+                      {
+                          runAsNonRoot: false,
+                          runAsUser: 0,
+                          runAsGroup: 0,
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL], add: [CHOWN, FOWNER] },
+                      }
+                  volumeMounts:
+                      - { name: state, mountPath: /state }
             containers:
                 - name: app
                   image: argos-a2a-agent:local
@@ -621,14 +653,16 @@ spec:
                       httpGet: { path: /health/live, port: http }
                       periodSeconds: 5
                       failureThreshold: 30
+                      timeoutSeconds: 10
                   livenessProbe:
                       httpGet: { path: /health/live, port: http }
                       periodSeconds: 10
+                      timeoutSeconds: 10
                   readinessProbe:
                       exec:
                           { command: [python, /opt/argos/health-probe/health_probe.py, a2a-agent] }
                       periodSeconds: 5
-                      timeoutSeconds: 5
+                      timeoutSeconds: 15
                   resources:
                       requests: { cpu: 100m, memory: 256Mi }
                       limits: { cpu: 1, memory: 1Gi }

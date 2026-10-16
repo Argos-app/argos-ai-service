@@ -141,3 +141,22 @@ def test_document_a2a_configuration_requires_endpoint_token_and_delegation_key()
         assert "delegação A2A exige" in str(exc)
     else:
         raise AssertionError("configuração A2A sem chave de delegação deveria ser rejeitada")
+
+
+def test_local_document_a2a_configuration_accepts_kubernetes_service_dns() -> None:
+    private_key = Ed25519PrivateKey.generate()
+    private_der = private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+    settings = Settings(
+        app_env="local",
+        mcp_delegation_key_id="main-key",
+        mcp_delegation_private_key=base64.b64encode(private_der).decode("ascii"),
+        document_a2a_url="http://a2a-agent:8000/a2a",
+        document_a2a_service_token="service-secret",
+    )
+
+    assert settings.document_a2a_url == "http://a2a-agent:8000/a2a"

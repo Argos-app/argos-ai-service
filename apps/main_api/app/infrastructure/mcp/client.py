@@ -74,7 +74,7 @@ def _validate_endpoint(
     url: str,
     service_name: str,
     *,
-    allow_compose_http: bool = False,
+    allow_local_http: bool = False,
 ) -> None:
     try:
         parsed = urlsplit(url)
@@ -102,9 +102,13 @@ def _validate_endpoint(
             )
         except ValueError:
             is_loopback = False
-        compose_hosts = {"data": "mcp_data", "prediction": "mcp_prediction", "email": "mcp_email"}
+        local_service_hosts = {
+            "data": {"mcp_data", "mcp-data"},
+            "prediction": {"mcp_prediction", "mcp-prediction"},
+            "email": {"mcp_email", "mcp-email"},
+        }
         if not is_loopback and not (
-            allow_compose_http and hostname.casefold() == compose_hosts[service_name]
+            allow_local_http and hostname.casefold() in local_service_hosts[service_name]
         ):
             raise McpClientConfigurationError(
                 f"o MCP {service_name} deve usar HTTPS fora do loopback"
@@ -123,7 +127,7 @@ class McpToolServerClient:
     allowed_tools: frozenset[str]
     timeout_seconds: float = 10.0
     response_max_bytes: int = 1_000_000
-    allow_compose_http: bool = field(default=False, repr=False, compare=False)
+    allow_local_http: bool = field(default=False, repr=False, compare=False)
     observation_collector: ObservationCollector | None = field(
         default=None, repr=False, compare=False
     )
@@ -134,7 +138,7 @@ class McpToolServerClient:
         _validate_endpoint(
             self.url,
             self.service_name,
-            allow_compose_http=self.allow_compose_http,
+            allow_local_http=self.allow_local_http,
         )
         if not self.service_token.strip():
             raise McpClientConfigurationError(f"token do MCP {self.service_name} está vazio")
@@ -281,8 +285,7 @@ class McpToolServerClient:
                 propagated_headers = dict(request_headers or {})
                 correlation_id = current_correlation_id()
                 if correlation_id is not None and not any(
-                    name.casefold() == "x-argos-correlation-id"
-                    for name in propagated_headers
+                    name.casefold() == "x-argos-correlation-id" for name in propagated_headers
                 ):
                     propagated_headers["X-Argos-Correlation-ID"] = str(correlation_id)
                 async with self._session(propagated_headers) as session:
@@ -375,6 +378,6 @@ def create_mcp_clients(settings: Settings) -> McpClients:
             allowed_tools=MCP_TOOL_ALLOWLISTS[service_name],
             timeout_seconds=settings.mcp_timeout_seconds,
             response_max_bytes=settings.mcp_response_max_bytes,
-            allow_compose_http=settings.app_env == "local",
+            allow_local_http=settings.app_env == "local",
         )
     return McpClients(**clients)

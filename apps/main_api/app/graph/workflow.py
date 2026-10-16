@@ -1078,7 +1078,6 @@ async def executar_fluxo(
         config=build_session_config(
             session_id,
             config,
-            checkpoint_namespace=f"interaction-{interaction_id}" if interaction_id else None,
         ),
     )
 
@@ -1094,7 +1093,6 @@ async def executar_resposta(
     recipient_selectors: dict[str, dict[str, str]] | None = None,
     send_intent_requested: bool = False,
     send_intent_source_interaction_id: str | None = None,
-    checkpoint_namespace: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
     state = answer_state(
@@ -1111,9 +1109,6 @@ async def executar_resposta(
         config=build_session_config(
             session_id,
             config,
-            checkpoint_namespace=(
-                f"interaction-{checkpoint_namespace}" if checkpoint_namespace else None
-            ),
         ),
     )
 
@@ -1121,13 +1116,12 @@ async def executar_resposta(
 def build_session_config(
     session_id: str,
     config: RunnableConfig | None,
-    *,
-    checkpoint_namespace: str | None = None,
 ) -> RunnableConfig:
     merged_config: RunnableConfig = dict(config or {})
     configurable = dict(merged_config.get("configurable") or {})
     configurable["thread_id"] = session_id
-    if checkpoint_namespace is not None:
-        configurable["checkpoint_ns"] = checkpoint_namespace
+    # LangGraph uses the empty namespace for the root graph. A custom namespace
+    # here makes state writes invisible to aget_state(thread_id) in MongoSaver.
+    configurable.pop("checkpoint_ns", None)
     merged_config["configurable"] = configurable
     return merged_config

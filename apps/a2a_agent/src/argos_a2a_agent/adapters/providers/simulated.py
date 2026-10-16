@@ -62,7 +62,10 @@ class SimulatedAnswerGenerator:
                 limitations=("O modo simulado não encontrou evidências para citar.",),
             )
         return GeneratedDocumentAnswer(
-            answer="Resposta gerada em modo simulado com base nos trechos recuperados.",
+            answer=(
+                "Resposta gerada em modo simulado com base nos trechos recuperados. "
+                + " ".join(f"[[{evidence_id}]]" for evidence_id in cited_ids)
+            ),
             status=DocumentAnswerStatus.SUCCESS,
             cited_evidence_ids=cited_ids,
             limitations=("Texto ilustrativo; não representa análise de um modelo de linguagem.",),

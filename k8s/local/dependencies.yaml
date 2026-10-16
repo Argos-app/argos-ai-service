@@ -28,16 +28,18 @@ spec:
                 - name: mongo
                   image: mongo:7.0
                   imagePullPolicy: IfNotPresent
-                  command: [mongod, --replSet, rs0, --bind_ip_all]
+                  command: [mongod, --replSet, rs0, --bind_ip_all, --wiredTigerCacheSizeGB, "0.25"]
                   ports: [{ name: mongo, containerPort: 27017 }]
                   startupProbe:
-                      exec: { command: [mongosh, --quiet, --eval, 'db.adminCommand("ping").ok'] }
+                      tcpSocket: { port: mongo }
                       periodSeconds: 5
-                      failureThreshold: 30
+                      failureThreshold: 60
+                      timeoutSeconds: 3
                   livenessProbe:
-                      exec: { command: [mongosh, --quiet, --eval, 'db.adminCommand("ping").ok'] }
+                      tcpSocket: { port: mongo }
                       periodSeconds: 10
-                      timeoutSeconds: 5
+                      failureThreshold: 6
+                      timeoutSeconds: 3
                   readinessProbe:
                       exec:
                           command:
@@ -45,11 +47,11 @@ spec:
                               - --quiet
                               - --eval
                               - 'try { rs.status().ok } catch (_) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}).ok }'
-                      periodSeconds: 5
-                      timeoutSeconds: 5
+                      periodSeconds: 15
+                      timeoutSeconds: 15
                   resources:
                       requests: { cpu: 100m, memory: 256Mi }
-                      limits: { cpu: 1, memory: 1Gi }
+                      limits: { cpu: 1, memory: 2Gi }
                   volumeMounts:
                       - { name: data, mountPath: /data/db }
             volumes:
@@ -70,6 +72,7 @@ metadata:
     name: redis
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector:
         matchLabels: { app: redis }
     template:
@@ -86,6 +89,7 @@ spec:
                       exec: { command: [redis-cli, ping] }
                       periodSeconds: 5
                       failureThreshold: 20
+                      timeoutSeconds: 10
                   livenessProbe:
                       <<: *redisProbe
                       periodSeconds: 10
@@ -110,6 +114,7 @@ metadata:
     name: qdrant
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector:
         matchLabels: { app: qdrant }
     template:
@@ -159,6 +164,7 @@ metadata:
     name: mailpit
 spec:
     replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
     selector:
         matchLabels: { app: mailpit }
     template:
@@ -176,6 +182,7 @@ spec:
                       exec: { command: [/mailpit, readyz] }
                       periodSeconds: 5
                       failureThreshold: 20
+                      timeoutSeconds: 10
                   livenessProbe:
                       <<: *mailpitProbe
                       periodSeconds: 10

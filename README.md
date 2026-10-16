@@ -13,11 +13,15 @@ preferências limitadas do usuário. A API valida identidade JWT EdDSA do backen
 e vincula ferramentas LangChain aos MCPs configurados, com delegação por
 usuário, propriedade, agente e operação. O backend ainda não inclui `farm_ids`,
 então a criação de sessão permanece bloqueada até delegar o escopo autorizado. O
-runtime principal cria modelos rápido e especialista a partir das configurações
-`MAIN_API_MODEL_*`, usando um provider compatível com a API OpenAI. A chave é
-independente dos nomes dos modelos e fica fora do repositório. Sem runtime
-válido, `/health/ready` retorna indisponível. Os testes injetam modelos
-simulados explicitamente por `create_app(models=...)`.
+runtime principal configura um modelo por agente (`MAIN_API_MODEL_ROUTER`,
+`MAIN_API_MODEL_FARM`, `MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`,
+`MAIN_API_MODEL_SECRETARY`, `MAIN_API_MODEL_INFORMATION`,
+`MAIN_API_MODEL_ORCHESTRATOR`, `MAIN_API_MODEL_JUDGE` e
+`MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são compartilhadas entre os
+agentes; cada variável pode apontar para o mesmo modelo ou para um modelo
+diferente. A sumarização de sessão e a extração de memória reutilizam o modelo
+do Router. Sem runtime válido, `/health/ready` retorna indisponível. Os testes
+injetam modelos simulados explicitamente por `create_app(models=...)`.
 
 ## Agentes
 
@@ -133,10 +137,19 @@ O serviço precisa de Mongo em replica set para transações e checkpointer. Os
 serviços com persistência própria compartilham o banco `argos_ai` e separam os
 dados por collections. A configuração por sistema, variáveis, URIs para host e
 Compose, precedência e migração das collections antigas de e-mail estão em
-[`docs/configuracao-mongodb.md`](docs/configuracao-mongodb.md); exemplos:
+[`docs/configuracao-mongodb.md`](docs/configuracao-mongodb.md). O Compose local
+usa um único `.env` gerado por `scripts/docker/create-local-env.py`; os
+`.env.example` de cada aplicação serve para execução individual. Crie o arquivo
+local de um serviço copiando o exemplo correspondente, por exemplo
+`Copy-Item apps/main_api/.env.example apps/main_api/.env`; esses `.env` locais
+são ignorados pelo Git. O Compose individual do A2A carrega seu arquivo. Nas
+execuções diretas dos outros serviços, exporte as variáveis para o processo,
+pois o Python não lê `.env` automaticamente:
 [`apps/main_api/.env.example`](apps/main_api/.env.example),
 [`apps/mcp_data/.env.example`](apps/mcp_data/.env.example) e
-[`apps/mcp_email/.env.example`](apps/mcp_email/.env.example). Em execução local
+[`apps/mcp_email/.env.example`](apps/mcp_email/.env.example),
+[`apps/mcp_prediction/.env.example`](apps/mcp_prediction/.env.example) e
+[`apps/a2a_agent/.env.example`](apps/a2a_agent/.env.example). Em execução local
 no host contra o Compose de testes, o URI usa `directConnection=true` porque o
 replica set anuncia um nome de host interno. O stub de identidade continua
 disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
@@ -312,5 +325,7 @@ nova validação de acesso; falhas não são apresentadas como dados ou operaç�
 bem-sucedidas. Ao atingir um limite, o controle determinístico encerra a
 execução com conteúdo já validado ou uma mensagem segura.
 
-Para subir a integração em um cluster Kind local, consulte
-[docs/kubernetes-local.md](docs/kubernetes-local.md).
+Para subir a integração em um cluster Kubernetes local, consulte
+[docs/kubernetes-local.md](docs/kubernetes-local.md). O estado e os resultados
+de homologação integrada estão em
+[docs/resultado-homologacao-local.md](docs/resultado-homologacao-local.md).

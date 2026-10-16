@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 from uuid import uuid4
 
+from app.privacy import minimize_sensitive_memory_input, protect_user_input
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -35,20 +36,26 @@ class SimulatedChatModel(BaseChatModel):
         names = [_tool_name(tool) for tool in tools]
         structured = next((name for name in names if name in _STRUCTURED_NAMES), None)
         business_tools = [name for name in names if name and name not in _STRUCTURED_NAMES]
-        tool_result_seen = any(isinstance(message, ToolMessage) for message in messages)
-        if structured == "SpecialistResult" and business_tools and not tool_result_seen:
+        if structured == "SpecialistResult" and business_tools:
             specialist_input = _specialist_input(messages)
-            tool_name = _select_tool(business_tools, specialist_input)
-            message = AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": tool_name,
-                        "args": _tool_arguments(tool_name, specialist_input),
-                        "id": str(uuid4()),
-                    }
-                ],
-            )
+            tool_name = _next_tool(business_tools, specialist_input, messages)
+            if tool_name is not None:
+                message = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": tool_name,
+                            "args": _tool_arguments(tool_name, specialist_input),
+                            "id": str(uuid4()),
+                        }
+                    ],
+                )
+            else:
+                call_name, args = self._structured_call(structured, messages)
+                message = AIMessage(
+                    content="",
+                    tool_calls=[{"name": call_name, "args": args, "id": str(uuid4())}],
+                )
         elif structured:
             call_name, args = self._structured_call(structured, messages)
             message = AIMessage(
@@ -73,9 +80,9 @@ class SimulatedChatModel(BaseChatModel):
             request = _last_human_text(messages)
             normalized_request = request.casefold()
             lot_code = _extract_lot_code(request)
+            explicit_send = protect_user_input(request).send_intent_requested
             is_report_request = any(
-                term in normalized_request
-                for term in ("relatório", "relatorio", "envie", "enviar")
+                term in normalized_request for term in ("relatório", "relatorio", "envie", "enviar")
             ) and any(term in normalized_request for term in ("relatório", "relatorio"))
             if is_report_request and lot_code:
                 return name, {
@@ -94,7 +101,12 @@ class SimulatedChatModel(BaseChatModel):
                             "task_id": "simulated_secretary_report",
                             "agent": "secretary",
                             "goal": (
-                                "Preparar o relatório solicitado a partir da origem autorizada."
+                                "Preparar e enviar o relatório solicitado a partir da origem "
+                                "autorizada; o pedido original autorizou explicitamente o envio."
+                                if explicit_send
+                                else (
+                                    "Preparar o relatório solicitado a partir da origem autorizada."
+                                )
                             ),
                             "brief_sanitized": (
                                 "Preparar o relatório usando a referência retornada por Fazenda."
@@ -110,13 +122,10 @@ class SimulatedChatModel(BaseChatModel):
                     "missing_slots": ["código do lote"],
                 }
             agent = "farm"
-            if any(
-                term in normalized_request for term in ("consumo", "previsão", "previsao")
-            ):
+            if any(term in normalized_request for term in ("consumo", "previsão", "previsao")):
                 agent = "analyst"
             elif any(
-                term in normalized_request
-                for term in ("medicamento", "remédio", "remedio", "bula")
+                term in normalized_request for term in ("medicamento", "remédio", "remedio", "bula")
             ):
                 agent = "doctor"
             elif any(
@@ -138,30 +147,35 @@ class SimulatedChatModel(BaseChatModel):
             }
         if name == "SpecialistResult":
             agent = "farm"
-            tool_result_seen = False
+            tool_result: ToolMessage | None = None
             tool_failed = False
             for message in reversed(messages):
                 if isinstance(message, ToolMessage):
-                    tool_result_seen = True
+                    tool_result = message
                     agent = _agent_for_tool(getattr(message, "name", ""))
                     tool_failed = getattr(message, "status", "success") == "error"
                     break
+            answer = ""
+            if tool_failed:
+                answer = "A consulta falhou; não há resultado verificável para responder."
+            elif tool_result is not None:
+                tool_name = str(tool_result.name or "ferramenta")
+                result = minimize_sensitive_memory_input(str(tool_result.content)).strip()
+                if len(result) > 2_000:
+                    result = result[:2_000] + "… [resultado truncado]"
+                answer = f"Resultado retornado por {tool_name}: {result}"
+            else:
+                answer = "Nenhuma consulta foi executada."
             return name, {
                 "agent": agent,
                 "status": (
                     "error"
                     if tool_failed
                     else "success"
-                    if tool_result_seen
+                    if tool_result is not None
                     else "unavailable"
                 ),
-                "answer": (
-                    "A consulta falhou; não há resultado verificável para responder."
-                    if tool_failed
-                    else "Consulta local concluída usando o resultado da ferramenta."
-                    if tool_result_seen
-                    else "Nenhuma consulta foi executada."
-                ),
+                "answer": answer,
                 "sources": [],
             }
         if name == "OrchestratorResult":
@@ -172,11 +186,22 @@ class SimulatedChatModel(BaseChatModel):
                 and outcome["result"].get("status") not in {"success", "partial"}
                 for outcome in outcomes
             )
+            answers = [
+                result["answer"].strip()
+                for outcome in outcomes
+                if isinstance(outcome, dict)
+                and isinstance((result := outcome.get("result")), dict)
+                and result.get("status") in {"success", "partial"}
+                and isinstance(result.get("answer"), str)
+                and result["answer"].strip()
+            ]
             return name, {
                 "draft_answer": (
                     "Não tenho informação suficiente para responder com segurança agora."
                     if failed_outcome
-                    else "Consulta local simulada concluída com os resultados disponíveis."
+                    else "\n\n".join(answers)[:6_000]
+                    if answers
+                    else "Nenhuma ferramenta retornou resultado verificável."
                 ),
                 "sources": [],
             }
@@ -240,7 +265,7 @@ def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -
     if name == "estimate_medicine_consumption":
         return {
             "payload": {
-                "as_of": (datetime.now(UTC).date() - timedelta(days=1)).isoformat(),
+                "as_of": (date.today() - timedelta(days=1)).isoformat(),
                 "horizon_days": 7,
             }
         }
@@ -269,6 +294,28 @@ def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str:
     if "prepare_report" in names:
         return "prepare_report"
     return names[0]
+
+
+def _next_tool(
+    names: list[str], specialist_input: dict[str, Any], messages: list[BaseMessage]
+) -> str | None:
+    prior_tool_result = next(
+        (message for message in reversed(messages) if isinstance(message, ToolMessage)),
+        None,
+    )
+    if prior_tool_result is None:
+        return _select_tool(names, specialist_input)
+    if prior_tool_result.name != "prepare_report" or "send_report" not in names:
+        return None
+    if "autorizou explicitamente o envio" not in str(specialist_input.get("goal") or ""):
+        return None
+    try:
+        preparation = json.loads(str(prior_tool_result.content))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(preparation, dict) and preparation.get("status") == "prepared":
+        return "send_report"
+    return None
 
 
 def _specialist_input(messages: list[BaseMessage]) -> dict[str, Any]:
