@@ -19,6 +19,26 @@ def test_protect_user_input_keeps_explicit_recipient_as_unique_reference():
     assert protected.send_intent_requested is True
 
 
+def test_protect_user_input_extracts_comma_separated_email_recipient_list():
+    emails = (
+        "luis.medeiros@institutojef.org.br",
+        "leticia.camargo@institutojef.org.br",
+        "beatriz.inacio@institutojef.org.br",
+        "enzo.alves@institutojef.org.br",
+        "vinicius.doliveira@institutojef.org.br",
+    )
+    protected = protect_user_input(
+        "Prepare e envie o relatório. Envie exclusivamente para estes cinco "
+        "destinatários cadastrados: " + ", ".join(emails) + ". Resolva-os pelo cadastro."
+    )
+
+    assert len(protected.recipient_selectors) == len(emails)
+    assert {item["value"] for item in protected.recipient_selectors.values()} == set(emails)
+    assert all(email not in protected.sanitized_text for email in emails)
+    assert "[EMAIL]" not in protected.sanitized_text
+    assert protected.send_intent_requested is True
+
+
 def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name():
     protected = protect_user_input(
         'Prepare, mas não envie para "Ana Silva"; CPF 123.456.789-00, '
@@ -36,7 +56,56 @@ def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name()
     assert protected.recipient_selectors == {
         "[DESTINATARIO_1]": {"kind": "name", "value": "Ana Silva"}
     }
-    assert protected.send_intent_requested is False
+
+
+def test_business_product_name_after_para_is_not_treated_as_email_recipient():
+    text = "Consulte a ficha do medicamento para Ivervet Teste e informe a carência."
+
+    protected = protect_user_input(text)
+
+    assert protected.sanitized_text == text
+    assert protected.recipient_selectors == {}
+
+
+def test_all_names_in_an_email_recipient_list_are_protected():
+    protected = protect_user_input(
+        "Envie o relatório para Luis Medeiros, para Leticia Camargo, "
+        "para Beatriz Inacio, para Enzo Alves e para Vinicius D'Oliveira"
+    )
+
+    assert "Luis Medeiros" not in protected.sanitized_text
+    assert "Leticia Camargo" not in protected.sanitized_text
+    assert "Beatriz Inacio" not in protected.sanitized_text
+    assert "Enzo Alves" not in protected.sanitized_text
+    assert "Vinicius D'Oliveira" not in protected.sanitized_text
+    assert len(protected.recipient_selectors) == 5
+    assert protected.send_intent_requested is True
+
+
+def test_comma_separated_email_recipients_are_all_protected():
+    protected = protect_user_input(
+        "Envie o relatório por e-mail para Luis Medeiros, Leticia Camargo, "
+        "Beatriz Inacio, Enzo Alves e Vinicius D'Oliveira. Peça minha confirmação."
+    )
+
+    assert all(
+        name not in protected.sanitized_text
+        for name in (
+            "Luis Medeiros",
+            "Leticia Camargo",
+            "Beatriz Inacio",
+            "Enzo Alves",
+            "Vinicius D'Oliveira",
+        )
+    )
+    assert [selector["value"] for selector in protected.recipient_selectors.values()] == [
+        "Luis Medeiros",
+        "Leticia Camargo",
+        "Beatriz Inacio",
+        "Enzo Alves",
+        "Vinicius D'Oliveira",
+    ]
+    assert protected.send_intent_requested is True
 
 
 def test_minimize_pii_redacts_cnpj_and_brazilian_phone():
@@ -45,6 +114,15 @@ def test_minimize_pii_redacts_cnpj_and_brazilian_phone():
     assert "12.345.678/0001-90" not in sanitized
     assert "(11) 98765-4321" not in sanitized
     assert "[CNPJ]" in sanitized
+    assert "[TELEFONE]" in sanitized
+
+
+def test_minimize_pii_preserves_uuid_identifiers_while_redacting_phone():
+    identifier = "c59bfd69-e647-b7dc-2b44-3c0f2f930b21"
+    sanitized = minimize_pii(f"medicine_id={identifier}, contato (11) 98765-4321")
+
+    assert identifier in sanitized
+    assert "(11) 98765-4321" not in sanitized
     assert "[TELEFONE]" in sanitized
 
 

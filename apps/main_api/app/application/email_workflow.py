@@ -207,7 +207,7 @@ class EmailWorkflow:
             )
             try:
                 payload = json.loads(result)
-            except TypeError, json.JSONDecodeError:
+            except (TypeError, json.JSONDecodeError):
                 payload = None
             code = payload.get("status") if isinstance(payload, dict) else None
             if not isinstance(code, str) or len(code) > 120:
@@ -324,6 +324,8 @@ class EmailWorkflow:
         prepared = PreparedReport.model_validate(_payload(response))
         if prepared.requested_by != principal_user_id:
             raise ValueError("MCP retornou preparação de outro solicitante")
+        if prepared.expires_at > envelope.valid_until:
+            prepared = prepared.model_copy(update={"expires_at": envelope.valid_until})
         record = EmailPreparation(
             reference=uuid4(),
             principal_user_id=principal_user_id,

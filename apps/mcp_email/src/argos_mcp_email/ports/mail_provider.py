@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from argos_mcp_email.domain import ReportAttachmentRecord
 from packages.contracts import RecipientRef
 
 
@@ -23,5 +24,6 @@ class MailProvider(Protocol):
         recipients: tuple[RecipientRef, ...],
         subject: str,
         body: str,
+        attachments: tuple[ReportAttachmentRecord, ...] = (),
     ) -> ProviderSendResult:
         """Solicita o envio e diferencia falha de aceite desconhecido."""

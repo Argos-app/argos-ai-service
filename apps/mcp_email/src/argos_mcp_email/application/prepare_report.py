@@ -2,9 +2,14 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from uuid import UUID, uuid4
 
-from argos_mcp_email.domain import PreparedReportRecord, ResolvedRecipient
+from argos_mcp_email.domain import (
+    PreparedReportRecord,
+    ReportAttachmentRecord,
+    ResolvedRecipient,
+)
 from argos_mcp_email.ports.recipient_directory import RecipientDirectory
 from argos_mcp_email.ports.report_renderer import ReportRenderer
 from argos_mcp_email.ports.report_repository import ReportRepository
@@ -14,6 +19,7 @@ from packages.contracts import (
     PreparedReportStatus,
     PrepareReportRequest,
     RecipientResolutionStatus,
+    ReportAttachment,
 )
 
 
@@ -71,6 +77,13 @@ class PrepareReport:
             recipients=recipients,
             title=request.report_title,
         )
+        attachment_content = rendered.body.encode("utf-8")
+        attachment = ReportAttachmentRecord(
+            filename=f"relatorio-{report_id}.txt",
+            content_type="text/plain",
+            content=attachment_content,
+            sha256=sha256(attachment_content).hexdigest(),
+        )
         record = PreparedReportRecord(
             report_id=report_id,
             requested_by=request.requested_by,
@@ -87,6 +100,7 @@ class PrepareReport:
             source_payload_hash=source.payload_hash,
             created_at=now,
             expires_at=expires_at,
+            attachments=(attachment,),
         )
         await self._report_repository.save(record)
 
@@ -97,6 +111,14 @@ class PrepareReport:
             recipients=recipients,
             subject=record.subject,
             body=record.body,
+            attachments=(
+                ReportAttachment(
+                    filename=attachment.filename,
+                    content_type=attachment.content_type,
+                    sha256=attachment.sha256,
+                    size_bytes=len(attachment.content),
+                ),
+            ),
             created_at=record.created_at,
             expires_at=record.expires_at,
         )

@@ -1,5 +1,6 @@
 """Persistência MongoDB de relatórios preparados."""
 
+import base64
 from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -7,6 +8,7 @@ from uuid import UUID
 from argos_mcp_email.domain import (
     PreparedReportRecord,
     ReportAlreadyExistsError,
+    ReportAttachmentRecord,
     ReportState,
     ResolvedRecipient,
 )
@@ -52,6 +54,15 @@ class MongoReportRepository:
             ],
             "subject": report.subject,
             "body": report.body,
+            "attachments": [
+                {
+                    "filename": attachment.filename,
+                    "content_type": attachment.content_type,
+                    "content_base64": base64.b64encode(attachment.content).decode("ascii"),
+                    "sha256": attachment.sha256,
+                }
+                for attachment in report.attachments
+            ],
             "source_payload_hash": report.source_payload_hash,
             "created_at": report.created_at,
             "expires_at": report.expires_at,
@@ -73,6 +84,15 @@ class MongoReportRepository:
             ),
             subject=document["subject"],
             body=document["body"],
+            attachments=tuple(
+                ReportAttachmentRecord(
+                    filename=attachment["filename"],
+                    content_type=attachment["content_type"],
+                    content=base64.b64decode(attachment["content_base64"], validate=True),
+                    sha256=attachment["sha256"],
+                )
+                for attachment in document.get("attachments", ())
+            ),
             source_payload_hash=document["source_payload_hash"],
             created_at=_as_datetime(document["created_at"]),
             expires_at=_as_datetime(document["expires_at"]),

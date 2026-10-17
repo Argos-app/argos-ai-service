@@ -260,6 +260,22 @@ class MongoEmailPreparationRepository:
         )
         return _preparation(document) if document is not None else None
 
+    async def list_prepared_for_session(
+        self, *, principal_user_id: UUID, session_id: UUID, limit: int = 20
+    ) -> tuple[EmailPreparation, ...]:
+        cursor = self._collection.find(
+            {
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+                "prepared_report.status": "prepared",
+            }
+        )
+        if hasattr(cursor, "sort"):
+            cursor = cursor.sort("created_at", -1)
+        if hasattr(cursor, "limit"):
+            cursor = cursor.limit(max(1, min(limit, 100)))
+        return tuple([_preparation(document) async for document in cursor])
+
     async def save(self, preparation: EmailPreparation) -> None:
         await self._collection.replace_one(
             {

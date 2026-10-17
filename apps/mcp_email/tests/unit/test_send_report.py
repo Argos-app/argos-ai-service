@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,7 @@ from argos_mcp_email.domain import (
     DispatchRecord,
     DispatchState,
     PreparedReportRecord,
+    ReportAttachmentRecord,
     ReportNotFoundError,
     ResolvedRecipient,
 )
@@ -144,6 +146,30 @@ async def test_sends_prepared_report_and_persists_accepted_state():
 
     assert result.status == DispatchStatus.ACCEPTED
     assert provider.calls[0]["sender"] == "no-reply@argos.local"
+
+
+@pytest.mark.asyncio
+async def test_sends_the_persisted_report_attachment_to_the_provider():
+    content = b"Relatorio sintetico de homologacao"
+    attachment = ReportAttachmentRecord(
+        filename="relatorio.txt",
+        content_type="text/plain",
+        content=content,
+        sha256=sha256(content).hexdigest(),
+    )
+    report = replace(prepared_report(), attachments=(attachment,))
+    dispatch = FakeDispatchRepository()
+    provider = FakeProvider(ProviderSendResult(accepted=True))
+
+    await use_case(report, dispatch, provider).execute(
+        SendReportRequest(
+            report_id=report.report_id,
+            requested_by=REQUESTER,
+            idempotency_key="send-with-attachment",
+        )
+    )
+
+    assert provider.calls[0]["attachments"] == (attachment,)
 
 
 @pytest.mark.asyncio
