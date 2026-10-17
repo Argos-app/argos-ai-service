@@ -106,7 +106,7 @@ jobs:
               shell: bash
               run: |
                   mkdir -p reports
-                  mapfile -t test_files < <(find apps tests -type f \( -path '*/tests/unit/test_*.py' -o -path '*/tests/unit/*_test.py' -o -path 'tests/unit/test_*.py' -o -path 'tests/unit/*_test.py' \) 2>/dev/null || true)
+                  mapfile -t test_files < <(find apps packages tests -type f \( -path '*/tests/unit/test_*.py' -o -path '*/tests/unit/*_test.py' -o -path 'packages/*/tests/test_*.py' -o -path 'packages/*/tests/*_test.py' -o -path 'tests/unit/test_*.py' -o -path 'tests/unit/*_test.py' \) 2>/dev/null || true)
                   if [ "${#test_files[@]}" -eq 0 ]; then
                     echo "No Python tests found yet; skipping pytest."
                     exit 0
