@@ -18,7 +18,7 @@ from app.application.contracts.interactions import (
 )
 from app.application.errors import ApplicationError, ApplicationErrorCode
 from app.application.identity import ActorContext
-from app.application.session_service import SessionApplicationService
+from app.application.session_service import SessionApplicationService, _response_from_state
 from app.domain.email_preparations import PendingRecipientOption, PendingRecipientResolution
 from app.domain.memory import (
     MemoryFieldAction,
@@ -36,10 +36,36 @@ from app.domain.sessions import (
 )
 
 from packages.contracts import RecipientSelector
+from packages.observability import correlation_key
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def test_response_marks_tool_or_agent_failures_as_degraded():
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={"final_answer": "A consulta falhou.", "errors": ["farm_failed"]},
+        now=_utcnow(),
+    )
+
+    assert outcome.status == "degraded"
+    assert outcome.degradation_reasons == ("farm_failed",)
+
+
+def test_response_marks_successful_graph_results_as_completed():
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={"final_answer": "Consulta concluída.", "errors": []},
+        now=_utcnow(),
+    )
+
+    assert outcome.status == "completed"
 
 
 class FakeSessionRepository:
@@ -332,6 +358,57 @@ async def test_message_is_sanitized_and_replay_counts_once():
     assert len(conversations.messages) == 2
     assert conversations.messages[0].sanitized_content.endswith("[EMAIL]")
     assert all(message.sequence == index for index, message in enumerate(conversations.messages, 1))
+
+
+@pytest.mark.asyncio
+async def test_langsmith_trace_metadata_contains_interaction_correlation_ids():
+    graph = FakeGraph()
+    callback = object()
+    service, _, _, _ = _service(graph, langsmith_callback=callback)
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte os dados da fazenda.",
+    )
+
+    outcome = await service.create_interaction(principal, session.session_id, request)
+    trace_config = graph.invocations[0][1]
+
+    assert trace_config["metadata"] == {
+        "argos_operation": "session.interaction",
+        "argos_correlation_id": str(outcome.public_request_id),
+        "argos_correlation_key": correlation_key(outcome.public_request_id),
+        "argos_session_id": str(outcome.session_id),
+        "argos_interaction_id": str(outcome.interaction_id),
+    }
+    assert trace_config["callbacks"] == [callback]
+
+
+@pytest.mark.asyncio
+async def test_degraded_result_is_persisted_as_terminal_degraded_status():
+    class DegradedGraph(FakeGraph):
+        async def ainvoke(self, state, *, config):
+            del state, config
+            return {"final_answer": "A consulta foi degradada.", "errors": ["farm_failed"]}
+
+    service, _, interactions, _ = _service(DegradedGraph())
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte os dados da fazenda.",
+    )
+
+    outcome = await service.create_interaction(principal, session.session_id, request)
+    stored = interactions.records[outcome.interaction_id]
+
+    assert outcome.status == "degraded"
+    assert outcome.degradation_reasons == ("farm_failed",)
+    assert stored.status == InteractionStatus.DEGRADED
+    assert stored.result_json is not None
 
 
 @pytest.mark.asyncio

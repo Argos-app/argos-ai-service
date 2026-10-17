@@ -71,7 +71,8 @@ async def build_session_context(
         for record in interaction_records
         if record is not None
         and record.session_id == session_id
-        and record.status in {InteractionStatus.COMPLETED, InteractionStatus.FAILED}
+        and record.status
+        in {InteractionStatus.COMPLETED, InteractionStatus.DEGRADED, InteractionStatus.FAILED}
     }
     visible = sorted(
         (

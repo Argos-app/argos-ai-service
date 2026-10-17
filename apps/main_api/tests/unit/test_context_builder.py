@@ -56,7 +56,7 @@ class FakeMemory:
 
 
 @pytest.mark.asyncio
-async def test_context_uses_summary_profile_and_only_completed_prior_messages():
+async def test_context_uses_summary_profile_and_terminal_prior_messages():
     now = datetime.now(UTC)
     user_id, session_id = uuid4(), uuid4()
     interactions = [
@@ -71,11 +71,15 @@ async def test_context_uses_summary_profile_and_only_completed_prior_messages():
             status=status,
             created_at=now,
             updated_at=now,
-            result_json="{}" if status == InteractionStatus.COMPLETED else None,
+            result_json=(
+                "{}"
+                if status in {InteractionStatus.COMPLETED, InteractionStatus.DEGRADED}
+                else None
+            ),
         )
         for index, status in enumerate(
             (
-                InteractionStatus.COMPLETED,
+                InteractionStatus.DEGRADED,
                 InteractionStatus.COMPLETED,
                 InteractionStatus.INTERRUPTED,
             ),

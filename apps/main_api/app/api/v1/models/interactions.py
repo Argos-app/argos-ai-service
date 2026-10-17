@@ -88,6 +88,8 @@ ResponseValue = Annotated[
 
 class InteractionResult(StrictModel):
     schema_version: Literal["1"] = "1"
+    status: Literal["completed", "degraded"] = "completed"
+    degradation_reasons: list[str] = Field(default_factory=list)
     session_id: UUID
     interaction_id: UUID
     public_request_id: UUID

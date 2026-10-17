@@ -32,6 +32,7 @@ from app.application.identity import ActorContext
 from app.application.operation_observation import OperationRecorder, observe_operation
 from app.application.session_summary_service import SessionSummaryService
 from app.application.user_memory_service import UserMemoryService
+from app.application.verified_evidence import verified_evidence_fallback
 from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
@@ -65,6 +66,7 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
     ResultMetadata,
+    correlation_key,
     current_correlation_id,
 )
 
@@ -390,7 +392,17 @@ class SessionApplicationService:
                     }
                     if self._langsmith_callback is not None:
                         graph_config["callbacks"] = [self._langsmith_callback]
-                        graph_config["metadata"] = {"argos_operation": "session.interaction"}
+                        graph_config["metadata"] = {
+                            "argos_operation": "session.interaction",
+                            "argos_correlation_id": str(
+                                current_correlation_id() or public_request_id
+                            ),
+                            "argos_correlation_key": correlation_key(
+                                current_correlation_id() or public_request_id
+                            ),
+                            "argos_session_id": str(session_id),
+                            "argos_interaction_id": str(interaction_id),
+                        }
                     if isinstance(body, MessageCommand):
                         with execution_limits_scope(execution_limits):
                             async with asyncio.timeout(self._execution_timeout_seconds):
@@ -428,13 +440,31 @@ class SessionApplicationService:
                 else:
                     if graph_recorder is not None:
                         graph_recorder.finish()
+            except TimeoutError as exc:
+                logger.warning(
+                    "session interaction exceeded execution timeout",
+                    extra={"error_type": type(exc).__name__},
+                )
+                evidence = execution_limits.evidence_snapshot()
+                state = {
+                    "final_answer": (
+                        verified_evidence_fallback(
+                            evidence,
+                            unavailable_stage="processamento",
+                        )
+                        or "O processamento excedeu o tempo limite antes de obter "
+                        "um resultado verificável. Tente novamente."
+                    ),
+                    "errors": ["execution_timeout"],
+                }
+                failed = True
             except Exception as exc:
                 logger.error(
                     "session interaction graph failed",
                     extra={"error_type": type(exc).__name__},
                 )
                 failed = True
-                state = {"final_answer": SAFE_ANSWER}
+                state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
 
             if lease_lost.is_set():
                 raise ApplicationError(
@@ -453,7 +483,13 @@ class SessionApplicationService:
             finished_at = _utcnow()
             completed = replace(
                 running,
-                status=InteractionStatus.FAILED if failed else InteractionStatus.COMPLETED,
+                status=(
+                    InteractionStatus.FAILED
+                    if failed
+                    else InteractionStatus.DEGRADED
+                    if response.status == "degraded"
+                    else InteractionStatus.COMPLETED
+                ),
                 result_json=result_json,
                 updated_at=finished_at,
                 version=running.version + 1,
@@ -582,6 +618,7 @@ class SessionApplicationService:
         if recorder is not None:
             is_replay = interaction.status in {
                 InteractionStatus.COMPLETED,
+                InteractionStatus.DEGRADED,
                 InteractionStatus.FAILED,
             }
             recorder.finish(
@@ -597,7 +634,11 @@ class SessionApplicationService:
     async def _resolve_existing_interaction(
         self, interaction: InteractionRecord, session: SessionRecord
     ) -> InteractionOutcome:
-        if interaction.status in {InteractionStatus.COMPLETED, InteractionStatus.FAILED}:
+        if interaction.status in {
+            InteractionStatus.COMPLETED,
+            InteractionStatus.DEGRADED,
+            InteractionStatus.FAILED,
+        }:
             if interaction.result_json:
                 return InteractionOutcome.model_validate_json(interaction.result_json)
         now = _utcnow()
@@ -940,7 +981,7 @@ def _response_from_state(
         if pending_expiry:
             try:
                 expires_at = min(expires_at, datetime.fromisoformat(pending_expiry))
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 expires_at = now
         if expires_at <= now:
             response = AnswerResult(
@@ -966,6 +1007,14 @@ def _response_from_state(
             text=minimize_pii(state.get("final_answer") or SAFE_ANSWER),
         )
     return InteractionOutcome(
+        status="degraded" if state.get("errors") else "completed",
+        degradation_reasons=tuple(
+            dict.fromkeys(
+                error
+                for error in state.get("errors", [])
+                if isinstance(error, str) and error.isascii() and error.replace("_", "").isalnum()
+            )
+        ),
         session_id=session_id,
         interaction_id=interaction_id,
         public_request_id=public_request_id,

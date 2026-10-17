@@ -19,6 +19,7 @@ class InteractionStatus(StrEnum):
     ACCEPTED = "accepted"
     RUNNING = "running"
     COMPLETED = "completed"
+    DEGRADED = "degraded"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
 
@@ -128,7 +129,9 @@ class InteractionRecord:
             raise ValueError("input_hash não pode estar vazio")
         if self.version < 1:
             raise ValueError("version deve ser positiva")
-        if self.status == InteractionStatus.COMPLETED and self.result_json is None:
+        if self.status in {InteractionStatus.COMPLETED, InteractionStatus.DEGRADED} and (
+            self.result_json is None
+        ):
             raise ValueError("interação concluída exige resultado público")
 
 
