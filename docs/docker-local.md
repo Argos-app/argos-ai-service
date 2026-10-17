@@ -28,12 +28,16 @@ script para gerar o `.env` com as credenciais internas.
 
 Em um volume PostgreSQL novo, a imagem executa, em ordem, os módulos
 `01_configuracao.sql` até `09_data_mart.sql`, o `10_dataload_completo.sql` e o
-`11_prediction_coverage.sql` e `12_local_stub_access.sql` localizados em
+`11_prediction_coverage.sql`, `12_local_stub_access.sql`,
+`13_local_prediction_coverage_fixture.sql` e
+`14_local_email_recipient_fixtures.sql` localizados em
 `infrastructure/docker/postgres/init/`. Os nove primeiros módulos vêm dos SQL
 separados de `argos-data-engineering`; o arquivo monolítico histórico
 `criacao_banco_completo.sql` não é usado. O módulo 10 carrega registros
 fictícios em todas as tabelas do schema. O módulo 11 expõe uma view de cobertura
-para testar a predição com essa base sintética. O script 99 cria o usuário
+para testar a predição com essa base sintética. O módulo 13 preenche o histórico
+sintético exigido por essa cobertura; o módulo 14 cria os cinco contatos de
+teste do fluxo de e-mail, sem criar credenciais ou vínculos de acesso. O script 99 cria o usuário
 `argos_reader` somente depois de schema, carga e view, concedendo leitura aos
 serviços.
 
@@ -141,7 +145,10 @@ O SMTP também pode ser configurado no mesmo `.env`. Se `MCP_EMAIL_SMTP_HOST`
 ficar vazio, o Compose usa Mailpit, que captura mensagens localmente e não as
 entrega. Para envio real, preencha host, porta, usuário, senha e
 `MCP_EMAIL_SMTP_USE_TLS`. LangSmith é opcional e usa as variáveis
-`MAIN_API_LANGSMITH_*` e `A2A_LANGSMITH_*` no mesmo arquivo.
+`MAIN_API_LANGSMITH_*` e `A2A_LANGSMITH_*` no mesmo arquivo. Para chaves de
+escopo organizacional, configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` e
+`A2A_LANGSMITH_WORKSPACE_ID` com o ID do workspace; o ID da organização não
+substitui o workspace.
 
 Os `.env.example` dentro de cada aplicação continuam disponíveis somente como
 referência para execução individual fora do Compose. O Compose da raiz não lê

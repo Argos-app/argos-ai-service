@@ -450,6 +450,22 @@
             "title": "Schema Version",
             "default": "1"
           },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "degraded"
+            ],
+            "title": "Status",
+            "default": "completed"
+          },
+          "degradation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degradation Reasons"
+          },
           "session_id": {
             "type": "string",
             "format": "uuid",

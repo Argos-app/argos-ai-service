@@ -104,7 +104,9 @@ O tracing LangSmith do `main_api` é opcional e só é ativado quando
 chamadas a modelos e ferramentas ocultam entradas e saídas; habilite
 `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true` somente após aprovar o envio de
 prompts, respostas e argumentos de ferramentas ao projeto LangSmith configurado.
-A chave deve ficar no gerenciador de secrets do ambiente.
+A chave deve ficar no gerenciador de secrets do ambiente. Para chaves de escopo
+organizacional, configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` com o ID do
+workspace LangSmith.
 `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e `MAIN_API_LANGSMITH_ENDPOINT`
 permite apontar para uma instância aprovada. O Mongo continua armazenando apenas
 os eventos brutos sanitizados existentes; conteúdo de trace é armazenado
@@ -165,7 +167,8 @@ Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
 habilita prompts, respostas e argumentos de ferramentas após aprovação. Com a
 captura ativa, e-mails, UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
 anonimizados. O projeto é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o
-endpoint HTTPS opcional por `MAIN_API_LANGSMITH_ENDPOINT`. O serviço A2A possui
+endpoint HTTPS opcional por `MAIN_API_LANGSMITH_ENDPOINT`. Para chaves de escopo
+organizacional, configure `MAIN_API_LANGSMITH_WORKSPACE_ID`. O serviço A2A possui
 configuração própria; IDs assinados de correlação e pai permitem relacionar a
 observação de chamada do principal às observações A2A quando ambas as
 persistências estiverem habilitadas.
