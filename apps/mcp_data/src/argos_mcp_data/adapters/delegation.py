@@ -22,10 +22,11 @@ from argos_mcp_data.domain.errors import AccessContextError
 _ACCESS_CONTEXT_KEY = "argos_mcp_data_access_context"
 _TOKEN_PART = re.compile(r"^[A-Za-z0-9_-]+$")
 _OPERATION = re.compile(r"^[a-z][a-z0-9_.:-]{0,63}$")
-_AGENTS = {"fazenda", "doutor"}
+_AGENTS = {"fazenda", "doutor", "analista"}
 _AGENT_OPERATIONS = {
     "fazenda": {"cattle.read", "medicine.read", "report.read"},
     "doutor": {"medicine.read"},
+    "analista": {"cattle.read"},
 }
 _MAX_TOKEN_BYTES = 16_384
 
@@ -259,7 +260,7 @@ class DelegationContextMiddleware:
         try:
             token = values[0].decode("ascii")
             context = self._verifier.verify(token)
-        except UnicodeDecodeError, AccessContextError:
+        except (UnicodeDecodeError, AccessContextError):
             await JSONResponse(
                 {"detail": "contexto de acesso obrigatório ou inválido"}, status_code=401
             )(scope, receive, send)

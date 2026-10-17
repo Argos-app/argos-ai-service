@@ -67,8 +67,9 @@ propriedades. As ferramentas do Doutor exigem agente `doutor`, operação
 `medicine.read` e contexto delegado válido; elas consultam o catálogo global,
 sem retornar uso ou estoque por propriedade. `list_medicines` consulta o
 cadastro relacional; `list_medicine_documents` lê a coleção Mongo separadamente,
-sem comparar ou validar o documento contra o SQL. Coleções e representações dos
-UUIDs devem refletir a implantação real.
+sem comparar ou validar o documento contra o SQL. Ambas aceitam `search` para
+procurar por nome comercial ou princípio ativo, além dos filtros específicos.
+Coleções e representações dos UUIDs devem refletir a implantação real.
 
 ## Diagnóstico e correlação
 

@@ -27,6 +27,16 @@ class MongoMedicineDocumentRepository(MedicineDocumentReadRepository):
 
     def _build_filter(self, request: ListMedicineDocumentsRequest) -> dict[str, Any]:
         query: dict[str, Any] = {}
+        if request.search is not None:
+            query["$or"] = [
+                {"brand_name": {"$regex": re.escape(request.search), "$options": "i"}},
+                {
+                    "active_ingredient": {
+                        "$regex": re.escape(request.search),
+                        "$options": "i",
+                    }
+                },
+            ]
         if request.medicine_id is not None:
             query["relational_medicine_id"] = self._encode_id(request.medicine_id)
         if request.brand_name is not None:

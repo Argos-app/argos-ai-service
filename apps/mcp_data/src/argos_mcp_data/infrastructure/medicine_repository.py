@@ -31,6 +31,17 @@ class PostgresMedicineRepository(MedicineReadRepository):
                 "position(lower(?) in lower(m.active_ingredient)) > 0",
                 request.active_ingredient,
             )
+        if request.search is not None:
+            brand_index = len(parameters) + 1
+            ingredient_index = brand_index + 1
+            parameters.extend((request.search, request.search))
+            clauses.append(
+                "(position(lower($"
+                f"{brand_index}"
+                ") in lower(m.brand_name)) > 0 OR position(lower($"
+                f"{ingredient_index}"
+                ") in lower(m.active_ingredient)) > 0)"
+            )
         if request.therapeutic_category is not None:
             add("position(lower(?) in lower(tc.name)) > 0", request.therapeutic_category)
         if request.needs_prescription is not None:

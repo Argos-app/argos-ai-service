@@ -73,9 +73,11 @@ class CattleQueryService:
         self,
         context: AccessContext,
         selected_property_ids: tuple[UUID, ...] | None,
+        *,
+        allowed_agents: frozenset[str] = frozenset({"fazenda"}),
     ) -> AuthorizedScope:
-        if context.agent_id != "fazenda":
-            raise AccessDeniedError("ferramenta disponível somente ao agente Fazenda")
+        if context.agent_id not in allowed_agents:
+            raise AccessDeniedError("ferramenta indisponível para este agente")
         return await self._access_policy.authorize(
             context,
             operation="cattle.read",
@@ -85,7 +87,13 @@ class CattleQueryService:
     async def list_properties(
         self, context: AccessContext, request: ListPropertiesRequest
     ) -> Page[PropertyRecord]:
-        scope = await self._authorized_scope(context, request.property_ids)
+        # The Analyst may resolve a user-provided property name for the
+        # prediction MCP. AccessPolicy still limits results to delegated IDs.
+        scope = await self._authorized_scope(
+            context,
+            request.property_ids,
+            allowed_agents=frozenset({"fazenda", "analista"}),
+        )
         return await self._repository.list_properties(scope, request)
 
     async def list_herds(

@@ -64,6 +64,17 @@ def test_valid_delegation_produces_immutable_access_context() -> None:
     assert context.agent_id == "fazenda"
 
 
+def test_analyst_delegation_accepts_only_cattle_read():
+    verifier, token, _ = make_verifier_and_token(
+        overrides={"agent": "analista"}
+    )
+
+    context = verifier.verify(token)
+
+    assert context.agent_id == "analista"
+    assert context.operations == frozenset({"cattle.read"})
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -71,6 +82,7 @@ def test_valid_delegation_produces_immutable_access_context() -> None:
         {"iss": "untrusted-issuer"},
         {"exp": 1_799_999_999},
         {"agent": "doutor", "operations": ["cattle.read"]},
+        {"agent": "analista", "operations": ["medicine.read"]},
         {"authorized_property_ids": []},
         {"authorized_property_ids": ["not-a-uuid"]},
         {"operations": ["cattle.read", "cattle.read"]},
