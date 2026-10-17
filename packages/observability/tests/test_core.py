@@ -20,6 +20,7 @@ from packages.observability import (
     UsageAvailability,
     allowlisted_value,
     classify_exception,
+    correlation_key,
     sanitize_observation,
 )
 from packages.observability.testing import InMemoryObservationWriter
@@ -39,6 +40,17 @@ class FakeClock:
 
 class ReadTimeout(Exception):
     pass
+
+
+def test_correlation_key_is_stable_and_survives_uuid_redaction_pattern():
+    correlation_id = uuid4()
+
+    key = correlation_key(correlation_id)
+
+    assert key == correlation_key(str(correlation_id))
+    assert len(key) == 64
+    assert "-" not in key
+    assert key != str(correlation_id)
 
 
 def _observation() -> Observation:

@@ -70,6 +70,7 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         client = Client(
             api_url=settings.langsmith_endpoint,
             api_key=settings.langsmith_api_key,
+            workspace_id=settings.langsmith_workspace_id,
             hide_inputs=not settings.langsmith_capture_content,
             hide_outputs=not settings.langsmith_capture_content,
             anonymizer=anonymizer,

@@ -1,5 +1,6 @@
 """Contexto de correlação e parentesco entre observações aninhadas."""
 
+import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -22,6 +23,16 @@ def current_parent_observation_id() -> UUID | None:
 
 def current_user_id() -> UUID | None:
     return _user_id.get()
+
+
+def correlation_key(correlation_id: UUID | str) -> str:
+    """Stable non-UUID key for correlating traces after UUID anonymization."""
+    value = str(correlation_id)
+    try:
+        value = str(UUID(value))
+    except ValueError:
+        pass
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 @contextmanager

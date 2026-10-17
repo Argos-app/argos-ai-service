@@ -31,11 +31,16 @@ def test_langsmith_client_hides_content_and_anonymizes_sensitive_values(monkeypa
     monkeypatch.setattr("langchain_core.tracers.LangChainTracer", FakeTracer)
 
     tracing = langsmith_module.create_langsmith_tracing(
-        Settings(langsmith_api_key="test-key", langsmith_project="test-project")
+        Settings(
+            langsmith_api_key="test-key",
+            langsmith_project="test-project",
+            langsmith_workspace_id="workspace-id",
+        )
     )
 
     assert tracing is not None
     assert client_arguments["api_key"] == "test-key"
+    assert client_arguments["workspace_id"] == "workspace-id"
     assert client_arguments["hide_inputs"] is True
     assert client_arguments["hide_outputs"] is True
     assert tracing.callback.arguments["project_name"] == "test-project"
@@ -76,3 +81,9 @@ def test_langsmith_closes_client_when_tracer_setup_fails(monkeypatch, caplog):
 def test_capture_content_requires_explicit_api_key():
     with pytest.raises(ValueError, match="CAPTURE_CONTENT exige"):
         Settings(langsmith_capture_content=True)
+
+
+def test_langsmith_workspace_id_is_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("MAIN_API_LANGSMITH_WORKSPACE_ID", "workspace-id")
+
+    assert Settings.from_env().langsmith_workspace_id == "workspace-id"

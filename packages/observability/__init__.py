@@ -4,6 +4,7 @@ from .collector import BestEffortObservationCollector, DisabledObservationCollec
 from .context import (
     bind_correlation,
     bind_user_id,
+    correlation_key,
     current_correlation_id,
     current_parent_observation_id,
     current_user_id,
@@ -51,6 +52,7 @@ __all__ = [
     "BestEffortObservationCollector",
     "bind_user_id",
     "bind_correlation",
+    "correlation_key",
     "current_correlation_id",
     "current_parent_observation_id",
     "current_user_id",

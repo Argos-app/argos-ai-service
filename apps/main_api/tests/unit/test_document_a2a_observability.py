@@ -5,13 +5,18 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from a2a.types import a2a_pb2
 from app.infrastructure.a2a.client import DocumentA2AClient
 from app.settings import Settings
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from packages.contracts.a2a import CorpusRefreshStatus, DocumentAnswerResponse
+from packages.contracts.a2a import (
+    CorpusRefreshStatus,
+    DocumentAnswerResponse,
+    DocumentSkill,
+)
 from packages.observability import ObservationStatus, bind_correlation
 from packages.security.delegation import GlobalDocumentDelegationTokenVerifier
 
@@ -35,7 +40,17 @@ def run_immediate(coroutine):
             raise AssertionError("fake A2A SDK não deveria suspender a corrotina")
 
 
-def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate() -> None:
+@pytest.mark.parametrize(
+    ("skill", "jurisdiction"),
+    [
+        (DocumentSkill.DOCUMENTAL, None),
+        (DocumentSkill.LEGAL, "BR"),
+    ],
+)
+def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
+    skill: DocumentSkill,
+    jurisdiction: str | None,
+) -> None:
     private_key = Ed25519PrivateKey.generate()
     private_der = private_key.private_bytes(
         encoding=serialization.Encoding.DER,
@@ -100,10 +115,22 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     question = "question containing private user text"
 
     with bind_correlation(correlation_id):
-        result = json.loads(run_immediate(client.ask(question, user_id=user_id)))
+        result = json.loads(
+            run_immediate(
+                client.ask(
+                    question,
+                    user_id=user_id,
+                    skill=skill,
+                    jurisdiction=jurisdiction,
+                )
+            )
+        )
 
     assert result["status"] == "unavailable"
     assert fake.request.message.parts[0].media_type == "application/json"
+    payload = json.loads(fake.request.message.parts[0].text)
+    assert payload["skill"] == skill.value
+    assert payload["jurisdiction"] == jurisdiction
     token = fake.context.service_parameters["X-Argos-Delegation"]
     delegated = GlobalDocumentDelegationTokenVerifier(
         {"main-key": public_key_b64},
@@ -119,7 +146,7 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     terminal = collector.observations[-1]
     assert terminal.status == ObservationStatus.SUCCEEDED
     assert terminal.protocol.task_state == "completed"
-    assert terminal.protocol.skill == "documental"
+    assert terminal.protocol.skill == skill.value
     assert terminal.result.code == "unavailable"
     assert terminal.duration_ms is not None
     serialized_observation = repr(terminal.model_dump())
