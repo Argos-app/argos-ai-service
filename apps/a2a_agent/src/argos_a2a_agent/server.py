@@ -70,7 +70,7 @@ class ServiceAuthenticationMiddleware:
                     raise AccessContextError("contexto delegado obrigatório")
                 delegated_token = delegation_values[0].decode("ascii")
                 context = self._delegation_verifier.verify(delegated_token)
-            except UnicodeDecodeError, AccessContextError:
+            except (UnicodeDecodeError, AccessContextError):
                 from starlette.responses import JSONResponse
 
                 response = JSONResponse(

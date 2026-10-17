@@ -85,7 +85,8 @@ projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
 ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
 perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs,
 CNPJs, telefones e tokens Bearer são anonimizados antes do envio. O endpoint
-HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`.
+HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`. Para chaves de escopo
+organizacional, configure `A2A_LANGSMITH_WORKSPACE_ID` com o ID do workspace.
 
 ## Contrato A2A
 

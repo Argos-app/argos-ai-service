@@ -89,7 +89,12 @@ class DocumentA2AExecutor(AgentExecutor):
         )
         try:
             trace_context = (
-                self._langsmith_tracing.context()
+                self._langsmith_tracing.context(
+                    str(access_context.correlation_id)
+                    if isinstance(access_context, DocumentAccessContext)
+                    and access_context.correlation_id is not None
+                    else None
+                )
                 if self._langsmith_tracing is not None
                 else nullcontext()
             )
@@ -154,7 +159,7 @@ class DocumentA2AExecutor(AgentExecutor):
             if part.media_type and part.media_type != "application/json":
                 raise ValueError("media type não suportado")
             request = DocumentQuestionRequest.model_validate_json(part.text)
-        except ValidationError, ValueError:
+        except (ValidationError, ValueError):
             await updater.reject(
                 updater.new_agent_message(
                     [

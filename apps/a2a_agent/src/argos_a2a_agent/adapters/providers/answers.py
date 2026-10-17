@@ -1,6 +1,7 @@
 """Geração estruturada em endpoint OpenAI-compatible sem tools ou ações externas."""
 
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from datetime import date
@@ -44,6 +45,11 @@ _PERSONAL_PATTERNS = (
         r"\1[REDACTED]",
     ),
 )
+_INLINE_EVIDENCE_ID = re.compile(r"\[\[(ev_[0-9a-f]{24})\]\]")
+_INVALID_OUTPUT_LIMITATION = (
+    "O modelo não retornou uma resposta estruturada compatível; o conteúdo não foi validado."
+)
+_LOGGER = logging.getLogger(__name__)
 
 
 def _minimize_prompt_value(value: Any) -> Any:
@@ -176,14 +182,7 @@ class OpenAICompatibleAnswerGenerator:
                 recorder=recorder,
                 operation_route="/chat/completions",
             )
-            content = response["choices"][0]["message"]["content"]
-            if not isinstance(content, str) or len(content) > 64 * 1024:
-                raise ValueError("conteúdo da resposta inválido ou acima do limite")
-            raw = json.loads(content, object_pairs_hook=_unique_object)
-            answer = _answer_from_json(raw)
-            if not set(answer.cited_evidence_ids) <= evidence_ids:
-                raise ValueError("resposta citou evidência que não foi fornecida")
-            return answer
+            return _answer_from_response(response, evidence_ids)
         except Exception as exc:
             if isinstance(exc, DocumentAnswerGenerationError):
                 raise
@@ -196,23 +195,164 @@ class OpenAICompatibleAnswerGenerator:
 
 
 def _answer_from_json(raw: Any) -> GeneratedDocumentAnswer:
-    expected = {"answer", "status", "cited_evidence_ids", "limitations", "missing_fields"}
-    if not isinstance(raw, dict) or set(raw) != expected:
+    if not isinstance(raw, dict):
         raise ValueError("campos da resposta estruturada são inválidos")
-    if any(
-        not isinstance(raw[name], list) or any(not isinstance(item, str) for item in raw[name])
-        for name in ("cited_evidence_ids", "limitations", "missing_fields")
-    ):
-        raise ValueError("listas da resposta estruturada são inválidas")
-    if not isinstance(raw["answer"], str) or not isinstance(raw["status"], str):
-        raise ValueError("resposta ou status inválido")
-    return GeneratedDocumentAnswer(
-        answer=raw["answer"],
-        status=DocumentAnswerStatus(raw["status"]),
-        cited_evidence_ids=tuple(raw["cited_evidence_ids"]),
-        limitations=tuple(raw["limitations"]),
-        missing_fields=tuple(raw["missing_fields"]),
+    answer = raw.get("answer", raw.get("response", raw.get("text", "")))
+    status = raw.get("status")
+    if not isinstance(answer, str):
+        raise ValueError("resposta inválida")
+    citations = _string_values(
+        raw.get(
+            "cited_evidence_ids",
+            raw.get("evidence_ids", raw.get("citations", ())),
+        ),
+        "cited_evidence_ids",
     )
+    limitations = _string_values(raw.get("limitations", ()), "limitations")
+    missing_fields = _string_values(raw.get("missing_fields", ()), "missing_fields")
+    inline_citations = tuple(dict.fromkeys(_INLINE_EVIDENCE_ID.findall(answer)))
+    if inline_citations:
+        if citations and set(inline_citations) != set(citations):
+            raise ValueError("citações no texto divergem das evidências estruturadas")
+        if not citations:
+            citations = inline_citations
+    elif citations and isinstance(status, str) and status.casefold() in {
+        DocumentAnswerStatus.SUCCESS.value,
+        DocumentAnswerStatus.PARTIAL.value,
+    }:
+        answer = f"{answer.rstrip()} {' '.join(f'[[{item}]]' for item in citations)}"
+    normalized_status = _normalized_answer_status(status, answer, citations)
+    if normalized_status == DocumentAnswerStatus.SUCCESS and not answer.strip():
+        normalized_status = DocumentAnswerStatus.ABSTAIN
+    if (
+        not inline_citations
+        and citations
+        and normalized_status
+        in {DocumentAnswerStatus.SUCCESS, DocumentAnswerStatus.PARTIAL}
+    ):
+        answer = f"{answer.rstrip()} {' '.join(f'[[{item}]]' for item in citations)}"
+    if normalized_status == DocumentAnswerStatus.PARTIAL and not limitations:
+        limitations = ("O provedor marcou a resposta como parcial.",)
+    if normalized_status == DocumentAnswerStatus.ABSTAIN and status != "abstain":
+        answer = ""
+    return GeneratedDocumentAnswer(
+        answer=answer,
+        status=normalized_status,
+        cited_evidence_ids=citations,
+        limitations=limitations,
+        missing_fields=missing_fields,
+    )
+
+
+def _normalized_answer_status(
+    value: Any,
+    answer: str,
+    citations: tuple[str, ...],
+) -> DocumentAnswerStatus:
+    aliases = {
+        "answered": DocumentAnswerStatus.SUCCESS,
+        "complete": DocumentAnswerStatus.SUCCESS,
+        "completed": DocumentAnswerStatus.SUCCESS,
+        "partially_answered": DocumentAnswerStatus.PARTIAL,
+        "clarification_required": DocumentAnswerStatus.NEEDS_CLARIFICATION,
+        "abstained": DocumentAnswerStatus.ABSTAIN,
+        "insufficient_evidence": DocumentAnswerStatus.ABSTAIN,
+        "no_answer": DocumentAnswerStatus.ABSTAIN,
+        "cannot_answer": DocumentAnswerStatus.ABSTAIN,
+    }
+    if isinstance(value, str):
+        normalized = value.casefold().strip()
+        if normalized in aliases:
+            return aliases[normalized]
+        try:
+            return DocumentAnswerStatus(normalized)
+        except ValueError:
+            pass
+    if answer.strip() and citations:
+        return DocumentAnswerStatus.SUCCESS
+    return DocumentAnswerStatus.ABSTAIN
+
+
+def _answer_from_response(
+    response: Any,
+    evidence_ids: set[str],
+) -> GeneratedDocumentAnswer:
+    try:
+        content = response["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or len(content) > 64 * 1024:
+            raise ValueError("conteúdo da resposta inválido ou acima do limite")
+        content = content.strip()
+        fenced = re.fullmatch(
+            r"```(?:json)?\s*(.*?)\s*```",
+            content,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if fenced is not None:
+            content = fenced.group(1)
+        try:
+            raw = json.loads(content, object_pairs_hook=_unique_object)
+        except ValueError:
+            if content.startswith(("{", "[")):
+                raise
+            inline_citations = tuple(dict.fromkeys(_INLINE_EVIDENCE_ID.findall(content)))
+            if not inline_citations or not set(inline_citations) <= evidence_ids:
+                raise
+            return GeneratedDocumentAnswer(
+                answer=content,
+                status=DocumentAnswerStatus.SUCCESS,
+                cited_evidence_ids=inline_citations,
+            )
+        answer = _answer_from_json(raw)
+        if not set(answer.cited_evidence_ids) <= evidence_ids:
+            raise ValueError("resposta citou evidência que não foi fornecida")
+        return answer
+    except (KeyError, IndexError, TypeError, ValueError, DocumentAnswerGenerationError) as exc:
+        _LOGGER.warning(
+            "model returned invalid structured answer",
+            extra={"failure_reason": "invalid_structured_output", "error_type": type(exc).__name__},
+        )
+        return GeneratedDocumentAnswer(
+            answer="",
+            status=DocumentAnswerStatus.ABSTAIN,
+            limitations=(_INVALID_OUTPUT_LIMITATION,),
+        )
+
+
+def _string_values(value: Any, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = (value,)
+    elif isinstance(value, (list, tuple)):
+        if all(isinstance(item, str) for item in value):
+            values = tuple(value)
+        elif all(isinstance(item, Mapping) for item in value):
+            values = tuple(
+                next(
+                    (
+                        item[key]
+                        for key in ("evidence_id", "citation_id", "id")
+                        if isinstance(item.get(key), str)
+                    ),
+                    "",
+                )
+                for item in value
+            )
+            if any(not item for item in values):
+                raise ValueError(f"{field_name} contém item sem identificador")
+        else:
+            raise ValueError(f"{field_name} deve conter somente strings ou identificadores")
+    else:
+        raise ValueError(f"{field_name} deve conter somente strings")
+    normalized = []
+    for item in values:
+        citation = item.strip()
+        wrapped = re.fullmatch(r"\[\[(ev_[0-9a-f]{24})\]\]", citation)
+        if wrapped is not None:
+            citation = wrapped.group(1)
+        if citation:
+            normalized.append(citation)
+    return tuple(dict.fromkeys(normalized))
 
 
 def _safe_model_name(value: str) -> str | None:

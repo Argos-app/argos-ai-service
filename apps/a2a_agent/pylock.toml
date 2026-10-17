@@ -442,6 +442,17 @@ url = "https://files.pythonhosted.org/packages/45/35/38f6d6564fae57d9b12e5676dfa
 sha256 = "42b54c2c90ad348b5e3a85e03e715d572c1fde357ef104cdfe3b03b697a404ea"
 
 [[packages]]
+name = "pyjwt"
+version = "2.15.1"
+
+[[packages.wheels]]
+name = "pyjwt-2.15.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/50/ca/44de4e75f8aadc457f0634be3b542815078ded46dca30efb960edeecad6e/pyjwt-2.15.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193"
+
+[[packages]]
 name = "pymongo"
 version = "4.18.3"
 
@@ -495,6 +506,17 @@ url = "https://files.pythonhosted.org/packages/ef/33/d8df6a2b214ffbe4138db9a1efe
 
 [packages.wheels.hashes]
 sha256 = "2b975099b378382f6ca1cfb43f0d59e541be6e16a5892f282a4b8de7eff5cb63"
+
+[[packages]]
+name = "redis"
+version = "5.3.1"
+
+[[packages.wheels]]
+name = "redis-5.3.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/7f/26/5c5fa0e83c3621db835cfc1f1d789b37e7fa99ed54423b5f519beb931aa7/redis-5.3.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "dc1909bd24669cc31b5f67a039700b16ec30571096c5f1f0d9d2324bff31af97"
 
 [[packages]]
 name = "requests"

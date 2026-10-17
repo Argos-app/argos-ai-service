@@ -61,8 +61,8 @@ class Settings:
     answer_api_key: str | None = field(default=None, repr=False)
     answer_model: str | None = None
     permission_sql_dsn: str | None = field(default=None, repr=False)
-    model_timeout_seconds: float = 20
-    model_max_output_tokens: int = 1_200
+    model_timeout_seconds: float = 40
+    model_max_output_tokens: int = 4_096
     model_mode: str = "provider"
     a2a_host: str = "0.0.0.0"
     a2a_port: int = 8000
@@ -84,6 +84,7 @@ class Settings:
     langsmith_project: str = "argos-ai-service"
     langsmith_endpoint: str | None = None
     langsmith_capture_content: bool = False
+    langsmith_workspace_id: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -112,7 +113,7 @@ class Settings:
         except ValueError as exc:
             raise ValueError("A2A_QDRANT_TIMEOUT_SECONDS deve ser um número") from exc
         try:
-            model_timeout = float(os.getenv("A2A_MODEL_TIMEOUT_SECONDS", "20"))
+            model_timeout = float(os.getenv("A2A_MODEL_TIMEOUT_SECONDS", "40"))
         except ValueError as exc:
             raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser um número") from exc
         return cls(
@@ -147,7 +148,7 @@ class Settings:
             answer_model=os.getenv("A2A_ANSWER_MODEL"),
             permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
             model_timeout_seconds=model_timeout,
-            model_max_output_tokens=read_int("A2A_MODEL_MAX_OUTPUT_TOKENS", 1_200),
+            model_max_output_tokens=read_int("A2A_MODEL_MAX_OUTPUT_TOKENS", 4_096),
             model_mode=os.getenv("A2A_MODEL_MODE", "provider").strip().casefold(),
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
@@ -184,6 +185,7 @@ class Settings:
             langsmith_api_key=os.getenv("A2A_LANGSMITH_API_KEY") or None,
             langsmith_project=os.getenv("A2A_LANGSMITH_PROJECT", "argos-ai-service"),
             langsmith_endpoint=os.getenv("A2A_LANGSMITH_ENDPOINT") or None,
+            langsmith_workspace_id=os.getenv("A2A_LANGSMITH_WORKSPACE_ID") or None,
             langsmith_capture_content=_environment_bool("A2A_LANGSMITH_CAPTURE_CONTENT"),
         )
 
@@ -286,9 +288,9 @@ class Settings:
             raise ValueError("A2A_QDRANT_TIMEOUT_SECONDS deve ser maior que 0 e até 30")
         if (
             not math.isfinite(self.model_timeout_seconds)
-            or not 0 < self.model_timeout_seconds <= 30
+            or not 0 < self.model_timeout_seconds <= 45
         ):
-            raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser maior que 0 e até 30")
+            raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser maior que 0 e até 45")
         if not 128 <= self.model_max_output_tokens <= 8_192:
             raise ValueError("A2A_MODEL_MAX_OUTPUT_TOKENS deve estar entre 128 e 8192")
         for name, value in (

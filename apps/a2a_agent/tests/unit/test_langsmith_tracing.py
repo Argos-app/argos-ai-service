@@ -8,6 +8,8 @@ from pathlib import Path
 from argos_a2a_agent.adapters.observability import langsmith as langsmith_module
 from argos_a2a_agent.settings import Settings
 
+from packages.observability import correlation_key
+
 
 def test_langsmith_is_disabled_without_explicit_api_key():
     assert langsmith_module.create_langsmith_tracing(Settings()) is None
@@ -33,20 +35,35 @@ def test_langsmith_context_enables_configured_client_and_project(monkeypatch):
     monkeypatch.setattr("langsmith.tracing_context", fake_tracing_context)
 
     tracing = langsmith_module.create_langsmith_tracing(
-        Settings(langsmith_api_key="test-key", langsmith_project="a2a-test")
+        Settings(
+            langsmith_api_key="test-key",
+            langsmith_project="a2a-test",
+            langsmith_workspace_id="workspace-id",
+        )
     )
 
     assert tracing is not None
+    assert client_arguments["workspace_id"] == "workspace-id"
     assert client_arguments["hide_inputs"] is True
     assert client_arguments["hide_outputs"] is True
-    with tracing.context():
+    with tracing.context("corr-123"):
         pass
     assert context_arguments == {
         "enabled": True,
         "client": tracing.client,
         "project_name": "a2a-test",
+        "metadata": {
+            "argos_correlation_id": "corr-123",
+            "argos_correlation_key": correlation_key("corr-123"),
+        },
     }
     tracing.close()
+
+
+def test_langsmith_workspace_id_is_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("A2A_LANGSMITH_WORKSPACE_ID", "workspace-id")
+
+    assert Settings.from_env().langsmith_workspace_id == "workspace-id"
 
 
 def test_a2a_capture_content_requires_explicit_api_key():
@@ -56,8 +73,8 @@ def test_a2a_capture_content_requires_explicit_api_key():
         qdrant_write_api_key="write-key",
         qdrant_collection="documents",
         qdrant_vector_size=3,
-        document_source_root=Path("C:/tmp/documents"),
-        manifest_path=Path("C:/tmp/manifest.json"),
+        document_source_root=Path.cwd() / "documents",
+        manifest_path=Path.cwd() / "manifest.json",
         internal_service_token="service-token",
         resource_server_url="https://resource.example",
         delegation_issuer="argos-test",

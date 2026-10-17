@@ -1,8 +1,10 @@
 """Casos de uso protegidos para consultar o corpus documental global."""
 
 import math
+import unicodedata
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import replace
 from uuid import UUID
 
 from argos_a2a_agent.application.ensure_current_corpus import (
@@ -85,6 +87,36 @@ class _DocumentQuery:
         )
         await self._ensure_current.reauthorize(context)
 
+    async def _read_all_documents(
+        self,
+        filters: DocumentFilter,
+        *,
+        expected_count: int,
+    ) -> tuple[CorpusDocumentMetadata, ...]:
+        documents: list[CorpusDocumentMetadata] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            page = await self._repository.list_documents(
+                filters=filters,
+                page_size=_LIST_PAGE_SIZE,
+                cursor=cursor,
+            )
+            documents.extend(page.documents)
+            if page.complete:
+                break
+            if page.next_cursor is None or page.next_cursor in seen_cursors:
+                raise IndexReadError("a paginação do manifesto não avançou")
+            seen_cursors.add(page.next_cursor)
+            cursor = page.next_cursor
+            if len(documents) > _MAX_AGGREGATE_DOCUMENTS:
+                raise DocumentQueryTooBroadError(
+                    "a consulta excede o limite de 10000 documentos"
+                )
+        if len(documents) != expected_count:
+            raise IndexReadError("a listagem não corresponde à contagem distinta do manifesto")
+        return tuple(documents)
+
 
 class SearchDocuments(_DocumentQuery):
     """Gera embedding da pergunta e devolve fontes atuais com páginas e revisão."""
@@ -109,6 +141,13 @@ class SearchDocuments(_DocumentQuery):
         filters = _filters(request, revision)
 
         matching_documents = await self._repository.count_documents(filters=filters)
+        if matching_documents:
+            filters = await self._scope_to_explicit_title(
+                request,
+                filters,
+                matching_documents=matching_documents,
+            )
+            matching_documents = await self._repository.count_documents(filters=filters)
         if matching_documents:
             vector = await self._embed_query(request.query)
             # Busca um elemento adicional para indicar truncamento quando o
@@ -150,6 +189,30 @@ class SearchDocuments(_DocumentQuery):
             refresh_status=DocumentAvailability.READY,
             truncated=truncated,
         )
+
+    async def _scope_to_explicit_title(
+        self,
+        request: SearchDocumentsRequest,
+        filters: DocumentFilter,
+        *,
+        matching_documents: int,
+    ) -> DocumentFilter:
+        """Restringe busca quando a pergunta cita sem ambiguidade um título do corpus."""
+        if request.document_ids is not None or matching_documents > _MAX_AGGREGATE_DOCUMENTS:
+            return filters
+        query = _normalize_title(request.query)
+        documents = await self._read_all_documents(
+            filters,
+            expected_count=matching_documents,
+        )
+        explicit_matches = tuple(
+            document
+            for document in documents
+            if _normalize_title(document.title) in query
+        )
+        if len(explicit_matches) != 1:
+            return filters
+        return replace(filters, document_ids=(explicit_matches[0].document_id,))
 
     async def _embed_query(self, query: str) -> tuple[float, ...]:
         try:
@@ -345,35 +408,6 @@ class AggregateDocuments(_DocumentQuery):
             complete=True,
         )
 
-    async def _read_all_documents(
-        self,
-        filters: DocumentFilter,
-        *,
-        expected_count: int,
-    ) -> tuple[CorpusDocumentMetadata, ...]:
-        documents: list[CorpusDocumentMetadata] = []
-        cursor: str | None = None
-        seen_cursors: set[str] = set()
-        while True:
-            page = await self._repository.list_documents(
-                filters=filters,
-                page_size=_LIST_PAGE_SIZE,
-                cursor=cursor,
-            )
-            documents.extend(page.documents)
-            if page.complete:
-                break
-            if page.next_cursor is None or page.next_cursor in seen_cursors:
-                raise IndexReadError("a paginação do manifesto não avançou")
-            seen_cursors.add(page.next_cursor)
-            cursor = page.next_cursor
-            if len(documents) > _MAX_AGGREGATE_DOCUMENTS:
-                raise DocumentQueryTooBroadError("a agregação excede o limite de 10000 documentos")
-        if len(documents) != expected_count:
-            raise IndexReadError("a listagem não corresponde à contagem distinta do manifesto")
-        return tuple(documents)
-
-
 def _filters(
     request: SearchDocumentsRequest | ListDocumentsRequest | AggregateDocumentsRequest,
     revision: str,
@@ -388,6 +422,11 @@ def _filters(
         document_date_to=request.document_date_to,
         corpus_revision=revision,
     )
+
+
+def _normalize_title(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(character for character in decomposed if character.isalnum())
 
 
 def _group_value(

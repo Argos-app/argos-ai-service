@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -32,3 +33,17 @@ def test_injected_permission_adapter_does_not_require_sql_dsn():
 def test_production_runtime_still_requires_permission_sql_dsn():
     with pytest.raises(ValueError, match="A2A_PERMISSION_SQL_DSN"):
         _runtime_settings().validate_runtime(require_providers=False)
+
+
+def test_a2a_model_timeout_allows_longer_provider_responses():
+    settings = _runtime_settings()
+
+    assert settings.model_timeout_seconds == 40
+    settings.validate_runtime(require_providers=False, require_permission_sql=False)
+
+
+def test_a2a_model_timeout_remains_bounded():
+    settings = replace(_runtime_settings(), model_timeout_seconds=46)
+
+    with pytest.raises(ValueError, match="A2A_MODEL_TIMEOUT_SECONDS"):
+        settings.validate_runtime(require_providers=False, require_permission_sql=False)

@@ -34,6 +34,7 @@ from argos_a2a_agent.infrastructure import (
     QdrantDocumentReadRepository,
     ReadOnlyQdrantReader,
 )
+from argos_a2a_agent.infrastructure.qdrant_health import check_qdrant_collection
 from argos_a2a_agent.ports.document_answer_generator import DocumentAnswerGenerator
 from argos_a2a_agent.ports.embedding_provider import EmbeddingProvider
 from argos_a2a_agent.server import create_a2a_server
@@ -358,9 +359,18 @@ async def create_runtime(
             answer_generator=dependencies.answer_generator,
             observation_collector=observation_collector,
         )
+
+        async def check_index_ready() -> None:
+            await check_qdrant_collection(
+                reader_client,
+                collection=configured.qdrant_collection,
+                vector_size=configured.qdrant_vector_size,
+                distance=configured.qdrant_distance,
+            )
+
         server = create_a2a_server(
             configured,
-            readiness_check=reader_client.get_collections,
+            readiness_check=check_index_ready,
             delegation_verifier=delegation_verifier,
             agent_registry=agent_registry,
             observation_collector=observation_collector,
