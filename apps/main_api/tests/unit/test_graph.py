@@ -1,5 +1,7 @@
+import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,9 +19,12 @@ from app.agent_schemas.results import (
     SourceReference,
     SpecialistResult,
 )
-from app.agent_schemas.synthesis import OrchestratorResult
+from app.agent_schemas.synthesis import OrchestratorResult, TaskOutcome
 from app.graph.workflow import (
+    NO_VERIFIED_RESULT_ANSWER,
+    ROUTER_UNAVAILABLE_ANSWER,
     SAFE_ANSWER,
+    _agent_failure_reason,
     answer_state,
     build_agent_context,
     build_graph,
@@ -29,7 +34,11 @@ from app.graph.workflow import (
     no_especialista,
     no_guardrail_entrada,
     no_guardrail_saida,
+    no_juiz,
+    no_orquestrador,
+    no_roteador,
     no_saida_segura,
+    synthesis_timeout_with_runtime_grace,
 )
 from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
@@ -59,6 +68,17 @@ class FakeFactory:
         return self.agents[agent_id]
 
 
+def test_synthesis_timeout_leaves_room_for_agent_output_persistence():
+    assert synthesis_timeout_with_runtime_grace(
+        model_timeout_seconds=60,
+        execution_timeout_seconds=180,
+    ) == 75
+    assert synthesis_timeout_with_runtime_grace(
+        model_timeout_seconds=120,
+        execution_timeout_seconds=100,
+    ) == 100
+
+
 def test_safe_response_preserves_recovered_email_action_outcome() -> None:
     result = no_saida_segura(
         {
@@ -69,6 +89,25 @@ def test_safe_response_preserves_recovered_email_action_outcome() -> None:
     assert result["final_answer"] == (
         f"{SAFE_ANSWER}\n\nEstado do envio: O MCP confirmou o recebimento do envio."
     )
+
+
+class ProviderStatusError(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__("private provider detail")
+        self.status_code = status_code
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (ProviderStatusError(502), "information_provider_unavailable"),
+        (ProviderStatusError(429), "information_provider_rate_limited"),
+        (TimeoutError("private provider detail"), "information_provider_timeout"),
+        (ValueError("private schema detail"), "information_invalid_output"),
+    ],
+)
+def test_agent_failure_reason_is_specific_and_never_includes_exception_text(error, expected):
+    assert _agent_failure_reason("information", error) == expected
 
 
 def test_output_guardrail_skips_non_text_execution_context_values():
@@ -83,6 +122,351 @@ def test_output_guardrail_skips_non_text_execution_context_values():
         result = no_guardrail_saida(state)
 
     assert result["final_answer"] == "Consulta local concluída."
+
+
+def test_output_guardrail_does_not_claim_search_found_nothing_after_agent_failure():
+    state = request_state("O que diz o documento sobre dados dos usuários?")
+    state.update(
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="information"),
+                result=SpecialistResult(
+                    agent="information",
+                    status="error",
+                    error="information_provider_unavailable",
+                ),
+            ),
+        ),
+        judge_result=JudgeResult(decision="approved", reason="Revisão incompleta simulada"),
+        draft_result=OrchestratorResult(draft_answer="O documento não trata do assunto."),
+    )
+
+    with execution_limits_scope(ExecutionLimits(4, 4)):
+        result = no_guardrail_saida(state)
+
+    assert result["final_answer"] == NO_VERIFIED_RESULT_ANSWER
+
+
+@pytest.mark.asyncio
+async def test_router_failure_explains_that_no_query_started():
+    state = request_state()
+    state["sanitized_message"] = "Quais aplicações existem?"
+    result = await no_roteador(
+        state,
+        factory=FakeFactory(router=FakeAgent(ProviderStatusError(502))),
+    )
+
+    assert result["final_answer"] == ROUTER_UNAVAILABLE_ANSWER
+    assert result["errors"] == ["router_provider_unavailable"]
+
+
+@pytest.mark.asyncio
+async def test_abstention_is_reported_as_degraded():
+    state = request_state()
+    state.update(
+        ordered_tasks=(task(agent="information"),),
+        current_task_index=0,
+        task_outcomes=(),
+        errors=[],
+        called_agents=[],
+        sources=[],
+    )
+    factory = FakeFactory(
+        information=FakeAgent(
+            SpecialistResult(
+                agent="information",
+                status="abstain",
+                answer="Não há evidência suficiente.",
+                missing_fields=("conteúdo do documento",),
+            )
+        )
+    )
+
+    with execution_limits_scope(ExecutionLimits(4, 4)):
+        result = await no_especialista(
+            state,
+            factory=factory,
+            agent_id=AgentId.INFORMATION,
+        )
+
+    assert result["errors"] == ["information_abstained"]
+    assert result["task_outcomes"][0].result.status == "abstain"
+    assert "clarification_request" not in result
+
+
+@pytest.mark.asyncio
+async def test_tool_abstention_survives_followup_provider_failure():
+    state = request_state("O que diz o documento sobre retenção?")
+    state.update(
+        ordered_tasks=(task(agent="information"),),
+        current_task_index=0,
+        task_outcomes=(),
+        errors=[],
+        called_agents=[],
+        sources=[],
+    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success(
+        "information",
+        "consultar_documental",
+        '{"status":"success","content":{"status":"abstain","answer":"",'
+        '"limitations":["conteúdo não validado"]}}',
+        reference="tool-call:documental-1",
+    )
+
+    with execution_limits_scope(limits):
+        update = await no_especialista(
+            state,
+            factory=FakeFactory(information=FakeAgent(ProviderStatusError(502))),
+            agent_id=AgentId.INFORMATION,
+        )
+
+    result = update["task_outcomes"][0].result
+    assert result.status == "abstain"
+    assert result.error == "information_provider_unavailable"
+    assert "consultar_documental" in result.answer
+    assert update["errors"] == ["information_provider_unavailable", "information_abstained"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_skips_llm_when_every_agent_lacks_verified_evidence():
+    state = request_state("O que diz o documento sobre retenção?")
+    state["task_outcomes"] = (
+        TaskOutcome(
+            task=task(agent="information"),
+            result=SpecialistResult(agent="information", status="abstain"),
+        ),
+    )
+    orchestrator = FakeAgent()
+
+    result = await no_orquestrador(
+        state,
+        factory=FakeFactory(orchestrator=orchestrator),
+    )
+
+    assert "se absteve" in result["final_answer"]
+    assert orchestrator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_timeout_returns_tool_evidence_and_specific_degradation():
+    state = request_state("Quantos bovinos há no lote HC-LOTE-001?")
+    state["sanitized_message"] = "Quantos bovinos há no lote HC-LOTE-001?"
+    state["task_outcomes"] = (
+        TaskOutcome(
+            task=task(agent="farm"),
+            result=SpecialistResult(agent="farm", status="success", answer="49 bovinos"),
+        ),
+    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success(
+        "farm",
+        "list_lots",
+        '{"lot_code":"HC-LOTE-001","head_count":49}',
+        reference="tool-call:lots-1",
+    )
+
+    with execution_limits_scope(limits):
+        result = await no_orquestrador(
+            state,
+            factory=FakeFactory(orchestrator=FakeAgent(TimeoutError())),
+        )
+
+    assert result["errors"] == ["orchestrator_provider_timeout"]
+    assert "list_lots" in result["final_answer"]
+    assert '"head_count": 49' in result["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_uses_configured_timeout_and_preserves_tool_evidence():
+    class SlowAgent:
+        async def run(self, input, *, context=None):
+            await asyncio.sleep(0.02)
+            return OrchestratorResult(draft_answer="O lote tem 49 bovinos.")
+
+    state = request_state("Quantos bovinos há no lote HC-LOTE-001?")
+    state["sanitized_message"] = "Quantos bovinos há no lote HC-LOTE-001?"
+    state["task_outcomes"] = (
+        TaskOutcome(
+            task=task(agent="farm"),
+            result=SpecialistResult(agent="farm", status="success", answer="49 bovinos"),
+        ),
+    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success(
+        "farm",
+        "list_lots",
+        '{"lot_code":"HC-LOTE-001","head_count":49}',
+        reference="tool-call:lots-1",
+    )
+
+    with execution_limits_scope(limits):
+        result = await no_orquestrador(
+            state,
+            factory=FakeFactory(orchestrator=SlowAgent()),
+            timeout_seconds=0.001,
+        )
+
+    assert result["errors"] == ["orchestrator_provider_timeout"]
+    assert '"head_count": 49' in result["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_judge_failure_explains_unverified_result_after_agent_failures():
+    state = request_state("O que o manual diz sobre privacidade?")
+    state["sanitized_message"] = "O que o manual diz sobre privacidade?"
+    state.update(
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="information"),
+                result=SpecialistResult(
+                    agent="information",
+                    status="unavailable",
+                    error="information_provider_unavailable",
+                ),
+            ),
+        ),
+        draft_result=OrchestratorResult(draft_answer="O manual não informa."),
+        errors=["information_provider_unavailable"],
+        called_agents=[],
+    )
+
+    result = await no_juiz(
+        state,
+        factory=FakeFactory(judge=FakeAgent(ProviderStatusError(502))),
+    )
+
+    assert "integração necessária" in result["final_answer"]
+    assert result["errors"] == [
+        "information_provider_unavailable",
+        "judge_provider_unavailable",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_judge_timeout_returns_tool_evidence_and_specific_degradation():
+    source = SourceReference(
+        title="Consulta externa: list_lots",
+        reference="tool-call:lots-1",
+        excerpt='{"lot_code":"HC-LOTE-001","head_count":49}',
+    )
+    state = request_state("Quantos bovinos há no lote HC-LOTE-001?")
+    state["sanitized_message"] = "Quantos bovinos há no lote HC-LOTE-001?"
+    state.update(
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="farm"),
+                result=SpecialistResult(
+                    agent="farm",
+                    status="success",
+                    answer="49 bovinos",
+                    sources=(source,),
+                ),
+            ),
+        ),
+        sources=[source],
+        draft_result=OrchestratorResult(draft_answer="O lote tem 49 bovinos.", sources=(source,)),
+    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success(
+        "farm",
+        "list_lots",
+        source.excerpt,
+        reference=source.reference,
+    )
+
+    with execution_limits_scope(limits):
+        result = await no_juiz(
+            state,
+            factory=FakeFactory(judge=FakeAgent(TimeoutError())),
+        )
+
+    assert result["errors"] == ["judge_provider_timeout"]
+    assert "list_lots" in result["final_answer"]
+    assert '"head_count": 49' in result["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_judge_uses_configured_timeout_and_preserves_tool_evidence():
+    class SlowAgent:
+        async def run(self, input, *, context=None):
+            await asyncio.sleep(0.02)
+            return JudgeResult(decision="approved", reason="Os dados são compatíveis.")
+
+    source = SourceReference(
+        title="Consulta externa: list_lots",
+        reference="tool-call:lots-1",
+        excerpt='{"lot_code":"HC-LOTE-001","head_count":49}',
+    )
+    state = request_state("Quantos bovinos há no lote HC-LOTE-001?")
+    state["sanitized_message"] = "Quantos bovinos há no lote HC-LOTE-001?"
+    state.update(
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="farm"),
+                result=SpecialistResult(
+                    agent="farm", status="success", answer="49 bovinos", sources=(source,)
+                ),
+            ),
+        ),
+        sources=[source],
+        draft_result=OrchestratorResult(
+            draft_answer="O lote tem 49 bovinos.", sources=(source,)
+        ),
+    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success(
+        "farm", "list_lots", source.excerpt, reference=source.reference
+    )
+
+    with execution_limits_scope(limits):
+        result = await no_juiz(
+            state,
+            factory=FakeFactory(judge=SlowAgent()),
+            timeout_seconds=0.001,
+        )
+
+    assert result["errors"] == ["judge_provider_timeout"]
+    assert '"head_count": 49' in result["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_judge_receives_all_trusted_tool_evidence_even_if_draft_omits_sources():
+    source = SourceReference(
+        title="Consulta externa: list_lots",
+        reference="tool-call:lots-1",
+        excerpt='{"lot_code":"HC-LOTE-001","head_count":49}',
+    )
+    state = request_state()
+    state["sanitized_message"] = "Quantos bovinos há no lote?"
+    state.update(
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="farm"),
+                result=SpecialistResult(
+                    agent="farm",
+                    status="success",
+                    answer="O lote tem 49 bovinos.",
+                    sources=(source,),
+                ),
+            ),
+        ),
+        sources=[source],
+        draft_result=OrchestratorResult(draft_answer="O lote tem 49 bovinos."),
+        called_agents=[],
+    )
+    judge = FakeAgent(JudgeResult(decision="approved", reason="Os dados são compatíveis."))
+
+    result = await no_juiz(state, factory=FakeFactory(judge=judge))
+
+    assert result["judge_result"].decision == "approved"
+    judge_input = judge.calls[0][0]
+    assert judge_input.sources == (source,)
+    outcome_source = judge_input.outcomes[0].result.sources[0]
+    assert outcome_source.reference == source.reference
+    assert outcome_source.title == source.title
+    assert outcome_source.excerpt is None
+    assert judge_input.sources[0] == source
 
 
 @pytest.mark.asyncio
@@ -123,7 +507,11 @@ async def test_successful_external_tool_call_is_attached_as_runtime_evidence():
         sources=[],
     )
     limits = ExecutionLimits(4, 4)
-    limits.record_tool_success("analyst", "estimate_medicine_consumption")
+    limits.record_tool_success(
+        "analyst",
+        "estimate_medicine_consumption",
+        '{"estimate": 28, "coverage_days": 21}',
+    )
     factory = FakeFactory(
         analyst=FakeAgent(SpecialistResult(agent="analyst", status="success", answer="Estimativa"))
     )
@@ -139,6 +527,7 @@ async def test_successful_external_tool_call_is_attached_as_runtime_evidence():
     assert len(evidence) == 1
     assert evidence[0].title == "Consulta externa: estimate_medicine_consumption"
     assert evidence[0].reference.startswith("tool-call:")
+    assert evidence[0].excerpt == '{"estimate": 28, "coverage_days": 21}'
 
 
 def request_state(message: str = "Quais aplicações existem?") -> dict:
@@ -151,9 +540,44 @@ def request_state(message: str = "Quais aplicações existem?") -> dict:
     )
 
 
+@pytest.mark.asyncio
+async def test_report_route_enforces_signed_farm_source_before_secretary():
+    router = FakeAgent(
+        RoutePlan(intent="preparar relatório", tasks=(task(agent="secretary"),))
+    )
+
+    state = request_state("Envie o relatório do lote HC-LOTE-001 por e-mail.")
+    state["sanitized_message"] = "Envie o relatório do lote HC-LOTE-001 por e-mail."
+    update = await no_roteador(state, factory=FakeFactory(router=router))
+
+    assert [item.agent.value for item in update["ordered_tasks"]] == ["farm", "secretary"]
+    farm_task, secretary_task = update["ordered_tasks"]
+    assert secretary_task.depends_on == (farm_task.task_id,)
+    assert "signed_report_source" in farm_task.required_evidence
+    assert "resolve_report_lot_report_source" in farm_task.brief_sanitized
+
+
+@pytest.mark.asyncio
+async def test_confirming_an_existing_report_does_not_create_a_new_farm_task():
+    router = FakeAgent(
+        RoutePlan(intent="enviar preparação existente", tasks=(task(agent="secretary"),))
+    )
+
+    state = request_state("Confirme e envie o relatório já preparado.")
+    state["sanitized_message"] = "Confirme e envie o relatório já preparado."
+    update = await no_roteador(state, factory=FakeFactory(router=router))
+
+    assert [item.agent.value for item in update["ordered_tasks"]] == ["secretary"]
+
+
 class RecordingGraph:
-    def __init__(self) -> None:
+    def __init__(self, values: dict[str, Any] | None = None) -> None:
         self.calls: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self.values = values or {}
+
+    async def aget_state(self, config: dict[str, Any]) -> SimpleNamespace:
+        del config
+        return SimpleNamespace(values=self.values)
 
     async def ainvoke(
         self,
@@ -278,6 +702,26 @@ async def test_executar_fluxo_preserves_trace_config_and_uses_trusted_session_id
 
 
 @pytest.mark.asyncio
+async def test_executar_fluxo_restores_saved_recipients_for_explicit_send_confirmation() -> None:
+    selectors = {"[DESTINATARIO_1]": {"kind": "name", "value": "Ana Silva"}}
+    graph = RecordingGraph(values={"recipient_selectors": selectors})
+
+    await executar_fluxo(
+        graph,
+        "Envie o relatório do lote HC-01 agora.",
+        user_id="user-demo",
+        farm_id="farm-demo",
+        session_id="session-demo",
+        interaction_id="send-confirmation",
+        send_intent_requested=True,
+    )
+
+    state, _ = graph.calls[0]
+    assert state["recipient_selectors"] == selectors
+    assert state["send_intent_requested"] is True
+
+
+@pytest.mark.asyncio
 async def test_executar_resposta_resumes_the_requested_question_thread() -> None:
     graph = RecordingGraph()
     question_id = "2c18f674-5608-4af2-a40c-b0fb1d6f0441"
@@ -346,7 +790,7 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
     state = request_state()
     state["session_context"] = session_context
     limits = ExecutionLimits(4, 4)
-    limits.record_tool_success("farm", "consultar_fazenda")
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 10}')
     with execution_limits_scope(limits):
         result = await graph.ainvoke(state)
 
@@ -370,7 +814,9 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         "interaction_id": "interaction-origin",
         "argos_task_id": "t1",
     }
-    assert judge.calls[0][0].sources == ()
+    assert judge.calls[0][0].sources == tuple(result["sources"])
+    assert judge.calls[0][0].sources[0].excerpt == '{"applications": 10}'
+    assert farm.calls[0][0].request == "Quais aplicações existem?"
     assert router.calls[0][0].session_context.session_summary == "Continuidade da tarefa"
     assert router.calls[0][0].session_context.user_tone is None
     assert farm.calls[0][0].session_context.recent_messages == (
@@ -409,14 +855,21 @@ async def test_graph_orders_dependencies_and_passes_previous_result() -> None:
     )
 
     limits = ExecutionLimits(4, 4)
-    limits.record_tool_success("farm", "consultar_fazenda")
-    limits.record_tool_success("analyst", "estimate_medicine_consumption")
+    limits.record_tool_success(
+        "farm",
+        "consultar_fazenda",
+        '{"applications": 10, "period": "2026-10"}',
+    )
     with execution_limits_scope(limits):
         result = await graph.ainvoke(request_state("Compare aplicações e indicadores"))
 
     assert result["called_agents"] == ["router", "farm", "analyst", "orchestrator", "judge"]
     assert [outcome.task.task_id for outcome in result["task_outcomes"]] == ["t1", "t2"]
     assert analyst.calls[0][0].dependency_results[0].answer == "10 aplicações"
+    assert analyst.calls[0][0].dependency_results[0].source_evidence[0].excerpt == (
+        '{"applications": 10, "period": "2026-10"}'
+    )
+    assert result["task_outcomes"][1].result.sources[0].reference.startswith("tool-call:")
 
 
 @pytest.mark.asyncio
@@ -453,7 +906,7 @@ async def test_specialist_clarification_does_not_expose_unverified_options() -> 
         FakeFactory(router=router, secretary=secretary, question_formatter=formatter)
     )
 
-    result = await graph.ainvoke(request_state("Prepare um relatório"))
+    result = await graph.ainvoke(request_state("Prepare uma mensagem"))
 
     assert result["clarification_request"].input_type == "free_text"
     assert result["clarification_request"].reason_code == "SPECIALIST_NEEDS_INPUT"
@@ -499,9 +952,12 @@ async def test_router_clarification_resumes_with_same_session() -> None:
     config = {"configurable": {"thread_id": "session-demo"}}
 
     first = await graph.ainvoke(request_state("Quero um relatório"), config=config)
-    second = await graph.ainvoke(
-        answer_state("janeiro", question_id=first["question_id"]), config=config
-    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 1}')
+    with execution_limits_scope(limits):
+        second = await graph.ainvoke(
+            answer_state("janeiro", question_id=first["question_id"]), config=config
+        )
 
     assert first["clarification_question"] == "Qual período?"
     assert "janeiro" in router.calls[1][0].message
@@ -537,9 +993,12 @@ async def test_invalid_answer_keeps_pending_question_for_retry() -> None:
 
     first = await graph.ainvoke(request_state("Quero um relatório"), config=config)
     wrong = await graph.ainvoke(answer_state("janeiro", question_id="outro-id"), config=config)
-    corrected = await graph.ainvoke(
-        answer_state("janeiro", question_id=first["question_id"]), config=config
-    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 1}')
+    with execution_limits_scope(limits):
+        corrected = await graph.ainvoke(
+            answer_state("janeiro", question_id=first["question_id"]), config=config
+        )
 
     assert wrong["question_id"] == first["question_id"]
     assert wrong["clarification_question"] == first["clarification_question"]
@@ -568,7 +1027,7 @@ async def test_specialist_clarification_retries_pending_task() -> None:
     )
     config = {"configurable": {"thread_id": "session-secretary"}}
 
-    first = await graph.ainvoke(request_state("Prepare relatório"), config=config)
+    first = await graph.ainvoke(request_state("Prepare uma mensagem"), config=config)
     second = await graph.ainvoke(
         answer_state("setembro", question_id=first["question_id"]), config=config
     )
@@ -602,15 +1061,26 @@ async def test_judge_rejection_never_publishes_unreviewed_draft() -> None:
     graph = build_graph(
         FakeFactory(
             router=FakeAgent(RoutePlan(intent="consulta", tasks=(task(),))),
-            farm=FakeAgent(SpecialistResult(agent="farm", status="abstain")),
+            farm=FakeAgent(
+                SpecialistResult(
+                    agent="farm",
+                    status="success",
+                    answer="O lote consultado tem 49 bovinos.",
+                )
+            ),
             orchestrator=FakeAgent(OrchestratorResult(draft_answer="Afirmação sem evidência")),
             judge=FakeAgent(JudgeResult(decision=JudgeDecision.REJECTED, reason="Sem fonte")),
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "list_lots", '{"head_count":49}')
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
-    assert result["final_answer"] == SAFE_ANSWER
+    assert "validação pelo modelo não foi concluída" in result["final_answer"]
+    assert '"head_count": 49' in result["final_answer"]
+    assert "judge_rejected" in result["errors"]
     assert "Afirmação sem evidência" not in result["final_answer"]
 
 
@@ -631,10 +1101,15 @@ async def test_inconsistent_judge_result_never_publishes_draft() -> None:
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 10}')
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
-    assert result["final_answer"] == SAFE_ANSWER
-    assert "judge_failed" in result["errors"]
+    assert "validação pelo modelo não foi concluída" in result["final_answer"]
+    assert '"applications": 10' in result["final_answer"]
+    assert "Afirmação sem fonte" not in result["final_answer"]
+    assert "judge_invalid_output" in result["errors"]
 
 
 @pytest.mark.asyncio
@@ -651,9 +1126,13 @@ async def test_preconstructed_inconsistent_judge_cannot_bypass_output_guardrail(
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 10}')
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
-    assert result["final_answer"] == SAFE_ANSWER
+    assert "validação pelo modelo não foi concluída" in result["final_answer"]
+    assert '"applications": 10' in result["final_answer"]
     assert "Afirmação sem fonte" not in result["final_answer"]
 
 
@@ -676,7 +1155,10 @@ async def test_judge_revision_is_bounded_and_passes_feedback() -> None:
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 1}')
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
     assert result["final_answer"] == "Texto revisado"
     assert result["retry_count"] == 1
@@ -702,9 +1184,12 @@ async def test_second_revision_abstains_instead_of_looping() -> None:
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 1}')
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
-    assert result["final_answer"] == SAFE_ANSWER
+    assert "processamento" in result["final_answer"] or "validação" in result["final_answer"]
     assert result["retry_count"] == 2
     assert len(orchestrator.calls) == 2
 
@@ -722,7 +1207,10 @@ async def test_output_guardrail_redacts_identifiers_after_approval() -> None:
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 1}')
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
     assert "farm-demo" not in result["final_answer"]
     assert "pessoa@exemplo.com" not in result["final_answer"]
@@ -739,26 +1227,45 @@ async def test_invalid_route_plan_ends_safely() -> None:
 
     result = await graph.ainvoke(request_state())
 
-    assert result["final_answer"] == SAFE_ANSWER
+    assert result["final_answer"] == ROUTER_UNAVAILABLE_ANSWER
     assert result["called_agents"] == ["router"]
-    assert "router_failed_or_invalid_plan" in result["errors"]
+    assert "router_invalid_output" in result["errors"]
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_cannot_change_trusted_source_metadata() -> None:
-    source = SourceReference(title="Registro real", reference="mock://farm-demo/1")
-    altered = SourceReference(title="Título inventado", reference=source.reference)
+async def test_orchestrator_source_reference_is_canonicalized_from_trusted_evidence() -> None:
+    altered = SourceReference(
+        title="Título inventado",
+        reference="tool-call:verified",
+        excerpt="conteúdo inventado pelo modelo",
+    )
+    judge = FakeAgent(JudgeResult(decision="approved", reason="Trecho sustenta a afirmação"))
     graph = build_graph(
         FakeFactory(
             router=FakeAgent(RoutePlan(intent="consulta", tasks=(task(),))),
             farm=FakeAgent(
-                SpecialistResult(agent="farm", status="success", answer="Dado", sources=(source,))
+                SpecialistResult(agent="farm", status="success", answer="Dado")
             ),
             orchestrator=FakeAgent(OrchestratorResult(draft_answer="Dado", sources=(altered,))),
+            judge=judge,
         )
     )
 
-    result = await graph.ainvoke(request_state())
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success(
+        "farm",
+        "list_lots",
+        '{"lot_code": "HC-LOTE-001", "head_count": 49}',
+        reference="tool-call:verified",
+    )
+    with execution_limits_scope(limits):
+        result = await graph.ainvoke(request_state())
 
-    assert result["final_answer"] == SAFE_ANSWER
-    assert "orchestrator_failed_or_unknown_source" in result["errors"]
+    trusted = result["sources"][0]
+    assert trusted.title == "Consulta externa: list_lots"
+    assert trusted.excerpt == '{"lot_code": "HC-LOTE-001", "head_count": 49}'
+    assert judge.calls[0][0].sources == (trusted,)
+    judge_outcome_source = judge.calls[0][0].outcomes[0].result.sources[0]
+    assert judge_outcome_source.reference == trusted.reference
+    assert judge_outcome_source.excerpt is None
+    assert result["final_answer"] == "Dado"

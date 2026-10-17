@@ -3,23 +3,68 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain.agents.structured_output import ToolStrategy
 from langchain.tools import tool
 from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.agent_schemas.inputs import SpecialistInput
-from app.agent_schemas.results import JudgeResult, QuestionFormatterResult, SpecialistResult
-from app.agent_schemas.synthesis import OrchestratorResult
+from app.agent_schemas.results import (
+    JudgeResult,
+    QuestionFormatterResult,
+    RoutePlan,
+    RouteTask,
+    SourceReference,
+    SpecialistResult,
+)
+from app.agent_schemas.synthesis import (
+    JudgeInput,
+    OrchestratorInput,
+    OrchestratorResult,
+    TaskOutcome,
+)
 from app.agents import specialists
-from app.agents.mock_tools import mock_consultar_fazenda
+from app.agents.mock_tools import mock_consultar_fazenda, mock_consultar_legal
 from app.agents.registry import ModelPolicyId
 from app.agents.specialists import build_agent_factory
+from app.application.execution_limits import ExecutionLimits
 from app.domain.sessions import ExecutionStatus
 from app.infrastructure.agents import langchain_factory
+from app.infrastructure.agents.langchain_factory import AgentResponseError
 from app.infrastructure.agents.model_factory import ModelRuntimeConfigurationError
 from app.infrastructure.mcp.client import McpClients
 from app.ports.agent import AgentId
+
+
+def test_model_output_contracts_ignore_unknown_provider_fields() -> None:
+    route = RoutePlan.model_validate({"intent": "lookup", "provider_metadata": {"x": 1}})
+    synthesis = OrchestratorResult.model_validate(
+        {"draft_answer": "Verified answer", "provider_metadata": {"x": 1}}
+    )
+    judge = JudgeResult.model_validate(
+        {
+            "decision": "approved",
+            "reason": "Supported by evidence",
+            "provider_metadata": {"x": 1},
+        }
+    )
+
+    assert route.intent == "lookup"
+    assert synthesis.draft_answer == "Verified answer"
+    assert judge.decision.value == "approved"
+
+    aliased_synthesis = OrchestratorResult.model_validate({"answer": "Another answer"})
+    aliased_judge = JudgeResult.model_validate(
+        {"verdict": "approve", "feedback": "Evidence supports the answer.", "unsupported": ""}
+    )
+    aliased_specialist = SpecialistResult.model_validate(
+        {"agent": "farm", "status": "success", "response": "Verified result"}
+    )
+    assert aliased_synthesis.draft_answer == "Another answer"
+    assert aliased_judge.decision.value == "approved"
+    assert aliased_judge.reason == "Evidence supports the answer."
+    assert aliased_specialist.answer == "Verified result"
 
 
 class _FakeRunnable:
@@ -73,8 +118,40 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
     )
     assert farm_call["system_prompt"]
     assert farm_call["response_format"] is SpecialistResult
-    assert any(call["response_format"] is OrchestratorResult for call in calls)
-    assert any(call["response_format"] is JudgeResult for call in calls)
+    information_call = next(
+        call
+        for call in calls
+        if [tool.name for tool in call["tools"]]
+        == ["mock_consultar_documental", "mock_consultar_legal"]
+    )
+    assert information_call["system_prompt"]
+    structured_calls = {
+        call["response_format"].schema: call
+        for call in calls
+        if isinstance(call.get("response_format"), ToolStrategy)
+    }
+    structured_router = structured_calls[RoutePlan]
+    assert structured_router["response_format"].handle_errors is False
+    orchestrator_call = next(
+        call
+        for call in calls
+        if "Você é o Orquestrador do sistema." in call["system_prompt"]
+    )
+    assert "response_format" not in orchestrator_call
+    assert all(
+        isinstance(call["response_format"], ToolStrategy)
+        for call in calls
+        if call is structured_router
+    )
+    assert all(
+        not isinstance(call.get("response_format"), ToolStrategy)
+        for call in calls
+        if call is not structured_router
+    )
+    judge_call = next(
+        call for call in calls if "Você é o Juiz do Argos." in call["system_prompt"]
+    )
+    assert "response_format" not in judge_call
 
     agent = factory.create(AgentId.FARM)
     result = await agent.run(
@@ -99,7 +176,7 @@ def test_build_agent_factory_registers_question_formatter_without_tools(monkeypa
     factory.create(AgentId.QUESTION_FORMATTER)
 
     formatter_call = next(
-        call for call in calls if call["response_format"] is QuestionFormatterResult
+        call for call in calls if call.get("response_format") is QuestionFormatterResult
     )
     assert formatter_call["tools"] == []
     assert "Formatador de Perguntas" in formatter_call["system_prompt"]
@@ -185,6 +262,430 @@ async def test_langchain_adapter_rejects_invalid_input(monkeypatch) -> None:
 
     with pytest.raises(ValidationError):
         await agent.run({"task_id": "", "goal": "", "brief_sanitized": ""})
+
+
+@pytest.mark.asyncio
+async def test_agent_accepts_complete_json_text_when_provider_omits_structured_response(
+    monkeypatch,
+) -> None:
+    class JsonTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '```json\n{"agent":"farm","status":"success",'
+                            '"answer":"49 bovinos","provider_metadata":{"retry":1}}\n```'
+                        ),
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: JsonTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="task-1",
+            goal="Consultar registros",
+            brief_sanitized="Consultar registros permitidos",
+        )
+    )
+
+    assert result.answer == "49 bovinos"
+
+
+@pytest.mark.asyncio
+async def test_agent_does_not_treat_free_text_as_structured_success(monkeypatch) -> None:
+    class PlainTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": "There are 49 bovines."}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
+
+    with pytest.raises(AgentResponseError, match="JSON estruturado"):
+        await agent.run(
+            SpecialistInput(
+                task_id="task-1",
+                goal="Consultar registros",
+                brief_sanitized="Consultar registros permitidos",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_specialist_agent_identity_is_inferred_from_its_registered_agent(monkeypatch):
+    class MissingAgentFieldRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "structured_response": {
+                    "status": "success",
+                    "response": "Lote consultado.",
+                    "provider_metadata": {"elapsed": 1},
+                }
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: MissingAgentFieldRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="farm-1",
+            goal="Consultar lote",
+            brief_sanitized="Consultar os dados do lote",
+        )
+    )
+
+    assert result.agent.value == "farm"
+    assert result.answer == "Lote consultado."
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_accepts_plain_text_and_attaches_only_received_sources(monkeypatch):
+    class PlainTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": "A fazenda tem 49 bovinos."}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
+    source = SourceReference(
+        title="Lote",
+        reference="tool-call:lot-1",
+        excerpt='{"head_count":49}',
+    )
+    outcome = TaskOutcome(
+        task=RouteTask(
+            task_id="farm-1",
+            agent="farm",
+            goal="Consultar lote",
+            brief_sanitized="Consultar dados do lote",
+        ),
+        result=SpecialistResult(
+            agent="farm",
+            status="success",
+            answer="49 bovinos",
+            sources=(source,),
+        ),
+    )
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ORCHESTRATOR)
+
+    result = await agent.run(OrchestratorInput(request="Quantos bovinos?", outcomes=(outcome,)))
+
+    assert result.draft_answer == "A fazenda tem 49 bovinos."
+    assert result.sources == (source,)
+
+
+@pytest.mark.asyncio
+async def test_judge_accepts_only_explicit_plain_text_verdict(monkeypatch):
+    class PlainTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": "decision: approved"}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
+
+    result = await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
+
+    assert result.decision.value == "approved"
+    assert result.reason == "Veredito textual explícito do Juiz."
+
+
+@pytest.mark.asyncio
+async def test_judge_accepts_json_text_without_provider_structured_response(monkeypatch):
+    class JsonTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": (
+                            '{"verdict":"approved",'
+                            '"rationale":"Os valores coincidem com a fonte.",'
+                            '"extra":"ignorado"}'
+                        ),
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: JsonTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
+
+    result = await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
+
+    assert result.decision.value == "approved"
+    assert result.reason == "Os valores coincidem com a fonte."
+
+
+@pytest.mark.asyncio
+async def test_judge_uses_explicit_verdict_when_provider_structured_payload_is_invalid(monkeypatch):
+    class MixedResponseRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "structured_response": {"decision": "yes"},
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "decision: approved - A resposta corresponde às evidências.",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: MixedResponseRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
+
+    result = await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
+
+    assert result.decision.value == "approved"
+    assert "corresponde" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_judge_rejects_ambiguous_plain_text(monkeypatch):
+    class PlainTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": "This looks okay."}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
+
+    with pytest.raises(AgentResponseError, match="veredito explícito"):
+        await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
+
+
+@pytest.mark.asyncio
+async def test_agent_accepts_plain_text_only_after_matching_tool_evidence(monkeypatch) -> None:
+    class PlainTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": "Estimativa: 52,9 ml."}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ANALYST)
+    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
+    limits.record_tool_success(
+        "analyst",
+        "estimate_medicine_consumption",
+        '{"status":"estimated","items":[{"estimated_quantity":"52.9"}]}',
+        reference="tool-call:prediction-1",
+    )
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="task-1",
+            goal="Estimar consumo",
+            brief_sanitized="Estimar consumo da Vacina Teste A",
+        ),
+        context={"argos_execution_limits": limits},
+    )
+
+    assert result.status.value == "success"
+    assert result.answer == "Estimativa: 52,9 ml."
+
+
+@pytest.mark.asyncio
+async def test_agent_uses_tool_evidence_when_provider_returns_empty_final_message(
+    monkeypatch,
+) -> None:
+    class EmptyFinalRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": ""}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: EmptyFinalRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ANALYST)
+    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
+    limits.record_tool_success(
+        "analyst",
+        "estimate_medicine_consumption",
+        '{"status":"estimated","forecast_window":{"start":"2026-10-16",'
+        '"end":"2026-11-12"},"coverage":[{"status":"confirmed"}],"items":['
+        '{"medicine_name":"Vacina Teste A","unit":"ml","estimated_quantity":"52.9",'
+        '"estimated_application_events":"4.2","estimated_head_administrations":"42"}]}',
+        reference="tool-call:prediction-1",
+    )
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="task-1",
+            goal="Estimar consumo",
+            brief_sanitized="Estimar consumo da Vacina Teste A",
+        ),
+        context={"argos_execution_limits": limits},
+    )
+
+    assert result.status.value == "success"
+    assert "fonte verificada" in result.answer
+    assert '"estimated_quantity":"52.9"' in result.sources[0].excerpt
+
+
+@pytest.mark.asyncio
+async def test_analyst_does_not_repeat_property_question_already_answered_by_mcp(monkeypatch):
+    class ClarifyingRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "structured_response": {
+                    "status": "needs_input",
+                    "missing_fields": ["propriedade"],
+                    "response": "Qual propriedade devo usar?",
+                }
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: ClarifyingRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ANALYST)
+    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
+    limits.record_tool_success(
+        "analyst",
+        "list_properties",
+        '{"items":[{"property_id":"property-1",'
+        '"property_name":"Fazenda Sol Nascente"}]}',
+        reference="tool-call:properties-1",
+    )
+    limits.record_tool_success(
+        "analyst",
+        "estimate_medicine_consumption",
+        '{"status":"estimated","forecast_window":{"start":"2026-10-16",'
+        '"end":"2026-11-12"},"coverage":[{"status":"confirmed"}],"items":['
+        '{"medicine_name":"Vacina Teste A","unit":"ml","estimated_quantity":"52.9",'
+        '"estimated_application_events":"4.2","estimated_head_administrations":"42"}]}',
+        reference="tool-call:prediction-1",
+    )
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="analyst-1",
+            request="Prediga para Fazenda Sol Nascente.",
+            goal="Estimar consumo",
+            brief_sanitized="Estimar o consumo da Vacina Teste A.",
+        ),
+        context={"argos_execution_limits": limits},
+    )
+
+    assert result.status.value == "success"
+    assert '"estimated_quantity":"52.9"' in result.sources[0].excerpt
+
+
+@pytest.mark.asyncio
+async def test_unavailable_specialist_uses_matching_verified_tool_evidence(monkeypatch) -> None:
+    class AbstainingRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "structured_response": SpecialistResult(
+                    agent="information",
+                    status="unavailable",
+                    answer="A consulta não pôde ser interpretada.",
+                )
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: AbstainingRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.INFORMATION)
+    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
+    limits.record_tool_success(
+        "information",
+        "consultar_legal",
+        '{"status":"partial","sources":[{"title":"Lei sintética",'
+        '"reference":"local://lei-1","excerpt":"Art. 1: registrar data e produto."}]}',
+        reference="tool-call:legal-1",
+    )
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="task-legal",
+            goal="Consultar regra de registro",
+            brief_sanitized="Quais dados registrar?",
+        ),
+        context={"argos_execution_limits": limits},
+    )
+
+    assert result.status.value == "partial"
+    assert "Art. 1: registrar data e produto" in result.answer
+    assert result.sources[0].reference == "tool-call:legal-1"
+
+
+@pytest.mark.asyncio
+async def test_agent_does_not_request_data_already_returned_by_a_tool(monkeypatch) -> None:
+    class ClarifyingRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {
+                "structured_response": SpecialistResult(
+                    agent="doctor",
+                    status="needs_clarification",
+                    answer="Pendente consulta da ficha documental.",
+                    missing_fields=("ficha documental",),
+                )
+            }
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: ClarifyingRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.DOCTOR)
+    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
+    limits.record_tool_success(
+        "doctor",
+        "list_medicines",
+        '{"content":{"items":[{"active_ingredient":"Ivermectina","dose":"10.000"}]}}',
+        reference="tool-call:medicine-catalog-1",
+    )
+    limits.record_tool_success(
+        "doctor",
+        "list_medicine_documents",
+        '{"content":{"items":[{"active_ingredient":"Ivermectina",'
+        '"dose":"10.000","unit":"ml"}]}}',
+        reference="tool-call:medicine-document-1",
+    )
+
+    result = await agent.run(
+        SpecialistInput(
+            task_id="task-medicine",
+            goal="Consultar princípio ativo e dose",
+            brief_sanitized="Pesquisar Ivervet Teste",
+        ),
+        context={"argos_execution_limits": limits},
+    )
+
+    assert result.status.value == "partial"
+    assert "Ivermectina" in result.answer
+    assert {source.reference for source in result.sources} == {
+        "tool-call:medicine-catalog-1",
+        "tool-call:medicine-document-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_information_agent_can_be_built_with_both_document_and_legal_mocks(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: _FakeRunnable())
+    factory = build_agent_factory(_models(), use_mock_tools=True)
+    assert factory.create(AgentId.INFORMATION) is not None
+
+    result = await mock_consultar_legal.ainvoke(
+        {"question": "Quais campos registrar?", "jurisdiction": "BR"}
+    )
+    assert "Nenhuma lei foi consultada" in result
+
+
+@pytest.mark.asyncio
+async def test_analyst_plain_text_requires_prediction_evidence(monkeypatch) -> None:
+    class PlainTextRunnable:
+        async def ainvoke(self, _state, config=None):
+            return {"messages": [{"role": "assistant", "content": "Estimativa: 52,9 ml."}]}
+
+    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
+    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ANALYST)
+    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
+    limits.record_tool_success(
+        "analyst",
+        "list_properties",
+        '{"items":[{"property_id":"00000000-0000-4000-8000-000000000001"}]}',
+        reference="tool-call:properties-1",
+    )
+
+    with pytest.raises(AgentResponseError, match="evidência suficiente"):
+        await agent.run(
+            SpecialistInput(
+                task_id="task-1",
+                goal="Estimar consumo",
+                brief_sanitized="Estimar consumo da Vacina Teste A",
+            ),
+            context={"argos_execution_limits": limits},
+        )
 
 
 @pytest.mark.asyncio

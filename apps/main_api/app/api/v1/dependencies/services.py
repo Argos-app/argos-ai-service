@@ -42,7 +42,7 @@ def _graph_provider(request: Request):
     if app_state.agent_graph is not None:
         return app_state.agent_graph
     from app.agents.specialists import build_agent_factory
-    from app.graph.workflow import build_graph
+    from app.graph.workflow import build_graph, synthesis_timeout_with_runtime_grace
 
     models = getattr(app_state, "models", None)
     if models is None:
@@ -88,6 +88,14 @@ def _graph_provider(request: Request):
                 persistence.email_preparations if persistence is not None else None
             ),
             email_dispatch=email_dispatch,
+            synthesis_agent_timeout_seconds=synthesis_timeout_with_runtime_grace(
+                model_timeout_seconds=getattr(
+                    getattr(app_state, "settings", None), "model_timeout_seconds", 60.0
+                ),
+                execution_timeout_seconds=getattr(
+                    getattr(app_state, "settings", None), "execution_timeout_seconds", 180.0
+                ),
+            ),
         )
     except Exception as exc:
         raise HTTPException(

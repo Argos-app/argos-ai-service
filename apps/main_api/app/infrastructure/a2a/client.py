@@ -7,7 +7,7 @@ import base64
 import json
 import time
 from contextlib import nullcontext
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -111,7 +111,15 @@ class DocumentA2AClient:
     def bind_observation_collector(self, collector: ObservationCollector) -> None:
         self.observation_collector = collector
 
-    async def ask(self, question: str, *, user_id: str | UUID) -> str:
+    async def ask(
+        self,
+        question: str,
+        *,
+        user_id: str | UUID,
+        skill: DocumentSkill = DocumentSkill.DOCUMENTAL,
+        jurisdiction: str | None = None,
+        reference_date: date | None = None,
+    ) -> str:
         observe_context = (
             observe_operation(
                 self.observation_collector,
@@ -119,13 +127,13 @@ class DocumentA2AClient:
                 operation_name="a2a.documental.message.send",
                 operation_phase=OperationPhase.EXECUTION,
                 observation_level=ObservationLevel.TRANSPORT_ATTEMPT,
-                agent="documental",
+                agent=skill.value,
                 timeout_ms=self._timeout_seconds * 1000,
                 error_origin=ErrorOrigin.TRANSPORT,
                 protocol=ProtocolMetadata(
                     name="a2a",
                     operation="message.send",
-                    skill=DocumentSkill.DOCUMENTAL.value,
+                    skill=skill.value,
                     task_state="working",
                 ),
             )
@@ -137,7 +145,9 @@ class DocumentA2AClient:
             request = DocumentQuestionRequest(
                 request_id=request_id,
                 question=question,
-                skill=DocumentSkill.DOCUMENTAL,
+                skill=skill,
+                jurisdiction=jurisdiction,
+                reference_date=reference_date,
                 deadline_at=datetime.now(UTC) + timedelta(seconds=self._timeout_seconds),
             )
             delegation = self._delegation_token(
@@ -180,7 +190,7 @@ class DocumentA2AClient:
                 protocol = ProtocolMetadata(
                     name="a2a",
                     operation="message.send",
-                    skill=DocumentSkill.DOCUMENTAL.value,
+                    skill=skill.value,
                     task_state=task_state,
                 )
                 if task_state == "rejected":

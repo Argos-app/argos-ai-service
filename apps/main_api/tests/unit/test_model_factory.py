@@ -66,6 +66,31 @@ def test_simulated_model_emits_a_valid_route_plan():
     assert route.tasks[0].agent is SpecialistAgentId.FARM
 
 
+def test_simulated_model_preserves_router_request_for_document_search():
+    from app.infrastructure.agents.simulated_model import _tool_arguments
+
+    request = "Consulte os termos globais sintéticos e cite o trecho relevante."
+    router_input = HumanMessage(
+        content=json.dumps({"message": request, "session_context": {}})
+    )
+
+    plan = SimulatedChatModel._structured_call("RoutePlan", [router_input])[1]
+    specialist_input = plan["tasks"][0]
+
+    assert specialist_input["goal"] == request
+    assert _tool_arguments("consultar_documental", specialist_input) == {"question": request}
+
+
+def test_simulated_doctor_filters_catalog_by_requested_medicine_name():
+    from app.infrastructure.agents.simulated_model import _tool_arguments
+
+    request = "Consulte no catálogo o medicamento Ivervet Teste e informe o princípio ativo."
+
+    assert _tool_arguments("list_medicines", {"goal": request}) == {
+        "payload": {"brand_name": "Ivervet Teste"}
+    }
+
+
 def test_simulated_model_routes_report_through_farm_then_secretary():
     route = (
         SimulatedChatModel()
@@ -80,6 +105,18 @@ def test_simulated_model_routes_report_through_farm_then_secretary():
     assert route.tasks[1].depends_on == (route.tasks[0].task_id,)
     assert route.tasks[0].goal.endswith("HC-LOTE-076.")
     assert "autorizou explicitamente o envio" in route.tasks[1].goal
+
+
+def test_simulated_confirmation_sends_existing_preparation_without_rerunning_farm():
+    route = (
+        SimulatedChatModel()
+        .with_structured_output(RoutePlan)
+        .invoke("Confirmo a preparação. Envie agora o relatório já preparado.")
+    )
+
+    assert [task.agent for task in route.tasks] == [SpecialistAgentId.SECRETARY]
+    assert route.tasks[0].task_id == "simulated_secretary_send_prepared"
+    assert "autorizou explicitamente o envio" in route.tasks[0].goal
 
 
 def test_simulated_model_does_not_authorize_send_for_prepare_only_request():
@@ -128,7 +165,7 @@ def test_simulated_secretary_uses_report_artifact_from_farm_dependency():
 
 
 def test_simulated_secretary_sends_only_after_preparation_and_explicit_intent():
-    from app.infrastructure.agents.simulated_model import _next_tool
+    from app.infrastructure.agents.simulated_model import _next_tool, _tool_arguments
 
     message = HumanMessage(
         content=json.dumps(
@@ -149,9 +186,25 @@ def test_simulated_secretary_sends_only_after_preparation_and_explicit_intent():
         tool_call_id="prepare-2",
         name="prepare_report",
     )
+    sent = ToolMessage(
+        content=json.dumps({"status": "accepted", "report_id": "report-1"}),
+        tool_call_id="send-1",
+        name="send_report",
+    )
 
     assert _next_tool(tools, json.loads(message.content), [message, ready]) == "send_report"
     assert _next_tool(tools, json.loads(message.content), [message, unresolved]) is None
+    assert _next_tool(tools, json.loads(message.content), [message, sent]) is None
+    assert _next_tool(tools, json.loads(message.content), []) == "send_report"
+    assert (
+        _next_tool(
+            ["resolve_report_lot_report_source", "list_lots"],
+            {"task_id": "simulated_farm_report"},
+            [],
+        )
+        == "resolve_report_lot_report_source"
+    )
+    assert _tool_arguments("send_report") == {}
     assert (
         _next_tool(
             tools,
@@ -268,8 +321,8 @@ def test_factory_maps_each_internal_policy_to_its_configured_model():
     assert models[ModelPolicyId.FARM] is not models[ModelPolicyId.ANALYST]
     assert models[ModelPolicyId.ROUTER] is not models[ModelPolicyId.FARM]
     assert calls[0]["api_key"] == "test-secret"
-    assert calls[0]["max_retries"] == 0
-    assert calls[0]["max_tokens"] == 1200
+    assert calls[0]["max_retries"] == 2
+    assert calls[0]["max_tokens"] == 4096
 
 
 def test_factory_reuses_instance_when_agents_share_a_model_name():
@@ -309,6 +362,10 @@ def test_per_agent_model_names_are_loaded_from_environment(monkeypatch):
     [
         {"model_max_output_tokens": 0},
         {"model_max_output_tokens": 8193},
+        {"model_max_retries": -1},
+        {"model_max_retries": 3},
+        {"document_a2a_timeout_seconds": 0},
+        {"document_a2a_timeout_seconds": 61},
         {"execution_max_model_calls": 0},
         {"execution_max_tool_calls": 101},
         {"execution_timeout_seconds": 301},
@@ -321,6 +378,7 @@ def test_execution_limits_are_validated(overrides):
 
 def test_execution_limits_are_loaded_from_environment(monkeypatch):
     monkeypatch.setenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "900")
+    monkeypatch.setenv("MAIN_API_MODEL_MAX_RETRIES", "2")
     monkeypatch.setenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "8")
     monkeypatch.setenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "7")
     monkeypatch.setenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "45")
@@ -328,9 +386,16 @@ def test_execution_limits_are_loaded_from_environment(monkeypatch):
     settings = Settings.from_env()
 
     assert settings.model_max_output_tokens == 900
+    assert settings.model_max_retries == 2
     assert settings.execution_max_model_calls == 8
     assert settings.execution_max_tool_calls == 7
     assert settings.execution_timeout_seconds == 45
+
+
+def test_document_a2a_timeout_is_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "50")
+
+    assert Settings.from_env().document_a2a_timeout_seconds == 50
 
 
 def test_model_factory_rejects_models_without_structured_output():
@@ -350,5 +415,32 @@ def test_model_factory_rejects_specialist_without_tool_support():
 
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
     models[ModelPolicyId.FARM] = NoToolBinding()
-    with pytest.raises(ModelRuntimeConfigurationError, match="chamada de ferramentas"):
+    with pytest.raises(
+        ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"
+    ):
         validate_model_capabilities(models)
+
+
+def test_model_factory_rejects_orchestrator_without_tool_support():
+    class NativeStructuredOnly:
+        def with_structured_output(self, _schema):
+            return self
+
+    models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
+    models[ModelPolicyId.ORCHESTRATOR] = NativeStructuredOnly()
+
+    with pytest.raises(
+        ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"
+    ):
+        validate_model_capabilities(models)
+
+
+def test_model_factory_allows_native_structured_output_for_judge():
+    class NativeStructuredOnly:
+        def with_structured_output(self, _schema):
+            return self
+
+    models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
+    models[ModelPolicyId.JUDGE] = NativeStructuredOnly()
+
+    validate_model_capabilities(models)

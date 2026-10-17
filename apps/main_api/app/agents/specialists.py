@@ -42,8 +42,10 @@ from app.prompts.specialists import (
     SECRETARY_SYSTEM_PROMPT,
 )
 from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from langchain_core.tools import BaseTool
 
+from packages.contracts.a2a import DocumentSkill
 from packages.observability import ObservationCollector
 
 AgentToolBindings = Mapping[AgentId, Mapping[str, Sequence[BaseTool]]]
@@ -138,6 +140,7 @@ def build_agent_factory(
     if documental_a2a_client is not None:
         overrides.setdefault(AgentId.INFORMATION, {})["documental_a2a"] = (
             build_document_a2a_tool(documental_a2a_client),
+            build_document_a2a_tool(documental_a2a_client, skill=DocumentSkill.LEGAL),
         )
     for agent_id, slots in (tool_bindings or {}).items():
         overrides.setdefault(agent_id, {}).update(
@@ -187,7 +190,10 @@ def build_agent_factory(
         model=models[ModelPolicyId.ROUTER],
         tools=[],
         system_prompt=ROUTER_SYSTEM_PROMPT,
-        response_format=RoutePlan,
+        # The configured NVIDIA OpenAI-compatible endpoint returns HTTP 500
+        # for RoutePlan's native JSON Schema response, while function calling
+        # accepts the same schema and validates the resulting object.
+        response_format=ToolStrategy(RoutePlan, handle_errors=False),
     )
 
     farm_app = create_agent(
@@ -229,14 +235,19 @@ def build_agent_factory(
         model=models[ModelPolicyId.ORCHESTRATOR],
         tools=[],
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-        response_format=OrchestratorResult,
+        # The Orchestrator has no tools. Keep its final text/JSON response raw
+        # and validate it in LangChainAgentFactory; ToolStrategy made compatible
+        # providers retry plain answers as synthetic tool calls and consume the
+        # full execution deadline.
     )
 
     judge_app = create_agent(
         model=models[ModelPolicyId.JUDGE],
         tools=[],
         system_prompt=JUDGE_SYSTEM_PROMPT,
-        response_format=JudgeResult,
+        # Validate JSON or an explicit verdict in LangChainAgentFactory. Asking
+        # the compatible endpoint for native structured output made the judge
+        # fail before the application could validate the same contract.
     )
 
     question_formatter_app = create_agent(

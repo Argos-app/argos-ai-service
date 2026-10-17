@@ -38,12 +38,21 @@ class RouterInput(_AgentInput):
     session_context: SessionContext = Field(default_factory=SessionContext)
 
 
+class DependencyEvidence(_AgentInput):
+    """Trecho validado da evidência que sustenta um resultado dependente."""
+
+    title: str = Field(min_length=1, max_length=160)
+    reference: str = Field(min_length=1, max_length=200)
+    excerpt: str = Field(min_length=1, max_length=48_000)
+
+
 class DependencyResult(_AgentInput):
     """Resultado anterior disponibilizado a uma tarefa dependente."""
 
     task_id: str = Field(min_length=1)
     answer: str
     source_references: tuple[str, ...] = ()
+    source_evidence: tuple[DependencyEvidence, ...] = ()
     report_artifact_refs: tuple[str, ...] = ()
 
 
@@ -51,6 +60,7 @@ class SpecialistInput(_AgentInput):
     """Tarefa sanitizada encaminhada pelo roteador a um agente especialista."""
 
     task_id: str = Field(min_length=1)
+    request: str | None = Field(default=None, min_length=1, max_length=8000)
     goal: str = Field(min_length=1)
     brief_sanitized: str = Field(min_length=1)
     context_refs: tuple[str, ...] = ()

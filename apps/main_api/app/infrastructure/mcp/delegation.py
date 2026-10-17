@@ -17,6 +17,7 @@ _AGENT_OPERATIONS = {
     "data": {
         "fazenda": frozenset({"cattle.read", "medicine.read", "report.read"}),
         "doutor": frozenset({"medicine.read"}),
+        "analista": frozenset({"cattle.read"}),
     },
     "prediction": {"analista": frozenset({"prediction.read"})},
 }

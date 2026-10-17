@@ -77,6 +77,36 @@ def test_issued_data_token_matches_mcp_verifier_contract(delegation_keys):
     assert (context.expires_at - context.issued_at).total_seconds() == 240
 
 
+def test_analyst_can_delegate_only_property_resolution_to_data_mcp(delegation_keys):
+    private_key, public_key = delegation_keys
+    data_url = "https://data.example/mcp"
+    issuer = McpDelegationTokenIssuer(
+        Settings(
+            mcp_data_url=data_url,
+            mcp_delegation_key_id="main-key",
+            mcp_delegation_private_key=private_key,
+        )
+    )
+    verifier = DataTokenVerifier(
+        {"main-key": public_key},
+        issuer="argos-main-service",
+        audience=data_url,
+    )
+
+    token = issuer.issue(
+        service="data",
+        user_id=uuid4(),
+        authorized_property_ids=(uuid4(),),
+        agent="analista",
+        operation="cattle.read",
+        request_id=uuid4(),
+    )
+
+    context = verifier.verify(token)
+    assert context.agent_id == "analista"
+    assert context.operations == frozenset({"cattle.read"})
+
+
 def test_issued_prediction_token_matches_shared_verifier_contract(delegation_keys):
     private_key, public_key = delegation_keys
     prediction_url = "https://prediction.example/mcp"

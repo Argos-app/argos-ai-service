@@ -120,7 +120,7 @@ class Settings:
     mcp_delegation_ttl_seconds: int = 240
     document_a2a_url: str | None = None
     document_a2a_service_token: str | None = field(default=None, repr=False)
-    document_a2a_timeout_seconds: float = 25.0
+    document_a2a_timeout_seconds: float = 45.0
     document_a2a_response_max_bytes: int = 1_000_000
     model_api_base_url: str | None = None
     model_mode: str = "provider"
@@ -134,15 +134,17 @@ class Settings:
     model_orchestrator_name: str | None = None
     model_judge_name: str | None = None
     model_question_formatter_name: str | None = None
-    model_timeout_seconds: float = 30.0
-    model_max_output_tokens: int = 1200
+    model_timeout_seconds: float = 60.0
+    model_max_retries: int = 2
+    model_max_output_tokens: int = 4096
     execution_max_model_calls: int = 12
     execution_max_tool_calls: int = 12
-    execution_timeout_seconds: float = 90.0
+    execution_timeout_seconds: float = 180.0
     langsmith_api_key: str | None = field(default=None, repr=False)
     langsmith_project: str = "argos-ai-service"
     langsmith_endpoint: str | None = None
     langsmith_capture_content: bool = False
+    langsmith_workspace_id: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -229,7 +231,7 @@ class Settings:
             document_a2a_url=os.getenv("MAIN_API_DOCUMENT_A2A_URL") or None,
             document_a2a_service_token=os.getenv("MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN") or None,
             document_a2a_timeout_seconds=float(
-                os.getenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "25")
+                os.getenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "45")
             ),
             document_a2a_response_max_bytes=int(
                 os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
@@ -246,14 +248,18 @@ class Settings:
             model_orchestrator_name=os.getenv("MAIN_API_MODEL_ORCHESTRATOR") or None,
             model_judge_name=os.getenv("MAIN_API_MODEL_JUDGE") or None,
             model_question_formatter_name=os.getenv("MAIN_API_MODEL_QUESTION_FORMATTER") or None,
-            model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "30")),
-            model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "1200")),
+            model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "60")),
+            model_max_retries=int(os.getenv("MAIN_API_MODEL_MAX_RETRIES", "2")),
+            model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "4096")),
             execution_max_model_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "12")),
             execution_max_tool_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "12")),
-            execution_timeout_seconds=float(os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "90")),
+            execution_timeout_seconds=float(
+                os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "180")
+            ),
             langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
             langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
             langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
+            langsmith_workspace_id=os.getenv("MAIN_API_LANGSMITH_WORKSPACE_ID") or None,
             langsmith_capture_content=_environment_bool("MAIN_API_LANGSMITH_CAPTURE_CONTENT"),
         )
 
@@ -276,9 +282,10 @@ class Settings:
             or not 0 <= self.auth_clock_skew_seconds <= 60
             or not self.mcp_delegation_issuer.strip()
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
-            or not 0 < self.document_a2a_timeout_seconds <= 30
+            or not 0 < self.document_a2a_timeout_seconds <= 60
             or self.document_a2a_response_max_bytes < 1
             or not 0 < self.model_timeout_seconds <= 120
+            or not 0 <= self.model_max_retries <= 2
             or not 1 <= self.model_max_output_tokens <= 8192
             or not 1 <= self.execution_max_model_calls <= 100
             or not 1 <= self.execution_max_tool_calls <= 100

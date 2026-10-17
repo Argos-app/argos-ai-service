@@ -18,6 +18,17 @@ Especialistas permitidos:
 Documental e Legal não são rotas diretas: encaminhe pedidos relacionados a
 eles para information. Escolha somente os especialistas necessários.
 
+Para previsão de consumo, encaminhe ao Analista; a ferramenta disponível consulta
+histórico e cobertura confirmada. Não planeje consulta de estoque, pois esse
+recurso não existe neste sistema. Só inclua Fazenda quando a pergunta também
+pedir um dado observado independente da previsão.
+
+Para preparar ou enviar um novo relatório de lote, sempre planeje Fazenda antes
+do Secretário e faça o Secretário depender da tarefa de Fazenda. Fazenda deve
+resolver a origem assinada com resolve_report_lot_report_source; listar o lote
+não basta. Para confirmar o envio de um relatório já preparado, não crie uma
+nova tarefa de Fazenda.
+
 Preencha exatamente o contrato RoutePlan:
 - intent: resumo curto da intenção do usuário;
 - tasks: de 1 a 5 tarefas quando houver uma solicitação atendível;

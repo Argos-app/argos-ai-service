@@ -1,9 +1,12 @@
+import asyncio
+import logging
 import re
 from functools import partial
 from typing import Any
 from uuid import UUID, uuid4
 
 from app.agent_schemas.inputs import (
+    DependencyEvidence,
     DependencyResult,
     QuestionFormatterInput,
     QuestionFormattingRequest,
@@ -37,6 +40,7 @@ from app.application.report_artifact_service import (
     ReportSourceValidationError,
     validate_report_source,
 )
+from app.application.verified_evidence import verified_evidence_fallback
 from app.domain.email_preparations import PendingRecipientResolution
 from app.domain.report_artifacts import (
     ReportArtifactExpiredError,
@@ -56,11 +60,106 @@ from langgraph.graph import END, START, StateGraph
 MAX_TASKS = 5
 MAX_REVISIONS = 1
 MAX_MESSAGE_LENGTH = 8000
+SYNTHESIS_AGENT_TIMEOUT_SECONDS = 60
+SYNTHESIS_AGENT_TIMEOUT_GRACE_SECONDS = 15.0
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
+NO_VERIFIED_RESULT_ANSWER = (
+    "Não há resultado verificável para responder: um agente necessário falhou ou se absteve. "
+    "O conteúdo solicitado permanece desconhecido; tente novamente."
+)
+ROUTER_UNAVAILABLE_ANSWER = (
+    "Não consegui iniciar o processamento desta solicitação agora. "
+    "Nenhuma consulta de dados foi concluída; tente novamente."
+)
+SYNTHESIS_UNAVAILABLE_ANSWER = (
+    "Os agentes não conseguiram consolidar os resultados em uma resposta verificável. "
+    "Tente novamente."
+)
+JUDGE_UNAVAILABLE_ANSWER = (
+    "A validação final da resposta não foi concluída; por segurança, não vou apresentar "
+    "um resultado sem revisão. Tente novamente."
+)
+_LOGGER = logging.getLogger(__name__)
+
+
+def synthesis_timeout_with_runtime_grace(
+    *, model_timeout_seconds: float, execution_timeout_seconds: float
+) -> float:
+    """Deixa a gravação e validação da resposta concluírem após a chamada do modelo."""
+    return min(
+        float(model_timeout_seconds) + SYNTHESIS_AGENT_TIMEOUT_GRACE_SECONDS,
+        float(execution_timeout_seconds),
+    )
+
+
+def _judge_outcome_summaries(outcomes: tuple[TaskOutcome, ...]) -> tuple[TaskOutcome, ...]:
+    """Avoids duplicating full source excerpts in the Judge's complete evidence list."""
+    return tuple(
+        outcome.model_copy(
+            update={
+                "result": outcome.result.model_copy(
+                    update={
+                        "sources": tuple(
+                            source.model_copy(update={"excerpt": None})
+                            for source in outcome.result.sources
+                        )
+                    }
+                )
+            }
+        )
+        for outcome in outcomes
+    )
 
 SECRET_REQUEST_PATTERN = re.compile(
     r"\b(?:revele|mostre|exiba)\b.{0,60}"
     r"\b(?:chave de api|token de acesso|senha|prompt de sistema)\b",
+    re.IGNORECASE,
+)
+
+
+def _agent_failure_reason(agent: str, error: BaseException) -> str:
+    """Converte falhas técnicas em códigos públicos seguros e específicos."""
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        status_code = getattr(current, "status_code", None)
+        if status_code == 429:
+            return f"{agent}_provider_rate_limited"
+        if status_code in {408, 504} or isinstance(current, TimeoutError):
+            return f"{agent}_provider_timeout"
+        if isinstance(status_code, int) and 500 <= status_code <= 599:
+            return f"{agent}_provider_unavailable"
+        if status_code in {401, 403}:
+            return f"{agent}_provider_rejected"
+        if type(current).__name__ in {
+            "AgentResponseError",
+            "OutputParserException",
+            "ValidationError",
+        } or isinstance(current, (TypeError, ValueError)):
+            return f"{agent}_invalid_output"
+        current = current.__cause__ or current.__context__
+    return f"{agent}_execution_failed"
+
+
+def _all_agent_results_failed_without_evidence(state: AgentState) -> bool:
+    outcomes = state.get("task_outcomes", ())
+    if not outcomes or any(source.excerpt for source in state.get("sources", ())):
+        return False
+    unavailable_statuses = {
+        SpecialistStatus.ABSTAIN,
+        SpecialistStatus.ERROR,
+        SpecialistStatus.UNAVAILABLE,
+    }
+    return all(outcome.result.status in unavailable_statuses for outcome in outcomes)
+_REPORT_WORD_PATTERN = re.compile(r"\brelat[óo]rio\b", re.IGNORECASE)
+_REPORT_ACTION_PATTERN = re.compile(
+    r"\b(?:prepar\w*|ger\w*|cri\w*|mont\w*|envie|enviar|mande|mandar|"
+    r"encaminhe|encaminhar)\b",
+    re.IGNORECASE,
+)
+_EXISTING_REPORT_PATTERN = re.compile(
+    r"\b(?:já\s+)?(?:(?:está|foi|estava)\s+)?(?:preparad\w*|gerad\w*|criad\w*)\b",
     re.IGNORECASE,
 )
 
@@ -259,6 +358,82 @@ def unique_sources(sources: list[SourceReference]) -> list[SourceReference]:
     return unique
 
 
+def _require_report_source_dependency(plan: RoutePlan, message: str) -> RoutePlan:
+    """Impõe Fazenda → Secretário para gerar/enviar um relatório-fonte novo."""
+    if (
+        not _REPORT_WORD_PATTERN.search(message)
+        or not _REPORT_ACTION_PATTERN.search(message)
+        or _EXISTING_REPORT_PATTERN.search(message)
+        or plan.missing_slots
+    ):
+        return plan
+    secretary_tasks = [task for task in plan.tasks if task.agent == AgentId.SECRETARY]
+    if not secretary_tasks:
+        return plan
+
+    tasks = list(plan.tasks)
+    farm_tasks = [task for task in tasks if task.agent == AgentId.FARM]
+    if not farm_tasks and len(tasks) < MAX_TASKS:
+        task_id = "report-source"
+        suffix = 2
+        while any(task.task_id == task_id for task in tasks):
+            task_id = f"report-source-{suffix}"
+            suffix += 1
+        farm_tasks = [
+            RouteTask(
+                task_id=task_id,
+                agent=AgentId.FARM,
+                goal="Resolver a fonte assinada do relatório solicitado",
+                brief_sanitized=(
+                    "Resolver o lote e obter a fonte assinada do relatório com "
+                    "resolve_report_lot_report_source; não substituir por list_lots."
+                ),
+                required_evidence=("signed_report_source",),
+            )
+        ]
+        tasks.insert(0, farm_tasks[0])
+
+    farm_ids = {task.task_id for task in farm_tasks}
+    if not farm_ids:
+        return plan
+    required_instruction = (
+        "Este relatório será preparado pelo Secretário. Como requisito obrigatório, "
+        "chame resolve_report_lot_report_source com o lote identificado; list_lots "
+        "sozinho não fornece o artefato assinado."
+    )
+    normalized_tasks: list[RouteTask] = []
+    for task in tasks:
+        if task.agent == AgentId.FARM and task.task_id in farm_ids:
+            task = task.model_copy(
+                update={
+                    "brief_sanitized": f"{task.brief_sanitized}\n{required_instruction}",
+                    "required_evidence": tuple(
+                        dict.fromkeys((*task.required_evidence, "signed_report_source"))
+                    ),
+                }
+            )
+        elif task.agent == AgentId.SECRETARY:
+            task = task.model_copy(
+                update={
+                    "depends_on": tuple(dict.fromkeys((*task.depends_on, *farm_ids)))
+                }
+            )
+        normalized_tasks.append(task)
+    return plan.model_copy(update={"tasks": tuple(normalized_tasks)})
+
+
+def _canonicalize_sources(
+    candidate_sources: tuple[SourceReference, ...],
+    trusted_sources: list[SourceReference],
+) -> tuple[SourceReference, ...]:
+    """Aceita somente referências emitidas pelo fluxo e recupera seus metadados confiáveis."""
+    canonical_by_reference = {source.reference: source for source in trusted_sources}
+    requested_references = tuple(dict.fromkeys(source.reference for source in candidate_sources))
+    if any(reference not in canonical_by_reference for reference in requested_references):
+        raise ValueError("unknown_source")
+    return tuple(canonical_by_reference[reference] for reference in requested_references)
+
+
 def no_guardrail_entrada(state: AgentState) -> dict:
     messages = state.get("messages", [])
     message = messages[-1] if messages else None
@@ -278,10 +453,17 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         )
 
     protected = protect_user_input(raw_text)
+    protected_text = protected.sanitized_text
+    protected_recipients = protected.recipient_selectors
+    if state.get("input_kind") == "answer" and state.get("sanitized_message"):
+        boundary = "\n<ARGOS_ANSWER_BOUNDARY>\n"
+        contextual = protect_user_input(f"{state['sanitized_message']}{boundary}{raw_text}")
+        protected_text = contextual.sanitized_text.split(boundary, maxsplit=1)[1]
+        protected_recipients = contextual.recipient_selectors
     recipient_selectors, sanitized = merge_recipient_selectors(
         dict(state.get("recipient_selectors") or {}),
-        protected.recipient_selectors,
-        protected.sanitized_text,
+        protected_recipients,
+        protected_text,
     )
     send_intent_requested = bool(state.get("send_intent_requested")) or (
         state.get("input_kind") != "answer" and protected.send_intent_requested
@@ -403,14 +585,21 @@ async def no_roteador(
             context=build_agent_context(state, config=config),
         )
         plan = RoutePlan.model_validate(response)
+        plan = _require_report_source_dependency(plan, state["sanitized_message"])
         ordered = order_tasks(plan)
     except ExecutionEventWriteError:
         raise
-    except Exception:
+    except Exception as exc:
+        failure_reason = _agent_failure_reason(AgentId.ROUTER.value, exc)
+        _LOGGER.warning(
+            "agent execution failed: %s",
+            type(exc).__name__,
+            extra={"agent": AgentId.ROUTER.value, "failure_reason": failure_reason},
+        )
         return {
             "called_agents": called,
-            "errors": [*state.get("errors", []), "router_failed_or_invalid_plan"],
-            "final_answer": SAFE_ANSWER,
+            "errors": [*state.get("errors", []), failure_reason],
+            "final_answer": ROUTER_UNAVAILABLE_ANSWER,
         }
 
     update: dict[str, Any] = {
@@ -512,7 +701,7 @@ async def no_especialista(
                         "task_id": dependency.task.task_id,
                     }
                 report_refs_by_dependency[dependency.task.task_id] = refs
-        except ReportArtifactExpiredError, ReportSourceExpiredError:
+        except (ReportArtifactExpiredError, ReportSourceExpiredError):
             if state.get("report_source_renewal_count", 0) < 1:
                 source_index = next(
                     index
@@ -541,24 +730,32 @@ async def no_especialista(
                     "report_source_renewal_count": (
                         state.get("report_source_renewal_count", 0) + 1
                     ),
-                    "errors": [
-                        *state.get("errors", []),
-                        "expired_report_source_renewed_by_farm",
-                    ],
                 }
             blocked = True
             errors = [*state.get("errors", []), "report_source_expired_after_renewal"]
-        except ReportArtifactNotFoundError, ReportSourceValidationError, ValueError:
+        except (ReportArtifactNotFoundError, ReportSourceValidationError, ValueError):
             blocked = True
             errors.append("invalid_or_missing_report_artifact")
 
     called = list(state.get("called_agents", []))
+    failure_reason = None
 
     if blocked:
+        report_source_missing = "invalid_or_missing_report_artifact" in errors
         result = SpecialistResult(
             agent=task.agent,
-            status=SpecialistStatus.ABSTAIN,
-            answer="Uma tarefa anterior não forneceu os dados necessários.",
+            status=SpecialistStatus.UNAVAILABLE,
+            answer=(
+                "A consulta do lote não disponibilizou a fonte assinada exigida; "
+                "nenhum relatório foi preparado e nenhum e-mail foi enviado."
+                if report_source_missing
+                else "A tarefa anterior não produziu dados confiáveis para continuar."
+            ),
+            error=(
+                "required_signed_report_source_missing"
+                if report_source_missing
+                else "dependency_unavailable"
+            ),
         )
         errors.append("blocked_dependency")
     else:
@@ -567,12 +764,22 @@ async def no_especialista(
                 task_id=outcome.task.task_id,
                 answer=outcome.result.answer,
                 source_references=tuple(source.reference for source in outcome.result.sources),
+                source_evidence=tuple(
+                    DependencyEvidence(
+                        title=source.title,
+                        reference=source.reference,
+                        excerpt=source.excerpt,
+                    )
+                    for source in outcome.result.sources
+                    if source.excerpt
+                ),
                 report_artifact_refs=report_refs_by_dependency.get(outcome.task.task_id, ()),
             )
             for outcome in dependencies
         )
         agent_input = SpecialistInput(
             task_id=task.task_id,
+            request=state.get("sanitized_message") or None,
             goal=task.goal,
             brief_sanitized=task.brief_sanitized,
             context_refs=task.context_refs,
@@ -602,12 +809,18 @@ async def no_especialista(
                 AgentId.INFORMATION,
             }:
                 limits = context.get("argos_execution_limits")
-                evidence = (
+                own_evidence = (
                     limits.evidence_for(agent_id.value)
                     if isinstance(limits, ExecutionLimits)
                     else ()
                 )
-                if not evidence and result.status in {
+                inherited_sources = tuple(
+                    source
+                    for dependency in dependencies
+                    for source in dependency.result.sources
+                    if source.excerpt
+                )
+                if not own_evidence and not inherited_sources and result.status in {
                     SpecialistStatus.SUCCESS,
                     SpecialistStatus.PARTIAL,
                 }:
@@ -620,27 +833,58 @@ async def no_especialista(
                         }
                     )
                     errors.append(f"{agent_id.value}_external_evidence_missing")
-                elif evidence:
+                else:
+                    source_evidence = tuple(
+                        SourceReference(
+                            title=f"Consulta externa: {item.tool_name}",
+                            reference=item.reference,
+                            excerpt=item.excerpt,
+                        )
+                        for item in own_evidence
+                    )
                     result = result.model_copy(
                         update={
                             "sources": tuple(
-                                SourceReference(
-                                    title=f"Consulta externa: {tool_name}",
-                                    reference=reference,
-                                )
-                                for tool_name, reference in evidence
+                                unique_sources([*source_evidence, *inherited_sources])
                             )
                         }
                     )
         except ExecutionEventWriteError:
             raise
-        except Exception:
+        except Exception as exc:
+            failure_reason = _agent_failure_reason(agent_id.value, exc)
+            _LOGGER.warning(
+                "agent execution failed: %s",
+                type(exc).__name__,
+                extra={"agent": agent_id.value, "failure_reason": failure_reason},
+            )
+            limits = current_execution_limits()
+            tool_result = (
+                limits.latest_non_evidence_result(agent_id.value)
+                if isinstance(limits, ExecutionLimits)
+                else None
+            )
+            tool_status = tool_result.status if tool_result is not None else None
+            fallback_status = (
+                SpecialistStatus.ABSTAIN
+                if tool_status == "abstain"
+                else SpecialistStatus.UNAVAILABLE
+                if tool_status in {"unavailable", "corpus_updating"}
+                else SpecialistStatus.ERROR
+            )
+            answer = (
+                f"A ferramenta {tool_result.tool_name} retornou status {tool_status}; "
+                "não há resultado verificável para apresentar."
+                if tool_result is not None
+                else ""
+            )
             result = SpecialistResult(
                 agent=task.agent,
-                status=SpecialistStatus.ERROR,
-                error="specialist_unavailable",
+                status=fallback_status,
+                answer=answer,
+                error=failure_reason,
             )
-            errors.append(f"{agent_id.value}_failed")
+            errors.append(failure_reason)
 
     if agent_id == AgentId.SECRETARY and email_preparations is not None:
         configurable = (config or {}).get("configurable") or {}
@@ -651,12 +895,13 @@ async def no_especialista(
                 interaction_id=UUID(state["interaction_id"]),
             )
         except Exception:
+            failure_reason = "recipient_resolution_storage_unavailable"
             result = SpecialistResult(
                 agent=task.agent,
                 status=SpecialistStatus.ERROR,
-                error="recipient_resolution_storage_unavailable",
+                error=failure_reason,
             )
-            errors.append("recipient_resolution_storage_unavailable")
+            errors.append(failure_reason)
         if trusted_recipient_question is not None:
             result = SpecialistResult(
                 agent=task.agent,
@@ -685,7 +930,14 @@ async def no_especialista(
         )
 
     outcome = TaskOutcome(task=task, result=result)
-    if result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE):
+    if result.status == SpecialistStatus.ABSTAIN:
+        errors.append(f"{agent_id.value}_abstained")
+    elif result.status == SpecialistStatus.PARTIAL:
+        errors.append(f"{agent_id.value}_partial_result")
+    elif (
+        result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE)
+        and not failure_reason
+    ):
         errors.append(f"{agent_id.value}_{result.status.value}")
     sources = unique_sources([*state.get("sources", []), *result.sources])
     update: dict[str, Any] = {
@@ -734,10 +986,7 @@ async def no_especialista(
                 if key != task.task_id
             }
             update["errors"] = [*update["errors"], "invalid_report_artifact_created"]
-    if (
-        result.status in (SpecialistStatus.NEEDS_CLARIFICATION, SpecialistStatus.NEEDS_INPUT)
-        or result.missing_fields
-    ):
+    if result.status in (SpecialistStatus.NEEDS_CLARIFICATION, SpecialistStatus.NEEDS_INPUT):
         fields = list(dict.fromkeys(result.missing_fields))
         goal = ", ".join(fields) if fields else task.goal
         update["missing_fields"] = fields
@@ -767,8 +1016,13 @@ async def no_orquestrador(
     state: AgentState,
     *,
     factory: AgentFactory,
+    timeout_seconds: float = SYNTHESIS_AGENT_TIMEOUT_SECONDS,
     config: RunnableConfig | None = None,
 ) -> dict:
+    if _all_agent_results_failed_without_evidence(state):
+        return {
+            "final_answer": _unverified_result_answer(state),
+        }
     called = [*state.get("called_agents", []), AgentId.ORCHESTRATOR.value]
     previous_review = state.get("judge_result")
     feedback = (
@@ -777,26 +1031,41 @@ async def no_orquestrador(
         else None
     )
     try:
-        response = await factory.create(AgentId.ORCHESTRATOR).run(
-            OrchestratorInput(
-                request=state["sanitized_message"],
-                outcomes=state["task_outcomes"],
-                revision_feedback=feedback,
-                session_context=_preference_context(state),
-            ),
-            context=build_agent_context(state, config=config),
-        )
+        async with asyncio.timeout(timeout_seconds):
+            response = await factory.create(AgentId.ORCHESTRATOR).run(
+                OrchestratorInput(
+                    request=state["sanitized_message"],
+                    outcomes=state["task_outcomes"],
+                    revision_feedback=feedback,
+                    session_context=_preference_context(state),
+                ),
+                context=build_agent_context(state, config=config),
+            )
         draft = OrchestratorResult.model_validate(response)
         trusted_sources = state.get("sources", [])
-        if any(source not in trusted_sources for source in draft.sources):
-            raise ValueError("unknown_source")
+        draft = draft.model_copy(
+            update={"sources": _canonicalize_sources(draft.sources, trusted_sources)}
+        )
     except ExecutionEventWriteError:
         raise
-    except Exception:
+    except Exception as exc:
+        failure_reason = _agent_failure_reason(AgentId.ORCHESTRATOR.value, exc)
+        _LOGGER.warning(
+            "agent execution failed: %s",
+            type(exc).__name__,
+            extra={"agent": AgentId.ORCHESTRATOR.value, "failure_reason": failure_reason},
+        )
+        limits = current_execution_limits()
+        evidence = limits.evidence_snapshot() if isinstance(limits, ExecutionLimits) else ()
+        fallback_answer = verified_evidence_fallback(evidence, unavailable_stage="síntese")
         return {
             "called_agents": called,
-            "errors": [*state.get("errors", []), "orchestrator_failed_or_unknown_source"],
-            "final_answer": SAFE_ANSWER,
+            "errors": [*state.get("errors", []), failure_reason],
+            "final_answer": (
+                _unverified_result_answer(state)
+                if _all_agent_results_failed_without_evidence(state)
+                else fallback_answer or SYNTHESIS_UNAVAILABLE_ANSWER
+            ),
         }
     return {"called_agents": called, "draft_result": draft}
 
@@ -805,6 +1074,7 @@ async def no_juiz(
     state: AgentState,
     *,
     factory: AgentFactory,
+    timeout_seconds: float = SYNTHESIS_AGENT_TIMEOUT_SECONDS,
     config: RunnableConfig | None = None,
 ) -> dict:
     called = [*state.get("called_agents", []), AgentId.JUDGE.value]
@@ -816,28 +1086,65 @@ async def no_juiz(
             "final_answer": SAFE_ANSWER,
         }
     try:
-        response = await factory.create(AgentId.JUDGE).run(
-            JudgeInput(
-                request=state["sanitized_message"],
-                draft_answer=draft.draft_answer,
-                sources=draft.sources,
-                outcomes=state["task_outcomes"],
-            ),
-            context=build_agent_context(state, config=config),
-        )
+        async with asyncio.timeout(timeout_seconds):
+            response = await factory.create(AgentId.JUDGE).run(
+                JudgeInput(
+                    request=state["sanitized_message"],
+                    draft_answer=draft.draft_answer,
+                    sources=tuple(unique_sources([*draft.sources, *state.get("sources", ())])),
+                    outcomes=_judge_outcome_summaries(state["task_outcomes"]),
+                ),
+                context=build_agent_context(state, config=config),
+            )
         review = JudgeResult.model_validate(response)
     except ExecutionEventWriteError:
         raise
-    except Exception:
+    except Exception as exc:
+        failure_reason = _agent_failure_reason(AgentId.JUDGE.value, exc)
+        _LOGGER.warning(
+            "agent execution failed: %s",
+            type(exc).__name__,
+            extra={"agent": AgentId.JUDGE.value, "failure_reason": failure_reason},
+        )
+        limits = current_execution_limits()
+        evidence = limits.evidence_snapshot() if isinstance(limits, ExecutionLimits) else ()
+        fallback_answer = verified_evidence_fallback(evidence, unavailable_stage="validação")
         return {
             "called_agents": called,
-            "errors": [*state.get("errors", []), "judge_failed"],
-            "final_answer": SAFE_ANSWER,
+            "errors": [*state.get("errors", []), failure_reason],
+            "final_answer": (
+                _unverified_result_answer(state)
+                if _all_agent_results_failed_without_evidence(state)
+                else fallback_answer or JUDGE_UNAVAILABLE_ANSWER
+            ),
         }
     retry_count = state.get("retry_count", 0)
+    errors = list(state.get("errors", []))
+    final_answer = None
     if review.decision == JudgeDecision.REVISE:
         retry_count += 1
-    return {"called_agents": called, "judge_result": review, "retry_count": retry_count}
+        if retry_count > MAX_REVISIONS:
+            errors.append("judge_revision_exhausted")
+    elif review.decision == JudgeDecision.REJECTED:
+        errors.append("judge_rejected")
+    invalid_approval = (
+        review.decision == JudgeDecision.APPROVED and bool(review.unsupported_claims)
+    )
+    if invalid_approval and "judge_invalid_output" not in errors:
+        errors.append("judge_invalid_output")
+    if invalid_approval or review.decision == JudgeDecision.REJECTED or (
+        review.decision == JudgeDecision.REVISE and retry_count > MAX_REVISIONS
+    ):
+        limits = current_execution_limits()
+        evidence = limits.evidence_snapshot() if isinstance(limits, ExecutionLimits) else ()
+        final_answer = verified_evidence_fallback(evidence, unavailable_stage="validação")
+    return {
+        "called_agents": called,
+        "judge_result": review,
+        "retry_count": retry_count,
+        "errors": errors,
+        **({"final_answer": final_answer} if final_answer else {}),
+    }
 
 
 async def no_formatador(
@@ -864,11 +1171,17 @@ async def no_formatador(
             raise ValueError("empty_question")
     except ExecutionEventWriteError:
         raise
-    except Exception:
+    except Exception as exc:
+        failure_reason = _agent_failure_reason(AgentId.QUESTION_FORMATTER.value, exc)
+        _LOGGER.warning(
+            "agent execution failed: %s",
+            type(exc).__name__,
+            extra={"agent": AgentId.QUESTION_FORMATTER.value, "failure_reason": failure_reason},
+        )
         question = request.question_goal
         return {
             "called_agents": called,
-            "errors": [*state.get("errors", []), "question_formatter_failed"],
+            "errors": [*state.get("errors", []), failure_reason],
             "clarification_question": question,
             "question_id": state.get("question_id") or str(uuid4()),
         }
@@ -890,7 +1203,9 @@ def no_guardrail_pergunta(state: AgentState) -> dict:
 def no_guardrail_saida(state: AgentState) -> dict:
     review = state.get("judge_result")
     draft = state.get("draft_result")
-    if (
+    if _all_agent_results_failed_without_evidence(state):
+        answer = _unverified_result_answer(state)
+    elif (
         review is None
         or review.decision != JudgeDecision.APPROVED
         or review.unsupported_claims
@@ -907,8 +1222,13 @@ def no_guardrail_saida(state: AgentState) -> dict:
 
 
 def no_saida_segura(state: AgentState) -> dict:
+    fallback = state.get("final_answer") or (
+        _unverified_result_answer(state)
+        if _all_agent_results_failed_without_evidence(state)
+        else SAFE_ANSWER
+    )
     answer = _include_email_action_summary(
-        state.get("final_answer") or SAFE_ANSWER,
+        fallback,
         state.get("email_action_summary"),
     )
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
@@ -918,6 +1238,22 @@ def _include_email_action_summary(answer: str, summary: str | None) -> str:
     if not summary:
         return answer
     return f"{answer}\n\nEstado do envio: {summary}"
+
+
+def _unverified_result_answer(state: AgentState) -> str:
+    """Explica indisponibilidade ou abstinência sem alegar que a busca não achou dados."""
+    outcomes = state.get("task_outcomes", ())
+    if any(outcome.result.status == SpecialistStatus.ABSTAIN for outcome in outcomes):
+        return (
+            "O agente necessário se absteve por não dispor de evidência validada. "
+            "O conteúdo solicitado permanece desconhecido; tente novamente."
+        )
+    if any(outcome.result.status == SpecialistStatus.UNAVAILABLE for outcome in outcomes):
+        return (
+            "A integração necessária não retornou evidência verificável. "
+            "O conteúdo solicitado permanece desconhecido; tente novamente."
+        )
+    return NO_VERIFIED_RESULT_ANSWER
 
 
 def decidir_pos_entrada(state: AgentState) -> str:
@@ -971,6 +1307,7 @@ def build_graph(
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
     email_dispatch: EmailDispatchWorkflow | None = None,
+    synthesis_agent_timeout_seconds: float = SYNTHESIS_AGENT_TIMEOUT_SECONDS,
 ):
     graph = StateGraph(AgentState)
     graph.add_node("guardrail_input", no_guardrail_entrada)
@@ -993,8 +1330,22 @@ def build_graph(
                 email_dispatch=email_dispatch,
             ),
         )
-    graph.add_node("orchestrator", partial(no_orquestrador, factory=factory))
-    graph.add_node("judge", partial(no_juiz, factory=factory))
+    graph.add_node(
+        "orchestrator",
+        partial(
+            no_orquestrador,
+            factory=factory,
+            timeout_seconds=synthesis_agent_timeout_seconds,
+        ),
+    )
+    graph.add_node(
+        "judge",
+        partial(
+            no_juiz,
+            factory=factory,
+            timeout_seconds=synthesis_agent_timeout_seconds,
+        ),
+    )
     graph.add_node("question_formatter", partial(no_formatador, factory=factory))
     graph.add_node("question_guardrail", no_guardrail_pergunta)
     graph.add_node("guardrail_output", no_guardrail_saida)
@@ -1063,6 +1414,14 @@ async def executar_fluxo(
     send_intent_requested: bool = False,
     config: RunnableConfig | None = None,
 ) -> dict:
+    run_config = build_session_config(session_id, config)
+    if send_intent_requested and not recipient_selectors:
+        get_state = getattr(graph, "aget_state", None)
+        if callable(get_state):
+            snapshot = await get_state(run_config)
+            saved = getattr(snapshot, "values", {}).get("recipient_selectors")
+            if isinstance(saved, dict):
+                recipient_selectors = saved
     state = initial_state(
         message,
         user_id=user_id,
@@ -1073,13 +1432,7 @@ async def executar_fluxo(
         recipient_selectors=recipient_selectors,
         send_intent_requested=send_intent_requested,
     )
-    return await graph.ainvoke(
-        state,
-        config=build_session_config(
-            session_id,
-            config,
-        ),
-    )
+    return await graph.ainvoke(state, config=run_config)
 
 
 async def executar_resposta(

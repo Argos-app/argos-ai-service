@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 from app.application.execution_limits import (
     ExecutionLimitExceeded,
     ExecutionLimits,
     current_execution_limits,
     execution_limits_scope,
 )
+from app.privacy import minimize_pii
 from langchain_core.callbacks import AsyncCallbackHandler
 
 
@@ -46,7 +49,17 @@ class ExecutionLimitCallback(AsyncCallbackHandler):
         self._limits.reserve_tool_output(output)
         call = self._tool_agents.pop(run_id, None)
         if call is not None:
-            self._limits.record_tool_success(*call)
+            if isinstance(output, str):
+                content = output
+            elif isinstance(getattr(output, "content", None), str):
+                content = output.content
+            else:
+                content = json.dumps(output, ensure_ascii=False, default=str)
+            self._limits.record_tool_success(
+                *call,
+                excerpt=minimize_pii(content),
+                reference=f"tool-call:{run_id}",
+            )
 
     async def on_tool_error(self, error, *, run_id, **kwargs):
         del error, kwargs

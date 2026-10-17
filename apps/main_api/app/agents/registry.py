@@ -79,6 +79,15 @@ ALLOWED_TOOL_SLOTS: dict[AgentId, frozenset[str]] = {
 }
 
 ALLOWED_TOOL_NAMES_BY_SLOT: dict[tuple[AgentId, str], frozenset[str]] = {
+    (AgentId.INFORMATION, "documental_a2a"): frozenset(
+        {
+            "consultar_documental",
+            "consultar_legal",
+            "mock_consultar_documental",
+            "mock_consultar_legal",
+            "documental_unavailable",
+        }
+    ),
     (AgentId.SECRETARY, "report_delivery"): frozenset(
         {
             "prepare_report",

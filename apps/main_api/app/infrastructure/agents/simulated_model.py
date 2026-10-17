@@ -77,10 +77,41 @@ class SimulatedChatModel(BaseChatModel):
     @staticmethod
     def _structured_call(name: str, messages: list[BaseMessage]) -> tuple[str, dict[str, Any]]:
         if name == "RoutePlan":
-            request = _last_human_text(messages)
+            request = _router_request_text(messages)
             normalized_request = request.casefold()
             lot_code = _extract_lot_code(request)
             explicit_send = protect_user_input(request).send_intent_requested
+            is_send_confirmation = explicit_send and any(
+                term in normalized_request
+                for term in (
+                    "confirmo",
+                    "confirme",
+                    "confirmação",
+                    "confirmacao",
+                    "preparação",
+                    "preparacao",
+                    "preparado",
+                )
+            ) and not re.search(r"\[DESTINATARIO_\d+\]", request, re.IGNORECASE)
+            if is_send_confirmation:
+                return name, {
+                    "intent": "confirmar envio de preparação existente",
+                    "tasks": [
+                        {
+                            "task_id": "simulated_secretary_send_prepared",
+                            "agent": "secretary",
+                            "goal": (
+                                "Enviar a preparação válida desta sessão; o pedido original "
+                                "autorizou explicitamente o envio."
+                            ),
+                            "brief_sanitized": (
+                                "Use a preparação e os destinatários persistidos, sem gerar "
+                                "outro relatório."
+                            ),
+                            "required_evidence": ["resultado do envio da preparação existente"],
+                        }
+                    ],
+                }
             is_report_request = any(
                 term in normalized_request for term in ("relatório", "relatorio", "envie", "enviar")
             ) and any(term in normalized_request for term in ("relatório", "relatorio"))
@@ -130,7 +161,17 @@ class SimulatedChatModel(BaseChatModel):
                 agent = "doctor"
             elif any(
                 term in normalized_request
-                for term in ("lei", "contrato", "documento", "juríd", "jurid")
+                for term in (
+                    "lei",
+                    "contrato",
+                    "documento",
+                    "juríd",
+                    "jurid",
+                    "termos",
+                    "condições",
+                    "condicoes",
+                    "faq",
+                )
             ):
                 agent = "information"
             return name, {
@@ -139,8 +180,10 @@ class SimulatedChatModel(BaseChatModel):
                     {
                         "task_id": "simulated_task",
                         "agent": agent,
-                        "goal": "Consultar a fonte disponível para a solicitação.",
-                        "brief_sanitized": "Solicitação enviada no modo simulado.",
+                        "goal": request[:4_000]
+                        or "Consultar a fonte disponível para a solicitação.",
+                        "brief_sanitized": request[:4_000]
+                        or "Solicitação enviada no modo simulado.",
                         "required_evidence": ["resultado da ferramenta"],
                     }
                 ],
@@ -244,6 +287,30 @@ def _last_human_text(messages: list[BaseMessage]) -> str:
     return ""
 
 
+def _router_request_text(messages: list[BaseMessage]) -> str:
+    """Retorna a mensagem original do usuário a partir do contrato do roteador."""
+    text = _last_human_text(messages)
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text
+    if isinstance(payload, dict) and isinstance(payload.get("message"), str):
+        return payload["message"]
+    return text
+
+
+def _requested_medicine_name(text: str) -> str | None:
+    match = re.search(
+        r"\bmedicamento\s+(?:chamado\s+)?[\"“]?(.+?)[\"”]?"
+        r"(?:\s+(?:e\s+(?:informe|diga|me|qual|consulte|também|tambem)|para\s+)|[,?.!]|$)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    return match.group(1).strip().strip("\"“”' ") or None
+
+
 def _agent_for_tool(name: str) -> str:
     if name.startswith("list_medicine"):
         return "doctor"
@@ -258,9 +325,20 @@ def _agent_for_tool(name: str) -> str:
 
 def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -> dict[str, Any]:
     specialist_input = specialist_input or {}
+    if name == "send_report":
+        return {}
     if name == "consultar_documental":
-        return {"question": "Consulte os documentos sintéticos disponíveis."}
-    if name in {"list_properties", "list_medicines", "list_herds", "list_lots"}:
+        question = str(
+            specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
+        )
+        return {"question": question[:4_000] or "Consulte os documentos sintéticos disponíveis."}
+    if name in {"list_medicines", "list_medicine_documents"}:
+        request_text = str(
+            specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
+        )
+        medicine_name = _requested_medicine_name(request_text)
+        return {"payload": {"brand_name": medicine_name} if medicine_name else {}}
+    if name in {"list_properties", "list_herds", "list_lots"}:
         return {"payload": {}}
     if name == "estimate_medicine_consumption":
         return {
@@ -291,6 +369,11 @@ def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str:
     task_id = str(specialist_input.get("task_id") or "")
     if task_id == "simulated_farm_report" and "resolve_report_lot_report_source" in names:
         return "resolve_report_lot_report_source"
+    if (
+        "autorizou explicitamente o envio" in str(specialist_input.get("goal") or "")
+        and "send_report" in names
+    ):
+        return "send_report"
     if "prepare_report" in names:
         return "prepare_report"
     return names[0]
@@ -299,22 +382,40 @@ def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str:
 def _next_tool(
     names: list[str], specialist_input: dict[str, Any], messages: list[BaseMessage]
 ) -> str | None:
+    if (
+        "autorizou explicitamente o envio" in str(specialist_input.get("goal") or "")
+        and "send_report" in names
+    ):
+        last_email_result = next(
+            (
+                message
+                for message in reversed(messages)
+                if isinstance(message, ToolMessage)
+                and message.name in {"prepare_report", "send_report"}
+            ),
+            None,
+        )
+        if last_email_result is None:
+            # A preparação pode existir apenas no repositório durável.
+            # O workflow valida sessão, validade, destinatários e escopo antes de enviar.
+            return "send_report"
+        if last_email_result.name == "send_report":
+            return None
+        try:
+            preparation = json.loads(str(last_email_result.content))
+        except json.JSONDecodeError:
+            return None
+        return (
+            "send_report"
+            if isinstance(preparation, dict) and preparation.get("status") == "prepared"
+            else None
+        )
     prior_tool_result = next(
         (message for message in reversed(messages) if isinstance(message, ToolMessage)),
         None,
     )
     if prior_tool_result is None:
         return _select_tool(names, specialist_input)
-    if prior_tool_result.name != "prepare_report" or "send_report" not in names:
-        return None
-    if "autorizou explicitamente o envio" not in str(specialist_input.get("goal") or ""):
-        return None
-    try:
-        preparation = json.loads(str(prior_tool_result.content))
-    except json.JSONDecodeError:
-        return None
-    if isinstance(preparation, dict) and preparation.get("status") == "prepared":
-        return "send_report"
     return None
 
 

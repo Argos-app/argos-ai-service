@@ -50,18 +50,18 @@ def validate_model_capabilities(
             raise ModelRuntimeConfigurationError(
                 f"modelo de {agent_id.value} não aceita o schema registrado"
             ) from exc
-        if definition.tool_slots:
+        if definition.tool_slots or agent_id is AgentId.ORCHESTRATOR:
             bind_tools = getattr(model, "bind_tools", None)
             if not callable(bind_tools):
                 raise ModelRuntimeConfigurationError(
-                    f"modelo de {agent_id.value} não oferece chamada de ferramentas"
+                    f"modelo de {agent_id.value} não oferece saída estruturada por ferramentas"
                 )
             try:
                 if bind_tools(()) is None:
                     raise ValueError("provider não criou modelo com ferramentas")
             except Exception as exc:
                 raise ModelRuntimeConfigurationError(
-                    f"modelo de {agent_id.value} não aceita ferramentas"
+                    f"modelo de {agent_id.value} não aceita saída estruturada por ferramentas"
                 ) from exc
 
 
@@ -109,7 +109,7 @@ def create_configured_models(
     shared_options: dict[str, Any] = {
         "api_key": settings.model_api_key,
         "timeout": settings.model_timeout_seconds,
-        "max_retries": 0,
+        "max_retries": settings.model_max_retries,
         "max_tokens": settings.model_max_output_tokens,
     }
     if settings.model_api_base_url is not None:
