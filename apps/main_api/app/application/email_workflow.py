@@ -16,6 +16,7 @@ from app.domain.email_preparations import (
     PendingRecipientResolution,
     SendAuthorizationOrigin,
 )
+from app.infrastructure.observability.recording import observe_operation
 from app.ports.email_preparation_repository import (
     EmailPreparationRepository,
     EmailSendAuthorizationConflictError,
@@ -28,6 +29,14 @@ from packages.contracts import (
     PrepareReportRequest,
     RecipientResolutionStatus,
     RecipientSelector,
+)
+from packages.observability import (
+    ErrorOrigin,
+    ObservationCollector,
+    ObservationLevel,
+    OperationKind,
+    OperationPhase,
+    ResultMetadata,
 )
 
 if TYPE_CHECKING:
@@ -163,14 +172,54 @@ class EmailWorkflow:
         email_client: McpToolServerClient,
         report_artifacts: ReportArtifactRepository,
         preparations: EmailPreparationRepository,
+        observation_collector: ObservationCollector | None = None,
     ) -> None:
         if email_client.service_name != "email":
             raise ValueError("EmailWorkflow exige um cliente MCP de e-mail")
         self._email_client = email_client
         self._report_artifacts = report_artifacts
         self._preparations = preparations
+        self._observation_collector = observation_collector
 
     async def prepare(
+        self,
+        *,
+        report_artifact_ref: UUID,
+        report_title: str,
+        configurable: dict[str, Any],
+    ) -> str:
+        if self._observation_collector is None:
+            return await self._prepare(
+                report_artifact_ref=report_artifact_ref,
+                report_title=report_title,
+                configurable=configurable,
+            )
+        async with observe_operation(
+            self._observation_collector,
+            operation_kind=OperationKind.WORKFLOW,
+            operation_name="email.prepare",
+            operation_phase=OperationPhase.EXECUTION,
+            observation_level=ObservationLevel.LOCAL_OPERATION,
+            error_origin=ErrorOrigin.APPLICATION,
+        ) as recorder:
+            result = await self._prepare(
+                report_artifact_ref=report_artifact_ref,
+                report_title=report_title,
+                configurable=configurable,
+            )
+            try:
+                payload = json.loads(result)
+            except TypeError, json.JSONDecodeError:
+                payload = None
+            code = payload.get("status") if isinstance(payload, dict) else None
+            if not isinstance(code, str) or len(code) > 120:
+                code = None
+            recorder.finish(
+                result=(ResultMetadata(source="application", code=code) if code else None)
+            )
+            return result
+
+    async def _prepare(
         self,
         *,
         report_artifact_ref: UUID,

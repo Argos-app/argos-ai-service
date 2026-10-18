@@ -1,17 +1,28 @@
 """Cliente MCP de curta duração para transporte Streamable HTTP."""
 
+from __future__ import annotations
+
 import ipaddress
 import json
 from collections.abc import Mapping
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
+from app.infrastructure.observability.recording import active_collector, observe_operation
 from app.settings import Settings
+from packages.observability import (
+    ErrorOrigin,
+    ObservationCollector,
+    ObservationLevel,
+    OperationKind,
+    OperationPhase,
+    ProtocolMetadata,
+)
 
 MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
     "data": frozenset(
@@ -101,6 +112,9 @@ class McpToolServerClient:
     allowed_tools: frozenset[str]
     timeout_seconds: float = 10.0
     response_max_bytes: int = 1_000_000
+    observation_collector: ObservationCollector | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if self.service_name not in MCP_TOOL_ALLOWLISTS:
@@ -134,34 +148,62 @@ class McpToolServerClient:
                 raise ValueError("somente o header de delegação pode variar por chamada MCP")
             headers["X-Argos-Delegation"] = value
 
-        timeout = httpx.Timeout(self.timeout_seconds)
-        try:
-            async with httpx.AsyncClient(
-                headers=headers,
-                timeout=timeout,
-                trust_env=False,
-            ) as http_client:
-                async with streamable_http_client(self.url, http_client=http_client) as streams:
-                    read_stream, write_stream, _ = streams
-                    async with ClientSession(
-                        read_stream,
-                        write_stream,
-                        read_timeout_seconds=timedelta(seconds=self.timeout_seconds),
-                    ) as session:
-                        await session.initialize()
-                        yield session
-        except (httpx.HTTPError, TimeoutError, OSError) as exc:
-            raise McpConnectionError(
-                f"falha de transporte ao comunicar com o MCP {self.service_name}"
-            ) from exc
-        except Exception as exc:
-            from mcp.shared.exceptions import McpError
-
-            if isinstance(exc, McpError):
+        options = {
+            "operation_kind": OperationKind.MCP,
+            "operation_name": f"mcp.{self.service_name}.session",
+            "operation_phase": OperationPhase.INITIALIZATION,
+            "observation_level": ObservationLevel.TRANSPORT_ATTEMPT,
+            "protocol": ProtocolMetadata(name="mcp", operation="session.initialize"),
+            "timeout_ms": self.timeout_seconds * 1000,
+            "error_origin": ErrorOrigin.TRANSPORT,
+        }
+        recorder_context = (
+            observe_operation(self.observation_collector, **options)
+            if self.observation_collector is not None
+            else nullcontext(None)
+        )
+        async with recorder_context as recorder:
+            try:
+                async with self._open_session(
+                    headers, ClientSession, streamable_http_client
+                ) as session:
+                    yield session
+            except (httpx.HTTPError, TimeoutError, OSError) as exc:
+                if recorder is not None:
+                    recorder.finish(error=exc)
                 raise McpConnectionError(
-                    f"falha ao inicializar a sessão MCP {self.service_name}"
+                    f"falha de transporte ao comunicar com o MCP {self.service_name}"
                 ) from exc
-            raise
+            except Exception as exc:
+                from mcp.shared.exceptions import McpError
+
+                if isinstance(exc, McpError):
+                    if recorder is not None:
+                        recorder.finish(error=exc)
+                    raise McpConnectionError(
+                        f"falha ao inicializar a sessão MCP {self.service_name}"
+                    ) from exc
+                if recorder is not None:
+                    recorder.finish(error=exc)
+                raise
+
+    @asynccontextmanager
+    async def _open_session(self, headers, ClientSession, streamable_http_client):
+        timeout = httpx.Timeout(self.timeout_seconds)
+        async with httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            trust_env=False,
+        ) as http_client:
+            async with streamable_http_client(self.url, http_client=http_client) as streams:
+                read_stream, write_stream, _ = streams
+                async with ClientSession(
+                    read_stream,
+                    write_stream,
+                    read_timeout_seconds=timedelta(seconds=self.timeout_seconds),
+                ) as session:
+                    await session.initialize()
+                    yield session
 
     def _check_response_size(self, response: Any) -> None:
         serialized = json.dumps(
@@ -176,14 +218,15 @@ class McpToolServerClient:
 
     async def list_tools(self) -> tuple[Any, ...]:
         """Lista apenas as ferramentas conhecidas e aprovadas para este serviço."""
-        try:
-            async with self._session() as session:
-                result = await session.list_tools()
-        except McpConnectionError:
-            raise
-        self._check_response_size(result)
-        available = {tool.name: tool for tool in result.tools}
-        return tuple(available[name] for name in sorted(self.allowed_tools & available.keys()))
+        async with self._observed_mcp_operation("list_tools", phase=OperationPhase.INITIALIZATION):
+            try:
+                async with self._session() as session:
+                    result = await session.list_tools()
+            except McpConnectionError:
+                raise
+            self._check_response_size(result)
+            available = {tool.name: tool for tool in result.tools}
+            return tuple(available[name] for name in sorted(self.allowed_tools & available.keys()))
 
     async def call_tool(
         self,
@@ -193,24 +236,72 @@ class McpToolServerClient:
         request_headers: Mapping[str, str] | None = None,
     ) -> Any:
         """Executa uma ferramenta permitida sem retry automático."""
-        if name not in self.allowed_tools:
-            raise McpToolNotAllowedError(
-                f"ferramenta {name!r} não está autorizada no MCP {self.service_name}"
-            )
-        if not isinstance(arguments, Mapping):
-            raise TypeError("arguments deve ser um objeto")
+        safe_name = name if name in MCP_TOOL_ALLOWLISTS[self.service_name] else "unknown"
+        async with self._observed_mcp_operation(f"call_tool.{safe_name}"):
+            if name not in self.allowed_tools:
+                raise McpToolNotAllowedError(
+                    f"ferramenta {name!r} não está autorizada no MCP {self.service_name}"
+                )
+            if not isinstance(arguments, Mapping):
+                raise TypeError("arguments deve ser um objeto")
 
-        try:
-            async with self._session(request_headers) as session:
-                result = await session.call_tool(name, dict(arguments))
-        except McpConnectionError:
-            raise
-        self._check_response_size(result)
-        if result.isError:
-            raise McpToolExecutionError(
-                f"a ferramenta {name!r} retornou erro no MCP {self.service_name}"
-            )
-        return result
+            try:
+                async with self._session(request_headers) as session:
+                    result = await session.call_tool(name, dict(arguments))
+            except McpConnectionError:
+                raise
+            self._check_response_size(result)
+            if result.isError:
+                raise McpToolExecutionError(
+                    f"a ferramenta {name!r} retornou erro no MCP {self.service_name}"
+                )
+            return result
+
+    @asynccontextmanager
+    async def _observed_mcp_operation(self, operation: str, *, phase=OperationPhase.EXECUTION):
+        options = {
+            "operation_kind": OperationKind.MCP,
+            "operation_name": f"mcp.{self.service_name}.{operation}"[:120],
+            "operation_phase": phase,
+            "observation_level": ObservationLevel.SDK_INVOCATION,
+            "protocol": ProtocolMetadata(name="mcp", operation=operation[:120]),
+            "timeout_ms": self.timeout_seconds * 1000,
+            "error_origin": ErrorOrigin.TRANSPORT,
+        }
+        if self.observation_collector is None:
+            yield
+            return
+        async with observe_operation(self.observation_collector, **options) as recorder:
+            try:
+                yield
+            except McpToolExecutionError as exc:
+                recorder.finish(error=exc, error_origin=ErrorOrigin.PROTOCOL)
+                raise
+
+
+def bind_observation_collector(
+    clients: McpClients,
+    collector: ObservationCollector,
+) -> McpClients:
+    """Clona os clientes configurados com o coletor runtime da aplicação."""
+    active = active_collector(collector)
+    return McpClients(
+        data=(
+            replace(clients.data, observation_collector=active)
+            if clients.data is not None
+            else None
+        ),
+        prediction=(
+            replace(clients.prediction, observation_collector=active)
+            if clients.prediction is not None
+            else None
+        ),
+        email=(
+            replace(clients.email, observation_collector=active)
+            if clients.email is not None
+            else None
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,7 +10,6 @@ from uuid import UUID
 
 from argos_a2a_agent.domain.errors import (
     CorpusSynchronizationError,
-    CorpusUpdatingError,
     DocumentDomainError,
     SourceListingIncompleteError,
     SourceReadError,
@@ -59,8 +58,9 @@ class DocumentCorpusSynchronizer:
         self._lock = asyncio.Lock()
 
     async def ensure_current(self) -> CorpusSyncResult:
-        if self._lock.locked():
-            raise CorpusUpdatingError("o corpus já está sendo sincronizado")
+        # Espera uma sincronização em andamento terminar. Rejeitar imediatamente
+        # fazia consultas simultâneas sobre um corpus já publicado retornarem
+        # "unavailable" mesmo quando a sincronização concorrente terminava bem.
         async with self._lock:
             try:
                 return await self._synchronize()

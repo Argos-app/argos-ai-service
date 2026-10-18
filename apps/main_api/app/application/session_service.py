@@ -41,6 +41,7 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
+from app.infrastructure.observability.recording import OperationRecorder, observe_operation
 from app.ports.conversation_repository import ConversationRepository
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
@@ -57,6 +58,14 @@ from app.session_config import (
     SESSION_LEASE_SECONDS,
 )
 from packages.contracts import RecipientSelector
+from packages.observability import (
+    ErrorOrigin,
+    ObservationCollector,
+    ObservationLevel,
+    OperationKind,
+    OperationPhase,
+    ResultMetadata,
+)
 
 GraphProvider = Callable[[], Any]
 SummaryGeneratorProvider = Callable[[], SessionSummaryGenerator | None]
@@ -79,6 +88,8 @@ class MongoSessionService:
         summaries: SessionSummaryRepository | None = None,
         user_memory: UserMemoryRepository | None = None,
         execution_events: ExecutionEventRepository | None = None,
+        observation_collector: ObservationCollector | None = None,
+        langsmith_callback: Any | None = None,
         email_preparations: EmailPreparationRepository | None = None,
         summary_generator_provider: SummaryGeneratorProvider | None = None,
         user_memory_extractor_provider: MemoryExtractorProvider | None = None,
@@ -90,6 +101,8 @@ class MongoSessionService:
         self._conversations = conversations
         self._session_work = session_work
         self._graph_provider = graph_provider
+        self._observation_collector = observation_collector
+        self._langsmith_callback = langsmith_callback
         self._email_preparations = email_preparations
         self._summaries = summaries
         self._user_memory = user_memory
@@ -144,6 +157,31 @@ class MongoSessionService:
         ]
 
     async def create_interaction(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        body: InteractionInput,
+    ) -> InteractionResult:
+        if self._observation_collector is None:
+            return await self._create_interaction(principal, session_id, body)
+        async with observe_operation(
+            self._observation_collector,
+            operation_kind=OperationKind.INTERACTION,
+            operation_name="interaction.process",
+            operation_phase=OperationPhase.EXECUTION,
+            observation_level=ObservationLevel.LOCAL_OPERATION,
+            error_origin=ErrorOrigin.APPLICATION,
+        ) as recorder:
+            result = await self._create_interaction(principal, session_id, body)
+            recorder.finish(
+                result=ResultMetadata(
+                    source="application",
+                    code=result.response.kind,
+                )
+            )
+            return result
+
+    async def _create_interaction(
         self,
         principal: Principal,
         session_id: UUID,
@@ -323,49 +361,69 @@ class MongoSessionService:
                     executar_resposta,
                 )
 
-                if isinstance(body, MessageInteraction):
-                    state = await executar_fluxo(
-                        graph,
-                        sanitized_input,
-                        user_id=str(principal.user_id),
-                        farm_id=str(authorized_farms[0]),
-                        session_id=str(session_id),
-                        interaction_id=str(interaction_id),
-                        session_context=session_context,
-                        recipient_selectors=recipient_selectors,
-                        send_intent_requested=send_intent_requested,
-                        config={
-                            "configurable": {
-                                "argos_user_id": str(principal.user_id),
-                                "argos_authorized_property_ids": tuple(
-                                    str(farm_id) for farm_id in authorized_farms
-                                ),
-                                "argos_request_id": str(interaction_id),
-                            }
-                        },
+                graph_recorder = (
+                    OperationRecorder(
+                        self._observation_collector,
+                        operation_kind=OperationKind.GRAPH,
+                        operation_name=(
+                            "graph.execute"
+                            if isinstance(body, MessageInteraction)
+                            else "graph.resume"
+                        ),
+                        operation_phase=OperationPhase.EXECUTION,
+                        observation_level=ObservationLevel.LOCAL_OPERATION,
+                        error_origin=ErrorOrigin.APPLICATION,
                     )
+                    if self._observation_collector is not None
+                    else None
+                )
+                try:
+                    graph_config = {
+                        "configurable": {
+                            "argos_user_id": str(principal.user_id),
+                            "argos_authorized_property_ids": tuple(
+                                str(farm_id) for farm_id in authorized_farms
+                            ),
+                            "argos_request_id": str(interaction_id),
+                        }
+                    }
+                    if self._langsmith_callback is not None:
+                        graph_config["callbacks"] = [self._langsmith_callback]
+                        graph_config["metadata"] = {"argos_operation": "session.interaction"}
+                    if isinstance(body, MessageInteraction):
+                        state = await executar_fluxo(
+                            graph,
+                            sanitized_input,
+                            user_id=str(principal.user_id),
+                            farm_id=str(authorized_farms[0]),
+                            session_id=str(session_id),
+                            interaction_id=str(interaction_id),
+                            session_context=session_context,
+                            recipient_selectors=recipient_selectors,
+                            send_intent_requested=send_intent_requested,
+                            config=graph_config,
+                        )
+                    else:
+                        state = await executar_resposta(
+                            graph,
+                            answer_text or sanitized_input,
+                            question_id=str(body.question_id),
+                            session_id=str(session_id),
+                            interaction_id=str(interaction_id),
+                            checkpoint_namespace=str(body.interaction_id),
+                            session_context=session_context,
+                            recipient_selectors=recipient_selectors,
+                            send_intent_requested=send_intent_requested,
+                            send_intent_source_interaction_id=send_intent_source_interaction_id,
+                            config=graph_config,
+                        )
+                except BaseException as exc:
+                    if graph_recorder is not None:
+                        graph_recorder.finish(error=exc, error_origin=ErrorOrigin.APPLICATION)
+                    raise
                 else:
-                    state = await executar_resposta(
-                        graph,
-                        answer_text or sanitized_input,
-                        question_id=str(body.question_id),
-                        session_id=str(session_id),
-                        interaction_id=str(interaction_id),
-                        checkpoint_namespace=str(body.interaction_id),
-                        session_context=session_context,
-                        recipient_selectors=recipient_selectors,
-                        send_intent_requested=send_intent_requested,
-                        send_intent_source_interaction_id=send_intent_source_interaction_id,
-                        config={
-                            "configurable": {
-                                "argos_user_id": str(principal.user_id),
-                                "argos_authorized_property_ids": tuple(
-                                    str(farm_id) for farm_id in authorized_farms
-                                ),
-                                "argos_request_id": str(interaction_id),
-                            }
-                        },
-                    )
+                    if graph_recorder is not None:
+                        graph_recorder.finish()
             except Exception:
                 failed = True
                 state = {"final_answer": SAFE_ANSWER}
@@ -494,6 +552,42 @@ class MongoSessionService:
         return existing
 
     async def _replay_or_reject(
+        self, interaction: InteractionRecord, session: SessionRecord
+    ) -> InteractionResult:
+        recorder = (
+            OperationRecorder(
+                self._observation_collector,
+                operation_kind=OperationKind.INTERACTION,
+                operation_name="interaction.replay_or_recovery",
+                operation_phase=OperationPhase.RECOVERY,
+                observation_level=ObservationLevel.LOCAL_OPERATION,
+                error_origin=ErrorOrigin.APPLICATION,
+            )
+            if self._observation_collector is not None
+            else None
+        )
+        try:
+            result = await self._resolve_existing_interaction(interaction, session)
+        except BaseException as exc:
+            if recorder is not None:
+                recorder.finish(error=exc)
+            raise
+        if recorder is not None:
+            is_replay = interaction.status in {
+                InteractionStatus.COMPLETED,
+                InteractionStatus.FAILED,
+            }
+            recorder.finish(
+                result=ResultMetadata(
+                    source="application",
+                    code="replayed_result" if is_replay else "recovery_result",
+                    recovered=not is_replay,
+                ),
+                replayed_result=is_replay,
+            )
+        return result
+
+    async def _resolve_existing_interaction(
         self, interaction: InteractionRecord, session: SessionRecord
     ) -> InteractionResult:
         if interaction.status in {InteractionStatus.COMPLETED, InteractionStatus.FAILED}:

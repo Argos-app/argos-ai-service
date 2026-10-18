@@ -15,6 +15,8 @@ from app.agents.registry import (
     AgentRegistry,
     ModelPolicyId,
 )
+from app.infrastructure.a2a.client import DocumentA2AClient
+from app.infrastructure.a2a.langchain_tool import build_document_a2a_tool
 from app.infrastructure.agents.langchain_factory import (
     AgentFactoryConfigurationError,
     LangChainAgentFactory,
@@ -40,6 +42,8 @@ from app.prompts.specialists import (
 )
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool
+
+from packages.observability import ObservationCollector
 
 AgentToolBindings = Mapping[AgentId, Mapping[str, Sequence[BaseTool]]]
 
@@ -112,6 +116,8 @@ def build_agent_factory(
     delegation_issuer: McpDelegationTokenIssuer | None = None,
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
+    observation_collector: ObservationCollector | None = None,
+    documental_a2a_client: DocumentA2AClient | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
@@ -122,7 +128,12 @@ def build_agent_factory(
                 delegation_issuer,
                 report_artifacts=report_artifacts,
                 email_preparations=email_preparations,
+                observation_collector=observation_collector,
             )
+        )
+    if documental_a2a_client is not None:
+        overrides.setdefault(AgentId.INFORMATION, {})["documental_a2a"] = (
+            build_document_a2a_tool(documental_a2a_client),
         )
     for agent_id, slots in (tool_bindings or {}).items():
         overrides.setdefault(agent_id, {}).update(
@@ -245,4 +256,5 @@ def build_agent_factory(
             AgentId.QUESTION_FORMATTER: question_formatter_app,
         },
         execution_events=execution_events,
+        observation_collector=observation_collector,
     )

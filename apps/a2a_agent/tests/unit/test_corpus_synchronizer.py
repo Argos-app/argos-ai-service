@@ -1,5 +1,6 @@
 """Sincronização completa do corpus e publicação fail-closed por revisão."""
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, timezone
 from hashlib import sha256
@@ -8,7 +9,6 @@ from uuid import UUID, uuid5
 import pytest
 from argos_a2a_agent.domain import (
     CorpusSynchronizationError,
-    CorpusUpdatingError,
     DocumentChunk,
     DocumentMetadata,
     IndexedDocumentChunk,
@@ -389,18 +389,24 @@ def test_processing_failure_discards_staging_without_publishing() -> None:
     assert set(writer.generations) == {old_revision}
 
 
-def test_locked_synchronizer_returns_updating_before_reading_source() -> None:
+@pytest.mark.asyncio
+async def test_concurrent_synchronizer_waits_for_active_sync() -> None:
     source = FakeSource((source_pair(UUID(int=90), b"one"),))
     synchronizer = make_synchronizer(
         source, FakeManifestRepository(), FakeProcessor(), FakeIndexWriter()
     )
-    assert run_immediate(synchronizer._lock.acquire())
+    await synchronizer._lock.acquire()
+    pending = asyncio.create_task(synchronizer.ensure_current())
+    await asyncio.sleep(0)
 
-    with pytest.raises(CorpusUpdatingError):
-        run_immediate(synchronizer.ensure_current())
-
+    assert not pending.done()
     assert source.list_calls == []
+
     synchronizer._lock.release()
+    result = await pending
+
+    assert result.updated is True
+    assert source.list_calls == [None]
 
 
 def test_manifest_revision_is_stable_for_input_order_and_timezone_equivalence() -> None:

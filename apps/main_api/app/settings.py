@@ -1,10 +1,40 @@
 """Configuração externa do serviço principal."""
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _observability_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        _LOGGER.warning(
+            "invalid observability setting; using default",
+            extra={"setting": name},
+        )
+        return default
+
+
+def _environment_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().casefold()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    _LOGGER.warning("invalid boolean setting; using default", extra={"setting": name})
+    return default
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +43,15 @@ class Settings:
     mongo_database: str = "argos_ai"
     mongo_server_selection_timeout_ms: int = 5_000
     mongo_write_timeout_ms: int = 5_000
+    observability_collection: str | None = None
+    observability_queue_max_items: int = 2_048
+    observability_queue_max_bytes: int = 8 * 1024 * 1024
+    observability_document_max_bytes: int = 16 * 1024
+    observability_batch_size: int = 100
+    observability_batch_interval_ms: int = 250
+    observability_max_attempts: int = 3
+    observability_retry_base_delay_ms: int = 50
+    observability_shutdown_timeout_ms: int = 2_000
     session_summary_input_max_tokens: int = SESSION_SUMMARY_INPUT_MAX_TOKENS
     auth_issuer: str = "argos-backend-service"
     auth_audience: str = "argos-ai-service"
@@ -31,6 +70,14 @@ class Settings:
     mcp_delegation_key_id: str | None = None
     mcp_delegation_private_key: str | None = field(default=None, repr=False)
     mcp_delegation_ttl_seconds: int = 240
+    document_a2a_url: str | None = None
+    document_a2a_service_token: str | None = field(default=None, repr=False)
+    document_a2a_timeout_seconds: float = 25.0
+    document_a2a_response_max_bytes: int = 1_000_000
+    langsmith_api_key: str | None = field(default=None, repr=False)
+    langsmith_project: str = "argos-ai-service"
+    langsmith_endpoint: str | None = None
+    langsmith_capture_content: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -53,6 +100,27 @@ class Settings:
                 os.getenv("MAIN_API_MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
             ),
             mongo_write_timeout_ms=int(os.getenv("MAIN_API_MONGO_WRITE_TIMEOUT_MS", "5000")),
+            observability_collection=os.getenv("MAIN_API_OBSERVABILITY_COLLECTION") or None,
+            observability_queue_max_items=_observability_int(
+                "MAIN_API_OBSERVABILITY_QUEUE_MAX_ITEMS", 2048
+            ),
+            observability_queue_max_bytes=_observability_int(
+                "MAIN_API_OBSERVABILITY_QUEUE_MAX_BYTES", 8 * 1024 * 1024
+            ),
+            observability_document_max_bytes=_observability_int(
+                "MAIN_API_OBSERVABILITY_DOCUMENT_MAX_BYTES", 16 * 1024
+            ),
+            observability_batch_size=_observability_int("MAIN_API_OBSERVABILITY_BATCH_SIZE", 100),
+            observability_batch_interval_ms=_observability_int(
+                "MAIN_API_OBSERVABILITY_BATCH_INTERVAL_MS", 250
+            ),
+            observability_max_attempts=_observability_int("MAIN_API_OBSERVABILITY_MAX_ATTEMPTS", 3),
+            observability_retry_base_delay_ms=_observability_int(
+                "MAIN_API_OBSERVABILITY_RETRY_BASE_DELAY_MS", 50
+            ),
+            observability_shutdown_timeout_ms=_observability_int(
+                "MAIN_API_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2000
+            ),
             session_summary_input_max_tokens=int(
                 os.getenv(
                     "MAIN_API_SESSION_SUMMARY_INPUT_MAX_TOKENS",
@@ -76,6 +144,18 @@ class Settings:
             mcp_delegation_key_id=os.getenv("MAIN_API_MCP_DELEGATION_KEY_ID") or None,
             mcp_delegation_private_key=os.getenv("MAIN_API_MCP_DELEGATION_PRIVATE_KEY") or None,
             mcp_delegation_ttl_seconds=int(os.getenv("MAIN_API_MCP_DELEGATION_TTL_SECONDS", "240")),
+            document_a2a_url=os.getenv("MAIN_API_DOCUMENT_A2A_URL") or None,
+            document_a2a_service_token=os.getenv("MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN") or None,
+            document_a2a_timeout_seconds=float(
+                os.getenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "25")
+            ),
+            document_a2a_response_max_bytes=int(
+                os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
+            ),
+            langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
+            langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
+            langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
+            langsmith_capture_content=_environment_bool("MAIN_API_LANGSMITH_CAPTURE_CONTENT"),
         )
 
     def __post_init__(self) -> None:
@@ -93,10 +173,68 @@ class Settings:
             or not 0 <= self.auth_clock_skew_seconds <= 60
             or not self.mcp_delegation_issuer.strip()
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
+            or not 0 < self.document_a2a_timeout_seconds <= 30
+            or self.document_a2a_response_max_bytes < 1
+            or not self.langsmith_project.strip()
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if self.langsmith_capture_content and not self.langsmith_api_key:
+            raise ValueError("MAIN_API_LANGSMITH_CAPTURE_CONTENT exige MAIN_API_LANGSMITH_API_KEY")
+        if self.langsmith_endpoint is not None:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed_langsmith_endpoint = urlsplit(self.langsmith_endpoint)
+                valid_langsmith_endpoint = (
+                    parsed_langsmith_endpoint.scheme == "https"
+                    and bool(parsed_langsmith_endpoint.hostname)
+                    and parsed_langsmith_endpoint.username is None
+                    and parsed_langsmith_endpoint.password is None
+                    and not parsed_langsmith_endpoint.query
+                    and not parsed_langsmith_endpoint.fragment
+                )
+            except ValueError:
+                valid_langsmith_endpoint = False
+            if not valid_langsmith_endpoint:
+                raise ValueError("MAIN_API_LANGSMITH_ENDPOINT deve usar HTTPS")
         if bool(self.mcp_delegation_key_id) != bool(self.mcp_delegation_private_key):
             raise ValueError(
                 "MAIN_API_MCP_DELEGATION_KEY_ID e "
                 "MAIN_API_MCP_DELEGATION_PRIVATE_KEY devem ser configurados juntos"
             )
+        if bool(self.document_a2a_url) != bool(self.document_a2a_service_token):
+            raise ValueError(
+                "MAIN_API_DOCUMENT_A2A_URL e MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN "
+                "devem ser configurados juntos"
+            )
+        if self.document_a2a_url is not None:
+            from urllib.parse import urlsplit
+
+            try:
+                parsed = urlsplit(self.document_a2a_url)
+                local_http = parsed.scheme == "http" and parsed.hostname in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                }
+                valid_url = (
+                    (parsed.scheme == "https" or local_http)
+                    and bool(parsed.hostname)
+                    and parsed.username is None
+                    and parsed.password is None
+                    and parsed.path.rstrip("/").endswith("/a2a")
+                    and not parsed.query
+                    and not parsed.fragment
+                    and (parsed.port is None or 1 <= parsed.port <= 65535)
+                )
+            except ValueError:
+                valid_url = False
+            if not valid_url:
+                raise ValueError(
+                    "MAIN_API_DOCUMENT_A2A_URL deve usar HTTPS ou HTTP local e terminar em /a2a"
+                )
+            if not self.mcp_delegation_key_id or not self.mcp_delegation_private_key:
+                raise ValueError(
+                    "a delegação A2A exige MAIN_API_MCP_DELEGATION_KEY_ID e "
+                    "MAIN_API_MCP_DELEGATION_PRIVATE_KEY"
+                )

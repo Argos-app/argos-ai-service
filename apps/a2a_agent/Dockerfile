@@ -15,6 +15,7 @@ COPY apps/a2a_agent/src/ /app/src/
 COPY apps/a2a_agent/data/documents/ /var/lib/argos/a2a/documents/
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/security/ /app/packages/security/
+COPY packages/observability/ /app/packages/observability/
 
 RUN mkdir -p /var/lib/argos/a2a/state \
     && addgroup --system --gid 10001 argos \

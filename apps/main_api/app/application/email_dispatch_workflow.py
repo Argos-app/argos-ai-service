@@ -10,6 +10,7 @@ from uuid import UUID
 from app.application.email_workflow import _fingerprint, _payload
 from app.application.report_artifact_service import validate_report_source
 from app.domain.email_preparations import EmailOperationReference
+from app.infrastructure.observability.recording import observe_operation
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from packages.contracts import (
@@ -19,6 +20,14 @@ from packages.contracts import (
     ReportStatusResult,
     SendReportRequest,
     SendReportResult,
+)
+from packages.observability import (
+    ErrorOrigin,
+    ObservationCollector,
+    ObservationLevel,
+    OperationKind,
+    OperationPhase,
+    ResultMetadata,
 )
 
 
@@ -61,12 +70,14 @@ class EmailDispatchWorkflow:
         email_client: Any,
         preparations: EmailPreparationRepository,
         report_artifacts: ReportArtifactRepository,
+        observation_collector: ObservationCollector | None = None,
     ) -> None:
         if email_client.service_name != "email":
             raise ValueError("EmailDispatchWorkflow exige um cliente MCP de e-mail")
         self._email_client = email_client
         self._preparations = preparations
         self._report_artifacts = report_artifacts
+        self._observation_collector = observation_collector
 
     @staticmethod
     def _identity(configurable: dict[str, Any]) -> tuple[UUID, UUID]:
@@ -78,6 +89,13 @@ class EmailDispatchWorkflow:
             ) from exc
 
     async def send(self, *, configurable: dict[str, Any]) -> str:
+        return await self._observe_workflow(
+            "email.dispatch.send",
+            self._send,
+            configurable=configurable,
+        )
+
+    async def _send(self, *, configurable: dict[str, Any]) -> str:
         principal_user_id, session_id = self._identity(configurable)
         try:
             source_interaction_id = UUID(
@@ -166,6 +184,14 @@ class EmailDispatchWorkflow:
         return _safe_result(result)
 
     async def status(self, *, authorization_id: UUID | None, configurable: dict[str, Any]) -> str:
+        return await self._observe_workflow(
+            "email.dispatch.status",
+            self._status,
+            authorization_id=authorization_id,
+            configurable=configurable,
+        )
+
+    async def _status(self, *, authorization_id: UUID | None, configurable: dict[str, Any]) -> str:
         principal_user_id, session_id = self._identity(configurable)
         if authorization_id is None:
             authorizations = await self._preparations.list_send_authorizations(
@@ -211,6 +237,14 @@ class EmailDispatchWorkflow:
         return await self._refresh_status(authorization, operation_reference, principal_user_id)
 
     async def recover_interaction_outcome(self, *, configurable: dict[str, Any]) -> str | None:
+        return await self._observe_workflow(
+            "email.dispatch.recovery",
+            self._recover_interaction_outcome,
+            configurable=configurable,
+            recovered=True,
+        )
+
+    async def _recover_interaction_outcome(self, *, configurable: dict[str, Any]) -> str | None:
         """Return a deterministic public summary for a send linked to this request.
 
         This only reads the authorization/reference already persisted by the main API and asks
@@ -256,6 +290,56 @@ class EmailDispatchWorkflow:
             result.get("status"),
             "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado.",
         )
+
+    async def _observe_workflow(self, name, operation, *, recovered=False, **kwargs):
+        if self._observation_collector is None:
+            return await operation(**kwargs)
+        async with observe_operation(
+            self._observation_collector,
+            operation_kind=OperationKind.WORKFLOW,
+            operation_name=name,
+            operation_phase=(OperationPhase.RECOVERY if recovered else OperationPhase.EXECUTION),
+            observation_level=ObservationLevel.LOCAL_OPERATION,
+            error_origin=ErrorOrigin.APPLICATION,
+        ) as recorder:
+            result = await operation(**kwargs)
+            code = None
+            confirmed = None
+            reported_recovered = None
+            if isinstance(result, str):
+                try:
+                    payload = json.loads(result)
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    raw_code = payload.get("status")
+                    if isinstance(raw_code, str) and len(raw_code) <= 120:
+                        code = raw_code
+                    raw_confirmed = payload.get("confirmed")
+                    confirmed = raw_confirmed if isinstance(raw_confirmed, bool) else None
+                    raw_recovered = payload.get("recovered")
+                    reported_recovered = raw_recovered if isinstance(raw_recovered, bool) else None
+            if recovered:
+                code = code or ("no_prior_operation" if result is None else "recovery_result")
+            recorder.finish(
+                result=(
+                    ResultMetadata(
+                        source="application",
+                        code=code,
+                        confirmed=confirmed,
+                        recovered=(
+                            reported_recovered
+                            if reported_recovered is not None
+                            else True
+                            if recovered and result is not None
+                            else None
+                        ),
+                    )
+                    if code or confirmed is not None or reported_recovered is not None
+                    else None
+                )
+            )
+            return result
 
     async def _action_options(self, authorizations, *, principal_user_id, session_id):
         actions = []

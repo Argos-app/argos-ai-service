@@ -1,10 +1,17 @@
 """Geração estruturada em endpoint OpenAI-compatible sem tools ou ações externas."""
 
 import json
+import re
 from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
+from langsmith import traceable
+
+from argos_a2a_agent.adapters.observability.recording import (
+    OperationRecorder,
+    active_collector,
+)
 from argos_a2a_agent.adapters.providers.http import OpenAICompatibleHTTP
 from argos_a2a_agent.domain.agent_answers import (
     AgentEvidence,
@@ -13,6 +20,13 @@ from argos_a2a_agent.domain.agent_answers import (
 )
 from argos_a2a_agent.domain.errors import DocumentAnswerGenerationError
 from packages.contracts.a2a import DocumentAnswerStatus
+from packages.observability import (
+    ErrorOrigin,
+    ObservationCollector,
+    ObservationLevel,
+    OperationKind,
+    OperationPhase,
+)
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -33,13 +47,16 @@ class OpenAICompatibleAnswerGenerator:
         timeout_seconds: float,
         *,
         max_output_tokens: int = 2_400,
+        observation_collector: ObservationCollector | None = None,
     ) -> None:
         if not 128 <= max_output_tokens <= 8_192:
             raise ValueError("max_output_tokens deve estar entre 128 e 8192")
         self._http = OpenAICompatibleHTTP(endpoint, api_key, timeout_seconds)
         self._model = model
         self._max_output_tokens = max_output_tokens
+        self._observation_collector = active_collector(observation_collector)
 
+    @traceable(name="a2a.model.answer", run_type="llm")
     async def generate(
         self,
         *,
@@ -94,6 +111,20 @@ class OpenAICompatibleAnswerGenerator:
             "status permitidos: success, partial, needs_clarification, abstain. Se não houver "
             "base documental suficiente, use abstain."
         )
+        recorder = (
+            OperationRecorder(
+                self._observation_collector,
+                operation_kind=OperationKind.MODEL,
+                operation_name="model.a2a.answer.generate",
+                operation_phase=OperationPhase.EXECUTION,
+                observation_level=ObservationLevel.TRANSPORT_ATTEMPT,
+                provider="openai_compatible",
+                model_requested=_safe_model_name(self._model),
+                error_origin=ErrorOrigin.PROVIDER,
+            )
+            if self._observation_collector is not None
+            else None
+        )
         try:
             response = await self._http.post_json(
                 {
@@ -108,7 +139,9 @@ class OpenAICompatibleAnswerGenerator:
                             "content": json.dumps(user_payload, ensure_ascii=False),
                         },
                     ],
-                }
+                },
+                recorder=recorder,
+                operation_route="/chat/completions",
             )
             content = response["choices"][0]["message"]["content"]
             if not isinstance(content, str) or len(content) > 64 * 1024:
@@ -147,3 +180,7 @@ def _answer_from_json(raw: Any) -> GeneratedDocumentAnswer:
         limitations=tuple(raw["limitations"]),
         missing_fields=tuple(raw["missing_fields"]),
     )
+
+
+def _safe_model_name(value: str) -> str | None:
+    return value if re.fullmatch(r"[A-Za-z0-9_.:/-]{1,120}", value) else None
