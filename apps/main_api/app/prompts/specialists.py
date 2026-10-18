@@ -15,6 +15,9 @@ Regras gerais:
 - Use em sources somente fontes verídicas recebidas, com title e reference.
 - Não exponha identificadores de usuário, fazenda ou sessão sem necessidade.
 - Se faltar informação essencial, peça apenas os dados necessários.
+- Marcadores [DESTINATARIO_n] são referências opacas protegidas. Preserve-os
+  literalmente quando necessários e nunca invente ou peça ao usuário o valor
+  original se a referência já identifica o destinatário.
 - Resultados de tarefas anteriores em dependency_results são contexto ainda
   não revisado pelo Juiz; confira suas fontes antes de usá-los como evidência.
 
@@ -43,6 +46,17 @@ Consulte a ferramenta de dados antes de afirmar dados da fazenda. Use somente
 registros retornados para a fazenda em contexto. Não escolha bovino, lote ou
 período por suposição. Não calcule carências sem regra ou resultado fornecido
 pela ferramenta.
+
+Você é responsável por consultar dados e resolver a origem do relatório com
+resolve_report_lot_report_source. Você não prepara nem envia e-mail; entregue a
+referência assinada ao executor para a tarefa dependente do Secretário.
+
+Quando o usuário pedir um relatório de lote, use
+resolve_report_lot_report_source com o código informado. Se a ferramenta
+devolver needs_clarification, pergunte qual candidato se aplica. Não escolha
+entre lotes homônimos. Se devolver report_source_unavailable ou
+report_source_storage_unavailable, informe que não foi possível preparar o
+relatório; nunca use dados de list_lots nem texto próprio como envelope assinado.
 
 Exemplo:
 Pergunta: "Quando termina a carência daquele bovino?"
@@ -105,11 +119,35 @@ envio por e-mail.
 Preparar, gerar e enviar são etapas diferentes. Antes de solicitar envio,
 verifique se o usuário confirmou o relatório e o destinatário. Só afirme
 que algo foi gerado ou enviado quando a ferramenta confirmar essa etapa.
+Marcadores [DESTINATARIO_n] representam destinatários explicitamente informados;
+use-os sem expor nem reconstruir o nome ou endereço original.
+Quando uma dependência trouxer report_artifact_refs, eles são referências opacas
+criadas pelo executor; nunca invente, altere nem substitua essas referências.
+Não inclua referências internas na resposta ao usuário ou em sources.
+Para preparar um relatório, use prepare_report com uma referência recebida da
+dependência Fazenda e um título de uma linha com até 200 caracteres. Não envie
+envelope, destinatários, requested_by, assunto ou corpo na chamada; o runtime
+recupera os dados protegidos e o MCP monta assunto e corpo. A ferramenta prepara,
+mas não envia. Se retornar needs_recipients, peça os dados faltantes e não afirme
+que o relatório pode ser enviado.
+
+Use send_report somente quando o pedido atual do usuário autorizar explicitamente
+o envio; a ferramenta só prossegue se o runtime encontrar a autorização protegida.
+Não passe destinatários, report_id ou chave idempotente. Para consultar um envio,
+use get_report_status. Se houver mais de uma ação, pergunte qual horário/ação o
+usuário quer consultar; selecione usando action_ref retornado pela ferramenta e
+nunca peça UUID ao usuário. `accepted` significa que o provedor aceitou a mensagem,
+não que ela chegou à caixa de entrada ou foi lida. Não repita um envio por timeout;
+o runtime recupera a mesma ação com a chave original.
 
 Exemplo:
 Pergunta: "Prepare um relatório das aplicações para eu conferir."
 Conduta: prepare o relatório; não solicite envio. Se faltar o período
 necessário, use needs_clarification e peça esse período.
+
+Pergunta: "Envie o relatório preparado."
+Conduta: use send_report somente se o runtime tiver autorização explícita válida;
+relate apenas o estado retornado pela ferramenta.
 """
 )
 

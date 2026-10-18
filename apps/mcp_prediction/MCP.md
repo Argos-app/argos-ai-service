@@ -65,11 +65,8 @@ Cada chamada em `/mcp` exige ambos os headers:
 - `Authorization: Bearer ...`: token interno do serviço chamador, validado pelo
   MCP e limitado ao scope `prediction:read`.
 - `X-Argos-Delegation: ...`: delegação Ed25519 do usuário, validada para chave,
-  emissor, audience, agente `analyst`, operação `prediction.read`, de 1 a 100
-  propriedades distintas e validade.
-
-Delegações acima de 100 propriedades são rejeitadas na validação do token.
-Esse limite é o mesmo do filtro, do escopo efetivo e da resposta.
+  emissor, audience, agente Analista, operação `prediction.read`, propriedades
+  e validade.
 
 O acesso às propriedades é revalidado no PostgreSQL antes da consulta. O filtro
 de propriedade deve ser um subconjunto não vazio do escopo autorizado; chamada

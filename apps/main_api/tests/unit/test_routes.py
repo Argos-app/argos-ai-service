@@ -24,6 +24,51 @@ def test_health_and_readiness() -> None:
     assert client.get("/health/ready").status_code == 503
 
 
+def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -> None:
+    main_module = import_module("app.main")
+    runtime_checkpointer = object()
+
+    class Runtime:
+        persistence = object()
+        database = type("Database", (), {"command": lambda self, name: _ping()})()
+
+        async def close(self):
+            pass
+
+    async def create_runtime(_settings):
+        runtime = Runtime()
+        runtime.checkpointer = runtime_checkpointer
+        return runtime
+
+    async def _ping():
+        return {"ok": 1}
+
+    monkeypatch.setattr(main_module, "create_runtime", create_runtime)
+    Settings = import_module("app.settings").Settings
+
+    with TestClient(
+        main_module.create_app(Settings(mongo_uri="mongodb://test"))
+    ) as identity_missing:
+        assert identity_missing.get("/health/ready").json()["reason"] == "identity_not_configured"
+
+    with TestClient(
+        main_module.create_app(
+            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+        )
+    ) as ready:
+        assert ready.get("/health/ready").json() == {"status": "ok"}
+
+    runtime_checkpointer = None
+    with TestClient(
+        main_module.create_app(
+            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+        )
+    ) as no_runtime:
+        response = no_runtime.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["reason"] == "graph_runtime_not_configured"
+
+
 def test_planned_routes_are_present() -> None:
     paths = app.openapi()["paths"]
     expected = {

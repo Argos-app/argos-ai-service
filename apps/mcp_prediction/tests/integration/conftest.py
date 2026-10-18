@@ -109,7 +109,7 @@ class PredictionHarness:
             "authorized_property_ids": [
                 str(value) for value in (authorized_properties or (self.property_a,))
             ],
-            "agent": "analyst",
+            "agent": "analista",
             "operations": ["prediction.read"],
             "iat": now,
             "nbf": now,
@@ -276,7 +276,7 @@ async def _seed_database(sql, harness, as_of):
                 permission_id,
                 "Analista de integração",
                 uuid4().hex,
-                "analyst@test",
+                "analista@test",
             ),
             (other_user_id, permission_id, "Outro usuário", uuid4().hex, "outro@test"),
         ],

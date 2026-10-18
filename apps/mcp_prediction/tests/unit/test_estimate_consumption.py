@@ -35,7 +35,7 @@ def scenario():
         uuid4(),
         (property_id,),
         frozenset({"prediction.read"}),
-        "analyst",
+        "analista",
         now,
         now + timedelta(minutes=2),
         "token",
@@ -125,9 +125,7 @@ async def test_name_without_history_in_one_selected_farm_blocks_partial_estimate
     assert response.items[0].estimated_quantity is None
 
 
-@pytest.mark.parametrize(
-    "change", ["absent_context", "wrong_agent", "legacy_agent", "revoked", "outside_filter"]
-)
+@pytest.mark.parametrize("change", ["absent_context", "wrong_agent", "revoked", "outside_filter"])
 async def test_denied_access_never_queries_history(scenario, change):
     context, directory, repository, _, service = scenario
     payload = request()
@@ -135,8 +133,6 @@ async def test_denied_access_never_queries_history(scenario, change):
         context = None
     elif change == "wrong_agent":
         context = replace(context, agent_id="doutor")
-    elif change == "legacy_agent":
-        context = replace(context, agent_id="analista")
     elif change == "revoked":
         directory.get_active_property_ids.return_value = set()
     else:
@@ -186,18 +182,3 @@ async def test_unknown_data_origin_blocks_numbers_and_synthetic_origin_is_simula
     synthetic = await service(DataOrigin.SYNTHETIC).execute(context, request())
     assert synthetic.status == "estimated"
     assert synthetic.mode == "simulation"
-
-
-async def test_full_delegated_scope_of_100_properties_without_filter(scenario):
-    context, directory, repository, _, service = scenario
-    properties = tuple(uuid4() for _ in range(100))
-    context = replace(context, authorized_property_ids=properties)
-    directory.get_active_property_ids.return_value = set(properties)
-    repository.aggregate_monthly.return_value = ()
-
-    response = await service().execute(context, request(names=None))
-
-    assert response.property_ids == properties
-    assert tuple(item.property_id for item in response.coverage) == properties
-    assert response.status == "insufficient_data"
-    assert repository.aggregate_monthly.await_args.args[0].property_ids == properties

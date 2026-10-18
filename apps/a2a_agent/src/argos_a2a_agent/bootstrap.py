@@ -3,12 +3,19 @@
 import hashlib
 import inspect
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from argos_a2a_agent.adapters.authorization import PostgresDocumentPermissionDirectory
 from argos_a2a_agent.adapters.documents.pypdf_parser import PyPdfParser
+from argos_a2a_agent.adapters.observability import (
+    MongoObservationRepository,
+    MongoObservationWriter,
+    observe_adapter,
+)
+from argos_a2a_agent.adapters.observability.langsmith import create_langsmith_tracing
 from argos_a2a_agent.adapters.providers import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleEmbeddingProvider,
@@ -28,6 +35,11 @@ from argos_a2a_agent.ports.document_answer_generator import DocumentAnswerGenera
 from argos_a2a_agent.ports.embedding_provider import EmbeddingProvider
 from argos_a2a_agent.server import create_a2a_server
 from argos_a2a_agent.settings import Settings
+from packages.observability import (
+    BestEffortObservationCollector,
+    DisabledObservationCollector,
+    ObservationCollector,
+)
 from packages.security.delegation import GlobalDocumentDelegationTokenVerifier
 from packages.security.document_access import (
     DocumentAccessPolicy,
@@ -35,6 +47,7 @@ from packages.security.document_access import (
 )
 
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +87,8 @@ class ServiceRuntime:
 
     server: Any
     delegation_verifier: GlobalDocumentDelegationTokenVerifier
+    observation_collector: ObservationCollector
+    observability_writer: MongoObservationWriter | None = None
     _closers: tuple[Any, ...] = field(default=(), repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
@@ -82,6 +97,11 @@ class ServiceRuntime:
             return
         self._closed = True
         errors: list[Exception] = []
+        if self.observability_writer is not None:
+            try:
+                await self.observability_writer.close()
+            except Exception as exc:
+                errors.append(exc)
         for close in reversed(self._closers):
             try:
                 result = close()
@@ -127,7 +147,11 @@ async def _close_resources(resources: list[Any]) -> None:
         raise ExceptionGroup("falha ao liberar recursos durante bootstrap", errors)
 
 
-async def create_runtime_dependencies(settings: Settings) -> RuntimeDependencies:
+async def create_runtime_dependencies(
+    settings: Settings,
+    *,
+    observation_collector: ObservationCollector | None = None,
+) -> RuntimeDependencies:
     """Cria adapters reais usando APIs OpenAI-compatible e PostgreSQL read-only."""
 
     try:
@@ -154,6 +178,7 @@ async def create_runtime_dependencies(settings: Settings) -> RuntimeDependencies
             settings.embeddings_api_key,
             settings.embeddings_model,
             settings.model_timeout_seconds,
+            observation_collector=observation_collector,
         )
         provider_resources.append(embeddings)
         answer_generator = OpenAICompatibleAnswerGenerator(
@@ -161,11 +186,13 @@ async def create_runtime_dependencies(settings: Settings) -> RuntimeDependencies
             settings.answer_api_key,
             settings.answer_model,
             settings.model_timeout_seconds,
+            observation_collector=observation_collector,
         )
         provider_resources.append(answer_generator)
         permission_directory = PostgresDocumentPermissionDirectory(
             pool,
             settings.documents_read_role_codes,
+            observation_collector=observation_collector,
         )
         fingerprint_material = (
             f"openai-compatible:{settings.embeddings_model}:{settings.embeddings_model_revision}"
@@ -194,29 +221,52 @@ async def create_runtime(
     configured.validate_runtime(require_providers=dependencies is None)
     if configured.document_source_root is None or configured.manifest_path is None:
         raise ValueError("fonte local e caminho do manifesto são obrigatórios")
-    source = LocalDocumentSource(
+    raw_source = LocalDocumentSource(
         configured.document_source_root,
         catalog_name=configured.document_catalog_name,
     )
     catalog_path = configured.document_source_root / configured.document_catalog_name
     if catalog_path.is_symlink() or not catalog_path.is_file():
         raise ValueError("catálogo allowlisted deve existir como arquivo regular")
-    manifests = LocalManifestRepository(configured.manifest_path)
+    (
+        observation_client,
+        observation_writer,
+        observation_collector,
+    ) = await _create_observability_runtime(configured)
+    langsmith_tracing = create_langsmith_tracing(configured)
+    resources: list[Any] = []
+    source = observe_adapter(
+        raw_source,
+        observation_collector,
+        operation_prefix="documents.source",
+    )
+    manifests = observe_adapter(
+        LocalManifestRepository(configured.manifest_path),
+        observation_collector,
+        operation_prefix="documents.manifest",
+    )
     # Detecta manifesto ilegível/corrompido antes de aceitar tráfego; ausência é
     # válida na primeira inicialização e será criada pelo sincronizador.
-    await manifests.load()
-    dependencies = dependencies or await create_runtime_dependencies(configured)
-    resources: list[Any] = [
-        dependencies.embeddings,
-        dependencies.answer_generator,
-        dependencies.permission_directory,
-    ]
     try:
+        await manifests.load()
+        dependencies = dependencies or await create_runtime_dependencies(
+            configured,
+            observation_collector=observation_collector,
+        )
+        resources = [
+            dependencies.embeddings,
+            dependencies.answer_generator,
+            dependencies.permission_directory,
+        ]
         dependencies.validate()
         if dependencies.embedding_vector_size != configured.qdrant_vector_size:
             raise ValueError("dimensão do adapter de embeddings diverge da configuração Qdrant")
 
-        parser = PyPdfParser()
+        parser = observe_adapter(
+            PyPdfParser(),
+            observation_collector,
+            operation_prefix="documents.pdf_parser",
+        )
         chunker = TextChunker()
         processor = PrepareDocumentForIndex(parser, dependencies.embeddings, chunker)
         delegation_verifier = GlobalDocumentDelegationTokenVerifier(
@@ -249,12 +299,20 @@ async def create_runtime(
         await reader_client.get_collections()
         await writer_client.get_collections()
 
-        reader = ReadOnlyQdrantReader(reader_client, configured.qdrant_collection)
-        writer = QdrantDocumentIndexWriter(
-            writer_client,
-            active_alias=configured.qdrant_collection,
-            vector_size=configured.qdrant_vector_size,
-            distance=configured.qdrant_distance,
+        reader = observe_adapter(
+            ReadOnlyQdrantReader(reader_client, configured.qdrant_collection),
+            observation_collector,
+            operation_prefix="qdrant.reader",
+        )
+        writer = observe_adapter(
+            QdrantDocumentIndexWriter(
+                writer_client,
+                active_alias=configured.qdrant_collection,
+                vector_size=configured.qdrant_vector_size,
+                distance=configured.qdrant_distance,
+            ),
+            observation_collector,
+            operation_prefix="qdrant.index_writer",
         )
         synchronizer = DocumentCorpusSynchronizer(
             source,
@@ -276,16 +334,21 @@ async def create_runtime(
             repository=repository,
             embeddings=dependencies.embeddings,
             answer_generator=dependencies.answer_generator,
+            observation_collector=observation_collector,
         )
         server = create_a2a_server(
             configured,
             readiness_check=reader_client.get_collections,
             delegation_verifier=delegation_verifier,
             agent_registry=agent_registry,
+            observation_collector=observation_collector,
+            langsmith_tracing=langsmith_tracing,
         )
 
         # Os adapters passam à propriedade do runtime depois que a composição tem êxito.
-        closers = []
+        closers = [observation_client.close] if observation_client is not None else []
+        if langsmith_tracing is not None:
+            closers.append(langsmith_tracing.close)
         seen: set[int] = set()
         for resource in resources:
             if id(resource) in seen:
@@ -297,11 +360,64 @@ async def create_runtime(
         return ServiceRuntime(
             server=server,
             delegation_verifier=delegation_verifier,
+            observation_collector=observation_collector,
+            observability_writer=observation_writer,
             _closers=tuple(closers),
         )
     except BaseException:
+        if observation_writer is not None:
+            await observation_writer.close()
+        if observation_client is not None:
+            resources.append(observation_client)
+        if langsmith_tracing is not None:
+            resources.append(langsmith_tracing)
         await _close_resources(resources)
         raise
+
+
+async def _create_observability_runtime(
+    settings: Settings,
+) -> tuple[Any | None, MongoObservationWriter | None, ObservationCollector]:
+    if settings.observability_mongo_uri is None or settings.observability_collection is None:
+        return None, None, DisabledObservationCollector()
+    client = None
+    writer = None
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from pymongo.write_concern import WriteConcern
+
+        client = AsyncIOMotorClient(
+            settings.observability_mongo_uri,
+            tz_aware=True,
+            serverSelectionTimeoutMS=settings.observability_mongo_server_selection_timeout_ms,
+        )
+        database = client.get_database(
+            settings.observability_mongo_database,
+            write_concern=WriteConcern(
+                w="majority",
+                wtimeout=settings.observability_mongo_write_timeout_ms,
+            ),
+        )
+        writer = MongoObservationWriter(
+            MongoObservationRepository(database[settings.observability_collection]),
+            max_items=settings.observability_queue_max_items,
+            max_bytes=settings.observability_queue_max_bytes,
+            max_document_bytes=settings.observability_document_max_bytes,
+            batch_size=settings.observability_batch_size,
+            batch_interval_ms=settings.observability_batch_interval_ms,
+            max_attempts=settings.observability_max_attempts,
+            retry_base_delay_ms=settings.observability_retry_base_delay_ms,
+            shutdown_timeout_ms=settings.observability_shutdown_timeout_ms,
+        )
+        await writer.start()
+        return client, writer, BestEffortObservationCollector(writer)
+    except Exception:
+        _LOGGER.warning("A2A observability persistence could not start")
+        if writer is not None:
+            await writer.close()
+        if client is not None:
+            client.close()
+        return None, None, DisabledObservationCollector()
 
 
 async def run_server(

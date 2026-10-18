@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from packages.security.errors import AccessDeniedError
-from packages.security.limits import MAX_PROPERTY_IDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +59,7 @@ class AuthorizedScope:
             raise AccessDeniedError("operação fora do contexto autorizado")
         claimed = set(context.authorized_property_ids)
         if (
-            not 1 <= len(context.authorized_property_ids) <= MAX_PROPERTY_IDS
+            not claimed
             or len(claimed) != len(context.authorized_property_ids)
             or not claimed.issubset(current_property_ids)
         ):
@@ -71,7 +70,7 @@ class AuthorizedScope:
             if selected_property_ids is None
             else selected_property_ids
         )
-        if not 1 <= len(selection) <= MAX_PROPERTY_IDS or len(set(selection)) != len(selection):
+        if not 1 <= len(selection) <= 100 or len(set(selection)) != len(selection):
             raise AccessDeniedError("seleção de propriedades inválida")
         if not set(selection).issubset(claimed):
             raise AccessDeniedError("seleção de propriedades fora do escopo autorizado")

@@ -78,7 +78,7 @@ def make_scope(properties):
         user_id=uuid4(),
         authorized_property_ids=properties,
         operations=frozenset({"prediction.read"}),
-        agent_id="analyst",
+        agent_id="analista",
         issued_at=now,
         expires_at=now + timedelta(seconds=120),
         token_id="token",

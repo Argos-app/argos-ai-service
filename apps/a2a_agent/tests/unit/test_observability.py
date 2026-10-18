@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from uuid import uuid4
+
+from argos_a2a_agent.adapters.inbound import a2a_server
+from argos_a2a_agent.adapters.observability.recording import observe_adapter
+from argos_a2a_agent.adapters.providers.http import _provider_usage
+
+from packages.contracts.a2a import (
+    CorpusRefreshStatus,
+    DocumentAnswerResponse,
+    DocumentAnswerStatus,
+    DocumentSkill,
+)
+from packages.observability import ObservationStatus, OperationKind, UsageAvailability
+from packages.security.access import DocumentAccessContext
+
+
+class Collector:
+    def __init__(self) -> None:
+        self.observations = []
+
+    def emit(self, observation) -> None:
+        self.observations.append(observation)
+
+
+def run_immediate(coroutine):
+    iterator = coroutine.__await__()
+    while True:
+        try:
+            yielded = iterator.send(None)
+        except StopIteration as completed:
+            return completed.value
+        if yielded is not None:
+            raise AssertionError("fake de unidade não deveria suspender a corrotina")
+
+
+def test_observed_adapter_records_timing_without_arguments_or_results() -> None:
+    class Adapter:
+        async def read(self, secret: str) -> dict[str, str]:
+            return {"private": secret}
+
+    collector = Collector()
+    wrapped = observe_adapter(Adapter(), collector, operation_prefix="documents.source")
+
+    result = run_immediate(wrapped.read("sensitive payload"))
+
+    assert result == {"private": "sensitive payload"}
+    assert [item.status for item in collector.observations] == [
+        ObservationStatus.STARTED,
+        ObservationStatus.SUCCEEDED,
+    ]
+    terminal = collector.observations[-1]
+    assert terminal.operation_kind == OperationKind.STORAGE
+    assert terminal.operation_name == "documents.source.read"
+    assert terminal.ended_at is not None
+    assert terminal.duration_ms is not None
+    assert "sensitive payload" not in repr(terminal.model_dump())
+
+
+def test_provider_usage_preserves_only_returned_numeric_categories() -> None:
+    usage = _provider_usage(
+        {
+            "prompt_tokens": 12,
+            "completion_tokens": 5,
+            "total_tokens": 17,
+            "prompt_tokens_details": {"cached_tokens": 3, "cache_creation_tokens": 2},
+            "completion_tokens_details": {"reasoning_tokens": 1},
+            "custom_tokens": 4,
+            "sensitive": "do not persist",
+        }
+    )
+
+    assert usage.availability == UsageAvailability.RETURNED
+    assert usage.source == "provider"
+    assert usage.input_tokens == 12
+    assert usage.output_tokens == 5
+    assert usage.total_tokens == 17
+    assert usage.cache_read_tokens == 3
+    assert usage.cache_write_tokens == 2
+    assert usage.reasoning_tokens == 1
+    assert usage.details == {"custom_tokens": 4}
+
+
+def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> None:
+    collector = Collector()
+    request_id = uuid4()
+    request = {
+        "request_id": str(request_id),
+        "question": "Pergunta de teste",
+        "skill": DocumentSkill.DOCUMENTAL.value,
+        "deadline_at": (datetime.now(UTC) + timedelta(minutes=1)).isoformat(),
+    }
+    access = DocumentAccessContext(
+        user_id=uuid4(),
+        operations=frozenset({"documents.read"}),
+        agent_id="informacoes",
+        issued_at=datetime.now(UTC) - timedelta(seconds=1),
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        token_id="token-test",
+        request_id="request-test",
+    )
+
+    class FakeUpdater:
+        def __init__(self, *_args) -> None:
+            pass
+
+        async def start_work(self) -> None:
+            pass
+
+        async def add_artifact(self, *_args, **_kwargs) -> None:
+            pass
+
+        async def complete(self) -> None:
+            pass
+
+    class Registry:
+        async def execute(self, _request, _access) -> DocumentAnswerResponse:
+            return DocumentAnswerResponse(
+                request_id=request_id,
+                status=DocumentAnswerStatus.UNAVAILABLE,
+                limitations=("consulta indisponível",),
+                refresh_status=CorpusRefreshStatus.UNAVAILABLE,
+            )
+
+    monkeypatch.setattr(a2a_server, "TaskUpdater", FakeUpdater)
+    context = SimpleNamespace(
+        task_id="task-test",
+        context_id="context-test",
+        current_task=object(),
+        message=SimpleNamespace(
+            parts=[
+                SimpleNamespace(
+                    text=json.dumps(request),
+                    media_type="application/json",
+                    WhichOneof=lambda _name: "text",
+                )
+            ]
+        ),
+        call_context=SimpleNamespace(state={a2a_server.ACCESS_CONTEXT_KEY: access}),
+    )
+
+    executor = a2a_server.DocumentA2AExecutor(Registry(), collector)
+    run_immediate(executor.execute(context, object()))
+
+    terminal = collector.observations[-1]
+    assert terminal.status == ObservationStatus.SUCCEEDED
+    assert terminal.protocol.task_state == "completed"
+    assert terminal.result.code == DocumentAnswerStatus.UNAVAILABLE.value

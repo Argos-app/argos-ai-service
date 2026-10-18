@@ -35,7 +35,7 @@ def make_scope(properties):
         uuid4(),
         properties,
         frozenset({"prediction.read"}),
-        "analyst",
+        "analista",
         now,
         now + timedelta(seconds=120),
         "token",

@@ -6,7 +6,6 @@ from argos_mcp_prediction.domain import CoverageRecord, CoverageState
 from argos_mcp_prediction.ports import CoverageReadRepository
 from packages.security.access import AuthorizedScope
 from packages.security.errors import AccessDeniedError
-from packages.security.limits import MAX_PROPERTY_IDS
 
 
 class UnknownCoverageRepository(CoverageReadRepository):
@@ -21,9 +20,9 @@ class UnknownCoverageRepository(CoverageReadRepository):
     ) -> tuple[CoverageRecord, ...]:
         if (
             not isinstance(scope, AuthorizedScope)
-            or scope.agent_id != "analyst"
+            or scope.agent_id != "analista"
             or scope.operation != "prediction.read"
-            or not 1 <= len(scope.property_ids) <= MAX_PROPERTY_IDS
+            or not 1 <= len(scope.property_ids) <= 100
             or len(set(scope.property_ids)) != len(scope.property_ids)
             or scope.expires_at.tzinfo is None
             or scope.expires_at <= datetime.now(UTC)
