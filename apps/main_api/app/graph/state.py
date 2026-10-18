@@ -15,6 +15,10 @@ class AgentState(MessagesState):
 
     pii_map: dict[str, str]
     sanitized_message: str
+    recipient_selectors: dict[str, dict[str, str]]
+    send_intent_requested: bool
+    send_intent_source_interaction_id: str | None
+    email_action_summary: str | None
 
     route: list[str]
     route_plan: RoutePlan | None
@@ -23,11 +27,15 @@ class AgentState(MessagesState):
     called_agents: list[str]
     task_outcomes: tuple[TaskOutcome, ...]
     sources: list[SourceReference]
+    report_artifact_refs: dict[str, tuple[str, ...]]
+    report_artifact_origin_interaction_id: str | None
+    report_source_renewal_count: int
 
     missing_fields: list[str]
     clarification_request: QuestionFormattingRequest | None
     clarification_question: str | None
     question_id: str | None
+    clarification_expires_at: str | None
     pending_task_id: str | None
     resume_target: str | None
 

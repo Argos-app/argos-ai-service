@@ -57,7 +57,7 @@ async def test_authenticated_http_initialization_and_prediction_tool_catalog(
         dict(configured_settings.trusted_delegation_keys),
         issuer=configured_settings.delegation_issuer,
         audience=configured_settings.mcp_resource_server_url,
-        agent_operations={"analyst": frozenset({"prediction.read"})},
+        agent_operations={"analista": frozenset({"prediction.read"})},
     )
     app = create_http_app(server, verifier)
     token, _ = signed_delegation()
@@ -139,7 +139,7 @@ async def test_same_mcp_session_uses_each_request_context_and_revalidates_access
         dict(configured_settings.trusted_delegation_keys),
         issuer=configured_settings.delegation_issuer,
         audience=configured_settings.mcp_resource_server_url,
-        agent_operations={"analyst": frozenset({"prediction.read"})},
+        agent_operations={"analista": frozenset({"prediction.read"})},
     )
     token_a, claims_a = signed_delegation(request_id="request-a")
     token_b, claims_b = signed_delegation(request_id="request-b")

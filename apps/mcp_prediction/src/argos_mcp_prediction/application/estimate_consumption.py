@@ -69,7 +69,7 @@ class EstimateMedicineConsumption:
     ) -> EstimateMedicineConsumptionResponse:
         """Autoriza o escopo completo antes de acessar histórico ou cobertura."""
 
-        if not isinstance(context, AccessContext) or context.agent_id != "analyst":
+        if not isinstance(context, AccessContext) or context.agent_id != "analista":
             raise AccessDeniedError("ferramenta disponível somente ao agente Analista")
         if not isinstance(request, EstimateMedicineConsumptionRequest):
             raise ValueError("payload de estimativa inválido")

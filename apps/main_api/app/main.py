@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.router import router as v1_router
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
+from app.infrastructure.mcp import McpDelegationTokenIssuer, create_mcp_clients
 from app.settings import Settings
 
 
@@ -48,6 +49,12 @@ def create_app(
     app.state.session_summary_generator = session_summary_generator
     app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
+    app.state.mcp_clients = create_mcp_clients(configured)
+    app.state.mcp_delegation_token_issuer = (
+        McpDelegationTokenIssuer(configured)
+        if configured.mcp_delegation_key_id and configured.mcp_delegation_private_key
+        else None
+    )
 
     @app.middleware("http")
     async def limit_body(request: Request, call_next):
@@ -72,6 +79,16 @@ def create_app(
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "session_store_not_configured"},
+            )
+        if not configured.auth_trusted_public_keys:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "identity_not_configured"},
+            )
+        if getattr(app.state, "checkpointer", None) is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "graph_runtime_not_configured"},
             )
         try:
             await app.state.mongo_database.command("ping")

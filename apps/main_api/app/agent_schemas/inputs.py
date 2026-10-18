@@ -44,6 +44,7 @@ class DependencyResult(_AgentInput):
     task_id: str = Field(min_length=1)
     answer: str
     source_references: tuple[str, ...] = ()
+    report_artifact_refs: tuple[str, ...] = ()
 
 
 class SpecialistInput(_AgentInput):

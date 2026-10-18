@@ -14,7 +14,6 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from packages.security.access import AccessContext, DocumentAccessContext
 from packages.security.errors import AccessContextError
-from packages.security.limits import MAX_PROPERTY_IDS
 
 _TOKEN_PART = re.compile(r"^[A-Za-z0-9_-]+$")
 _OPERATION = re.compile(r"^[a-z][a-z0-9_.:-]{0,63}$")
@@ -142,10 +141,7 @@ class DelegationTokenVerifier:
                 raise ValueError
             user_id = UUID(subject)
             properties_raw = claims["authorized_property_ids"]
-            if (
-                not isinstance(properties_raw, list)
-                or not 1 <= len(properties_raw) <= MAX_PROPERTY_IDS
-            ):
+            if not isinstance(properties_raw, list) or not 1 <= len(properties_raw) <= 1000:
                 raise ValueError
             if not all(isinstance(value, str) for value in properties_raw):
                 raise ValueError

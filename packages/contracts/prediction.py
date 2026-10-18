@@ -8,8 +8,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
-from packages.security.limits import MAX_PROPERTY_IDS
-
 
 class _PredictionContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
@@ -46,7 +44,7 @@ class PredictionMode(StrEnum):
     SIMULATION = "simulation"
 
 
-IdFilter = Annotated[tuple[UUID, ...], Field(min_length=1, max_length=MAX_PROPERTY_IDS)]
+IdFilter = Annotated[tuple[UUID, ...], Field(min_length=1, max_length=100)]
 MedicineName = Annotated[str, Field(min_length=1, max_length=80)]
 MedicineNameFilter = Annotated[tuple[MedicineName, ...], Field(min_length=1, max_length=100)]
 NonNegativeDecimal = Annotated[Decimal, Field(ge=0, allow_inf_nan=False)]
@@ -215,7 +213,7 @@ class EstimateMedicineConsumptionResponse(_PredictionContract):
     history_window: PredictionWindow
     forecast_window: PredictionWindow
     property_ids: IdFilter
-    coverage: tuple[PropertyCoverage, ...] = Field(min_length=1, max_length=MAX_PROPERTY_IDS)
+    coverage: tuple[PropertyCoverage, ...] = Field(min_length=1, max_length=100)
     items: tuple[MedicineConsumptionEstimate, ...] = Field(default=(), max_length=1000)
     method: Literal["monthly_daily_average"] = "monthly_daily_average"
     mode: PredictionMode

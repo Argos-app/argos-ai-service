@@ -13,7 +13,6 @@ from argos_mcp_prediction.domain.errors import (
 from argos_mcp_prediction.ports import ConsumptionReadRepository, SqlReader
 from packages.security.access import AuthorizedScope
 from packages.security.errors import AccessDeniedError
-from packages.security.limits import MAX_PROPERTY_IDS
 
 _MAX_GROUPS = 1000
 _MAX_MONTHLY_ROWS = _MAX_GROUPS * 12
@@ -97,9 +96,9 @@ class PostgresConsumptionRepository(ConsumptionReadRepository):
         if not isinstance(scope, AuthorizedScope):
             raise AccessDeniedError("escopo autorizado obrigatório")
         if (
-            scope.agent_id != "analyst"
+            scope.agent_id != "analista"
             or scope.operation != "prediction.read"
-            or not 1 <= len(scope.property_ids) <= MAX_PROPERTY_IDS
+            or not 1 <= len(scope.property_ids) <= 100
             or any(not isinstance(value, UUID) for value in scope.property_ids)
             or len(set(scope.property_ids)) != len(scope.property_ids)
         ):
