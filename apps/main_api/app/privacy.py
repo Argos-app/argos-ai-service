@@ -21,24 +21,26 @@ _EMAIL_WORKFLOW_CONTEXT_PATTERN = re.compile(
     r"encaminhe|encaminhar|prepare|preparar|gerar|gerado)\b",
     re.IGNORECASE,
 )
+_RECIPIENT_CONTEXT_PATTERN = re.compile(
+    r"\b(?:destinat[áa]rios?|endere[çc]os?\s+de\s+e-?mails?|lista\s+de\s+e-?mails?)\b",
+    re.IGNORECASE,
+)
 _QUOTED_NAME_PATTERN = re.compile(
-    r"\bpara\s+(?:o\s+contato\s+)?[\"“](?P<name>[^\"”]{2,100})[\"”]",
+    r"\bpara\s+(?:(?:o|a|os|as)\s+)?"
+    r"(?:(?:seguinte|seguintes|usuári[oa]s?|contatos?|destinatári[oa]s?)\s+){0,2}"
+    r"[\"“](?P<name>[^\"”]{2,100})[\"”]",
     re.IGNORECASE,
 )
 _NAME_TOKEN = r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ÿ'’-]*"
 _NAME_ITEM = rf"{_NAME_TOKEN}(?:\s+(?:(?:da|das|de|do|dos)\s+)?{_NAME_TOKEN}){{0,3}}"
 _NAME_ITEM_PATTERN = re.compile(_NAME_ITEM)
 _UNQUOTED_NAME_PATTERN = re.compile(
-    rf"\bpara\s+(?P<names>{_NAME_ITEM}(?:\s*(?:[,;]\s*|\s+e\s+){_NAME_ITEM})*)"
+    r"\bpara\s+(?:(?:o|a|os|as)\s+)?"
+    r"(?:(?:seguinte|seguintes|usuári[oa]s?|contatos?|destinatári[oa]s?)\s+){0,2}"
+    rf"(?P<names>{_NAME_ITEM}(?:\s*(?:[,;]\s*|\s+e\s+){_NAME_ITEM})*)"
     r"(?=\s*(?:[,.;!?]|$|\b(?:e\s+)?para\b|"
     r"\b(?:por\s+e-?mail|no\s+e-?mail|com\s+o\s+endereço)\b))"
 )
-_RECIPIENT_LIST_HEADER_PATTERN = re.compile(
-    r"\b(?:destinat[áa]rios?|contatos?|endere[çc]os?\s+(?:de\s+)?e-?mails?|emails?)\b"
-    r"[^\n:]{0,80}[:：]",
-    re.IGNORECASE,
-)
-_SENTENCE_END_PATTERN = re.compile(r"[.!?][\"'”’)]*\s+(?=[A-ZÁ-Ú])")
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,16 +84,10 @@ def merge_recipient_selectors(
 
 
 def protect_user_input(text: str) -> ProtectedInput:
-    """Substitui destinatários explícitos por referências e remove outra PII."""
+    """Extrai e-mails como seletores sem ocultá-los; minimiza outras PII."""
     candidates: list[tuple[int, int, str, str]] = []
     send_requested = _has_positive_send_intent(text)
-    recipient_list_spans: list[tuple[int, int]] = []
-    if send_requested and _EMAIL_WORKFLOW_CONTEXT_PATTERN.search(text):
-        for header in _RECIPIENT_LIST_HEADER_PATTERN.finditer(text):
-            end_match = _SENTENCE_END_PATTERN.search(text, header.end())
-            recipient_list_spans.append(
-                (header.end(), end_match.start() if end_match else len(text))
-            )
+    email_workflow_context = bool(_EMAIL_WORKFLOW_CONTEXT_PATTERN.search(text))
     for match in EMAIL_PATTERN.finditer(text):
         prefix_start = max(0, match.start() - 32)
         prefix = text[prefix_start : match.start()]
@@ -100,24 +96,33 @@ def protect_user_input(text: str) -> ProtectedInput:
             prefix,
             re.IGNORECASE,
         )
-        in_recipient_list = any(
-            start <= match.start() and match.end() <= end
-            for start, end in recipient_list_spans
-        )
-        if destination or in_recipient_list:
+        recipient_prefix = text[max(0, match.start() - 200) : match.start()]
+        has_recipient_context = bool(_RECIPIENT_CONTEXT_PATTERN.search(recipient_prefix))
+        if email_workflow_context and (destination or has_recipient_context):
             if destination:
-                start = prefix_start + destination.start("label")
+                start = match.start()
+                recipient_name = destination.group("label").strip()
+                if recipient_name and _NAME_ITEM_PATTERN.fullmatch(recipient_name):
+                    name_start = prefix_start + destination.start("label")
+                    candidates.append(
+                        (
+                            name_start,
+                            name_start + len(recipient_name),
+                            "masked_name",
+                            recipient_name,
+                        )
+                    )
             else:
                 start = match.start()
             end = match.end() + int(text[match.end() : match.end() + 1] == ">")
             candidates.append((start, end, "email", match.group()))
 
-    name_patterns = [_QUOTED_NAME_PATTERN]
-    # Nomes sem aspas só são seletores quando a frase está no contexto de uma
+    name_patterns = []
+    # Nomes, com ou sem aspas, só são seletores no contexto de uma
     # operação de e-mail. Assim, "para Ivervet Teste" numa consulta de catálogo
     # permanece texto de negócio, não vira um destinatário.
     if _EMAIL_WORKFLOW_CONTEXT_PATTERN.search(text):
-        name_patterns.append(_UNQUOTED_NAME_PATTERN)
+        name_patterns.extend((_QUOTED_NAME_PATTERN, _UNQUOTED_NAME_PATTERN))
     for pattern in name_patterns:
         for match in pattern.finditer(text):
             if pattern is _UNQUOTED_NAME_PATTERN:
@@ -142,6 +147,8 @@ def protect_user_input(text: str) -> ProtectedInput:
     selectors: dict[str, dict[str, str]] = {}
     ref_by_selector: dict[tuple[str, str], str] = {}
     for _, _, kind, value in selected:
+        if kind == "masked_name":
+            continue
         key = (kind, value.strip().casefold())
         reference = ref_by_selector.get(key)
         if reference is None:
@@ -151,6 +158,11 @@ def protect_user_input(text: str) -> ProtectedInput:
 
     sanitized = text
     for start, end, kind, value in reversed(selected):
+        if kind == "email":
+            continue
+        if kind == "masked_name":
+            sanitized = sanitized[:start] + "[NOME]" + sanitized[end:]
+            continue
         reference = ref_by_selector[(kind, value.strip().casefold())]
         sanitized = sanitized[:start] + reference + sanitized[end:]
 
@@ -168,13 +180,13 @@ def _has_positive_send_intent(text: str) -> bool:
 
 
 def minimize_pii(text: str) -> str:
-    """Remove e-mail, CPF, CNPJ e telefone antes do conteúdo seguir adiante."""
+    """Remove CPF, CNPJ e telefone; e-mails permanecem sem anonimização."""
     return PHONE_PATTERN.sub(
         "[TELEFONE]",
-        CNPJ_PATTERN.sub("[CNPJ]", CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))),
+        CNPJ_PATTERN.sub("[CNPJ]", CPF_PATTERN.sub("[CPF]", text)),
     )
 
 
 def minimize_sensitive_memory_input(text: str) -> str:
-    """Remove PII e valores com aparência de credencial antes de extrair perfil."""
+    """Remove CPF, CNPJ, telefone e credenciais antes de extrair perfil."""
     return SECRET_VALUE_PATTERN.sub(r"\1[REDACTED]", minimize_pii(text))

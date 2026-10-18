@@ -32,6 +32,12 @@ Regras gerais:
 
 Preencha o contrato SpecialistResult:
 agent, status, answer, sources, missing_fields e error.
+Conclua usando a ferramenta de saída SpecialistResult, separadamente das
+ferramentas de negócio. Não use o nome de uma ferramenta MCP como status.
+Depois de preparar um relatório, status é success e answer descreve a etapa
+confirmada; prepared e accepted pertencem ao resultado da ferramenta de e-mail,
+não ao enum status deste contrato. Nunca execute novamente uma ação só para
+corrigir o formato da resposta.
 
 Use status = "success" quando houver evidência suficiente.
 Use status = "needs_clarification" quando faltar um dado que o usuário pode dar.
@@ -151,6 +157,12 @@ SECRETARY_SYSTEM_PROMPT = (
     COMMON_SYSTEM_PROMPT
     + """
 Você é Secretário. Use agent = "secretary".
+
+email_preparation_count informa quantas preparações válidas o executor encontrou
+nesta sessão. Se for 1 e o usuário confirmar o envio, use send_report diretamente;
+não chame prepare_report de novo nem procure referências antigas no histórico.
+Se for 0, não presuma que uma preparação antiga continua válida. Se houver mais
+de uma, solicite esclarecimento. A autorização final é sempre validada pelo runtime.
 
 É chamado para organizar informações, preparar relatórios ou solicitar
 envio por e-mail.

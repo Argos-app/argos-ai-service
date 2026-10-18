@@ -5,13 +5,13 @@ from app.application.session_service import _normalize_input
 from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 
 
-def test_protect_user_input_keeps_explicit_recipient_as_unique_reference():
+def test_protect_user_input_keeps_email_visible_and_also_extracts_recipient_selector():
     protected = protect_user_input(
         "Envie o relatório para ana@example.com e cópia para ana@example.com"
     )
 
     assert protected.sanitized_text == (
-        "Envie o relatório para [DESTINATARIO_1] e cópia para [DESTINATARIO_1]"
+        "Envie o relatório para ana@example.com e cópia para ana@example.com"
     )
     assert protected.recipient_selectors == {
         "[DESTINATARIO_1]": {"kind": "email", "value": "ana@example.com"}
@@ -34,9 +34,23 @@ def test_protect_user_input_extracts_comma_separated_email_recipient_list():
 
     assert len(protected.recipient_selectors) == len(emails)
     assert {item["value"] for item in protected.recipient_selectors.values()} == set(emails)
-    assert all(email not in protected.sanitized_text for email in emails)
+    assert all(email in protected.sanitized_text for email in emails)
     assert "[EMAIL]" not in protected.sanitized_text
     assert protected.send_intent_requested is True
+
+
+def test_email_clarification_captures_addresses_without_send_intent_or_para_prefix():
+    protected = protect_user_input(
+        "Quem são os destinatários do relatório? ana@example.com, bruno@example.com"
+    )
+
+    assert protected.send_intent_requested is False
+    assert {item["value"] for item in protected.recipient_selectors.values()} == {
+        "ana@example.com",
+        "bruno@example.com",
+    }
+    assert "ana@example.com" in protected.sanitized_text
+    assert "bruno@example.com" in protected.sanitized_text
 
 
 def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name():
@@ -46,11 +60,11 @@ def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name()
     )
 
     assert "Ana Silva" not in protected.sanitized_text
-    assert "contato@example.com" not in protected.sanitized_text
+    assert "contato@example.com" in protected.sanitized_text
     assert "123.456.789-00" not in protected.sanitized_text
     assert "abc123" not in protected.sanitized_text
     assert "[DESTINATARIO_1]" in protected.sanitized_text
-    assert "[EMAIL]" in protected.sanitized_text
+    assert "[EMAIL]" not in protected.sanitized_text
     assert "[CPF]" in protected.sanitized_text
     assert "[REDACTED]" in protected.sanitized_text
     assert protected.recipient_selectors == {
@@ -65,6 +79,15 @@ def test_business_product_name_after_para_is_not_treated_as_email_recipient():
 
     assert protected.sanitized_text == text
     assert protected.recipient_selectors == {}
+
+
+def test_quoted_medicine_name_is_preserved_outside_email_workflows():
+    for quotes in (("“", "”"), ('"', '"')):
+        text = f"Consulte o catálogo e as bulas para {quotes[0]}Vacina Teste A{quotes[1]}."
+        protected = protect_user_input(text)
+        assert protected.sanitized_text == text
+        assert protected.recipient_selectors == {}
+        assert protected.send_intent_requested is False
 
 
 def test_all_names_in_an_email_recipient_list_are_protected():
@@ -108,13 +131,42 @@ def test_comma_separated_email_recipients_are_all_protected():
     assert protected.send_intent_requested is True
 
 
+def test_email_recipient_list_accepts_user_determiners():
+    protected = protect_user_input(
+        "Prepare o relatório para os usuários Luis Medeiros, Leticia Camargo, "
+        "Beatriz Inacio, Enzo Alves e Vinicius D'Oliveira. Não envie ainda."
+    )
+
+    assert protected.send_intent_requested is False
+    assert [selector["value"] for selector in protected.recipient_selectors.values()] == [
+        "Luis Medeiros",
+        "Leticia Camargo",
+        "Beatriz Inacio",
+        "Enzo Alves",
+        "Vinicius D'Oliveira",
+    ]
+    assert all(
+        name not in protected.sanitized_text
+        for name in (
+            "Luis Medeiros",
+            "Leticia Camargo",
+            "Beatriz Inacio",
+            "Enzo Alves",
+            "Vinicius D'Oliveira",
+        )
+    )
+
+
 def test_minimize_pii_redacts_cnpj_and_brazilian_phone():
-    sanitized = minimize_pii("CNPJ 12.345.678/0001-90, telefone (11) 98765-4321")
+    sanitized = minimize_pii(
+        "CNPJ 12.345.678/0001-90, telefone (11) 98765-4321, contato a@example.com"
+    )
 
     assert "12.345.678/0001-90" not in sanitized
     assert "(11) 98765-4321" not in sanitized
     assert "[CNPJ]" in sanitized
     assert "[TELEFONE]" in sanitized
+    assert "a@example.com" in sanitized
 
 
 def test_minimize_pii_preserves_uuid_identifiers_while_redacting_phone():
@@ -146,7 +198,7 @@ def test_merge_recipient_selectors_does_not_overwrite_prior_clarification_contex
     }
 
 
-def test_session_input_persists_only_sanitized_recipient_marker():
+def test_session_input_persists_email_without_anonymization():
     normalized = _normalize_input(
         MessageCommand(
             kind="message",
@@ -160,9 +212,9 @@ def test_session_input_persists_only_sanitized_recipient_marker():
         normalized[3],
         normalized[6],
     )
-    assert "ana@example.com" not in sanitized_input
-    assert "ana@example.com" not in payload_json
+    assert "ana@example.com" in sanitized_input
+    assert "ana@example.com" in payload_json
     assert "Ana Silva" not in sanitized_input
     assert "123.456.789-00" not in payload_json
-    assert "[DESTINATARIO_1]" in sanitized_input
+    assert "[DESTINATARIO_1]" not in sanitized_input
     assert recipient_selectors["[DESTINATARIO_1]"]["value"] == "ana@example.com"

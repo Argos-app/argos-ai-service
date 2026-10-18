@@ -117,7 +117,7 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
         if [tool.name for tool in call["tools"]] == ["mock_consultar_fazenda"]
     )
     assert farm_call["system_prompt"]
-    assert farm_call["response_format"] is SpecialistResult
+    assert farm_call["response_format"].schema is SpecialistResult
     information_call = next(
         call
         for call in calls
@@ -133,9 +133,7 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
     structured_router = structured_calls[RoutePlan]
     assert structured_router["response_format"].handle_errors is False
     orchestrator_call = next(
-        call
-        for call in calls
-        if "Você é o Orquestrador do sistema." in call["system_prompt"]
+        call for call in calls if "Você é o Orquestrador do sistema." in call["system_prompt"]
     )
     assert "response_format" not in orchestrator_call
     assert all(
@@ -143,14 +141,15 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
         for call in calls
         if call is structured_router
     )
-    assert all(
-        not isinstance(call.get("response_format"), ToolStrategy)
+    specialists_with_tools = [
+        call
         for call in calls
-        if call is not structured_router
-    )
-    judge_call = next(
-        call for call in calls if "Você é o Juiz do Argos." in call["system_prompt"]
-    )
+        if isinstance(call.get("response_format"), ToolStrategy)
+        and call["response_format"].schema is SpecialistResult
+    ]
+    assert len(specialists_with_tools) == 5
+    assert all(call["response_format"].handle_errors is False for call in specialists_with_tools)
+    judge_call = next(call for call in calls if "Você é o Juiz do Argos." in call["system_prompt"])
     assert "response_format" not in judge_call
 
     agent = factory.create(AgentId.FARM)
@@ -203,7 +202,7 @@ def test_build_agent_factory_accepts_real_tools_by_registered_slot(monkeypatch) 
     farm_call = next(
         call for call in calls if [item.name for item in call["tools"]] == ["get_lot_summary"]
     )
-    assert farm_call["response_format"] is SpecialistResult
+    assert farm_call["response_format"].schema is SpecialistResult
 
 
 def test_build_agent_factory_rejects_tool_slot_not_allowed_for_agent() -> None:
@@ -535,8 +534,7 @@ async def test_analyst_does_not_repeat_property_question_already_answered_by_mcp
     limits.record_tool_success(
         "analyst",
         "list_properties",
-        '{"items":[{"property_id":"property-1",'
-        '"property_name":"Fazenda Sol Nascente"}]}',
+        '{"items":[{"property_id":"property-1","property_name":"Fazenda Sol Nascente"}]}',
         reference="tool-call:properties-1",
     )
     limits.record_tool_success(
@@ -625,8 +623,7 @@ async def test_agent_does_not_request_data_already_returned_by_a_tool(monkeypatc
     limits.record_tool_success(
         "doctor",
         "list_medicine_documents",
-        '{"content":{"items":[{"active_ingredient":"Ivermectina",'
-        '"dose":"10.000","unit":"ml"}]}}',
+        '{"content":{"items":[{"active_ingredient":"Ivermectina","dose":"10.000","unit":"ml"}]}}',
         reference="tool-call:medicine-document-1",
     )
 

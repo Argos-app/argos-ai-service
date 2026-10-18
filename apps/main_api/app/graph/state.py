@@ -19,6 +19,7 @@ class AgentState(MessagesState):
     send_intent_requested: bool
     send_intent_source_interaction_id: str | None
     email_action_summary: str | None
+    email_preparation_confirmed: bool
 
     route: list[str]
     route_plan: RoutePlan | None

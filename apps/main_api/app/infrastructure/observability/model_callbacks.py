@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -10,9 +11,11 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler
 
 from packages.observability import (
+    CancellationState,
     ErrorOrigin,
     ObservationCollector,
     ObservationLevel,
+    ObservationStatus,
     OperationKind,
     OperationPhase,
     Usage,
@@ -276,9 +279,32 @@ class ModelUsageCallback(AsyncCallbackHandler):
         if recorder is not None:
             recorder.finish(
                 error=error,
+                status=(
+                    ObservationStatus.CANCELLED
+                    if isinstance(error, asyncio.CancelledError)
+                    else ObservationStatus.FAILED
+                ),
+                cancellation_state=(
+                    CancellationState.OBSERVED
+                    if isinstance(error, asyncio.CancelledError)
+                    else None
+                ),
                 error_origin=ErrorOrigin.PROVIDER,
                 usage=Usage(availability=UsageAvailability.ABSENT),
             )
+
+    def finish_pending(self, error: BaseException) -> None:
+        """Close provider observations when cancellation bypasses LangChain callbacks."""
+        cancelled = isinstance(error, asyncio.CancelledError)
+        for run_id, recorder in tuple(self._recorders.items()):
+            recorder.finish(
+                error=error,
+                status=(ObservationStatus.CANCELLED if cancelled else ObservationStatus.FAILED),
+                cancellation_state=(CancellationState.OBSERVED if cancelled else None),
+                error_origin=ErrorOrigin.APPLICATION if cancelled else ErrorOrigin.PROVIDER,
+                usage=Usage(availability=UsageAvailability.ABSENT),
+            )
+            self._recorders.pop(run_id, None)
 
     def _start(
         self,

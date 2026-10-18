@@ -137,9 +137,10 @@ class Settings:
     model_timeout_seconds: float = 60.0
     model_max_retries: int = 2
     model_max_output_tokens: int = 4096
+    model_thinking: str = "auto"
     execution_max_model_calls: int = 12
     execution_max_tool_calls: int = 12
-    execution_timeout_seconds: float = 180.0
+    execution_timeout_seconds: float = 300.0
     langsmith_api_key: str | None = field(default=None, repr=False)
     langsmith_project: str = "argos-ai-service"
     langsmith_endpoint: str | None = None
@@ -251,11 +252,10 @@ class Settings:
             model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "60")),
             model_max_retries=int(os.getenv("MAIN_API_MODEL_MAX_RETRIES", "2")),
             model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "4096")),
+            model_thinking=os.getenv("MAIN_API_MODEL_THINKING", "auto").strip().casefold(),
             execution_max_model_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "12")),
             execution_max_tool_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "12")),
-            execution_timeout_seconds=float(
-                os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "180")
-            ),
+            execution_timeout_seconds=float(os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "300")),
             langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
             langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
             langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
@@ -266,6 +266,8 @@ class Settings:
     def __post_init__(self) -> None:
         if not self.mongo_database.strip():
             raise ValueError("MAIN_API_MONGO_DATABASE não pode estar vazio")
+        if self.model_thinking not in {"auto", "enabled", "disabled"}:
+            raise ValueError("MAIN_API_MODEL_THINKING deve ser auto, enabled ou disabled")
         if self.observability_collection is not None and self.observability_collection in {
             getattr(self.mongo_collections, item.name) for item in fields(self.mongo_collections)
         }:

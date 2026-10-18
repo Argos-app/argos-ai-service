@@ -200,35 +200,35 @@ def build_agent_factory(
         model=models[ModelPolicyId.FARM],
         tools=tools_for(AgentId.FARM),
         system_prompt=FARM_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     doctor_app = create_agent(
         model=models[ModelPolicyId.DOCTOR],
         tools=tools_for(AgentId.DOCTOR),
         system_prompt=DOCTOR_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     analyst_app = create_agent(
         model=models[ModelPolicyId.ANALYST],
         tools=tools_for(AgentId.ANALYST),
         system_prompt=ANALYST_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     secretary_app = create_agent(
         model=models[ModelPolicyId.SECRETARY],
         tools=tools_for(AgentId.SECRETARY),
         system_prompt=SECRETARY_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     information_app = create_agent(
         model=models[ModelPolicyId.INFORMATION],
         tools=tools_for(AgentId.INFORMATION),
         system_prompt=INFORMATION_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     orchestrator_app = create_agent(

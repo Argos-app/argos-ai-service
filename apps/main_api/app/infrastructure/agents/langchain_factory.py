@@ -138,8 +138,8 @@ def _specialist_evidence_fallback(
     evidence = _required_tool_evidence(agent_id, limits)
     if not evidence:
         return None
-    complete_prediction = (
-        agent_id is AgentId.ANALYST and _has_complete_prediction_evidence(evidence)
+    complete_prediction = agent_id is AgentId.ANALYST and _has_complete_prediction_evidence(
+        evidence
     )
     return SpecialistResult(
         agent=SpecialistAgentId(agent_id.value),
@@ -163,15 +163,13 @@ def _specialist_evidence_fallback(
 
 def _has_complete_prediction_evidence(evidence: Sequence[Any]) -> bool:
     """Promove a estimativa determinística completa mesmo se o Analista se abstiver."""
-    predictions = [
-        item for item in evidence if item.tool_name == "estimate_medicine_consumption"
-    ]
+    predictions = [item for item in evidence if item.tool_name == "estimate_medicine_consumption"]
     if not predictions:
         return False
     for item in predictions:
         try:
             payload = json.loads(item.excerpt)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         if not isinstance(payload, Mapping):
             return False
@@ -191,8 +189,7 @@ def _has_complete_prediction_evidence(evidence: Sequence[Any]) -> bool:
             and isinstance(coverage, list)
             and coverage
             and all(
-                isinstance(row, Mapping) and row.get("status") == "confirmed"
-                for row in coverage
+                isinstance(row, Mapping) and row.get("status") == "confirmed" for row in coverage
             )
             and isinstance(items, list)
             and items
@@ -247,9 +244,7 @@ def _orchestrator_result_from_plain_text(
 def _normalized_term(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value.casefold())
     return "".join(
-        character
-        for character in decomposed
-        if character.isalnum() or character.isspace()
+        character for character in decomposed if character.isalnum() or character.isspace()
     )
 
 
@@ -265,9 +260,7 @@ def _json_contains_value_for_key(value: Any, keys: frozenset[str]) -> bool:
     return False
 
 
-def _evidence_covers_missing_fields(
-    missing_fields: Sequence[str], evidence: Sequence[Any]
-) -> bool:
+def _evidence_covers_missing_fields(missing_fields: Sequence[str], evidence: Sequence[Any]) -> bool:
     """Detect only explicit cases where a requested field is already in tool output."""
     if not missing_fields or not evidence:
         return False
@@ -284,7 +277,7 @@ def _evidence_covers_missing_fields(
     for item in evidence:
         try:
             decoded = json.loads(item.excerpt)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         decoded_evidence.append((item.tool_name, decoded))
 
@@ -432,9 +425,8 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                 if raw_response is None:
                     limits = (context or {}).get("argos_execution_limits")
                     text = _plain_assistant_text(result)
-                    if (
-                        self._output_schema is SpecialistResult
-                        and isinstance(limits, ExecutionLimits)
+                    if self._output_schema is SpecialistResult and isinstance(
+                        limits, ExecutionLimits
                     ):
                         evidence = _required_tool_evidence(self._agent_id, limits)
                         response = (
@@ -482,9 +474,7 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                     except ValidationError:
                         text = _plain_assistant_text(result)
                         if self._output_schema is OrchestratorResult and text:
-                            response = _orchestrator_result_from_plain_text(
-                                text, validated_input
-                            )
+                            response = _orchestrator_result_from_plain_text(text, validated_input)
                         elif self._output_schema is JudgeResult and text:
                             response = _judge_result_from_plain_text(text)
                             if response is None:
@@ -492,9 +482,8 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                         else:
                             raise
                     limits = (context or {}).get("argos_execution_limits")
-                    if (
-                        isinstance(response, SpecialistResult)
-                        and isinstance(limits, ExecutionLimits)
+                    if isinstance(response, SpecialistResult) and isinstance(
+                        limits, ExecutionLimits
                     ):
                         evidence = _required_tool_evidence(self._agent_id, limits)
                         all_tool_evidence = limits.evidence_for(self._agent_id.value)
@@ -515,14 +504,16 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                         )
                         if can_use_evidence:
                             response = (
-                                _specialist_evidence_fallback(self._agent_id, limits)
-                                or response
+                                _specialist_evidence_fallback(self._agent_id, limits) or response
                             )
             except ValidationError as exc:
                 raise AgentResponseError(
                     "Resposta do agente não corresponde ao schema registrado"
                 ) from exc
         except BaseException as exc:
+            for callback in callbacks:
+                if isinstance(callback, ModelUsageCallback):
+                    callback.finish_pending(exc)
             if metric is not None:
                 metric.finish(error=exc)
             if observer is not None and invocation_id is not None:

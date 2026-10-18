@@ -3,7 +3,6 @@
 import base64
 import json
 import logging
-import os
 import re
 import time
 from collections.abc import AsyncIterator, Callable
@@ -250,13 +249,14 @@ def _verify_principal(request: Request) -> Principal:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if os.getenv("APP_ENV", "") == "local" and os.getenv("AUTH_MODE", "") == "stub":
+    settings = request.app.state.settings
+    if settings.app_env == "local" and settings.auth_mode == "stub":
         return _local_stub_principal()
 
     verifier = getattr(request.app.state, "identity_token_verifier", None)
     if verifier is None:
         try:
-            verifier = IdentityTokenVerifier(request.app.state.settings)
+            verifier = IdentityTokenVerifier(settings)
         except IdentityTokenConfigurationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

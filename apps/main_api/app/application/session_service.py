@@ -6,7 +6,8 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Collection
+import re
+from collections.abc import Callable, Collection, Coroutine
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -73,6 +74,7 @@ from packages.observability import (
 GraphProvider = Callable[[], Any]
 SummaryGeneratorProvider = Callable[[], SessionSummaryGenerator | None]
 MemoryExtractorProvider = Callable[[], UserMemoryExtractor | None]
+BackgroundTaskScheduler = Callable[[Coroutine[Any, Any, Any]], None]
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,7 @@ class SessionApplicationService:
         email_preparations: EmailPreparationRepository | None = None,
         summary_generator_provider: SummaryGeneratorProvider | None = None,
         user_memory_extractor_provider: MemoryExtractorProvider | None = None,
+        background_task_scheduler: BackgroundTaskScheduler | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
         renew_seconds: int = SESSION_LEASE_RENEW_SECONDS,
         execution_max_model_calls: int = 12,
@@ -110,6 +113,7 @@ class SessionApplicationService:
         self._execution_max_model_calls = execution_max_model_calls
         self._execution_max_tool_calls = execution_max_tool_calls
         self._execution_timeout_seconds = execution_timeout_seconds
+        self._background_task_scheduler = background_task_scheduler
         self._observation_collector = observation_collector
         self._langsmith_callback = langsmith_callback
         self._email_preparations = email_preparations
@@ -342,12 +346,6 @@ class SessionApplicationService:
                         source_created_at=accepted_message.created_at,
                         sanitized_user_input=memory_input,
                     )
-                await self._publish_due_summary(
-                    session_id=session_id,
-                    user_id=principal.user_id,
-                    user_message_count=(accepted_message.user_message_number or 1) - 1,
-                    through_sequence=accepted_message.sequence - 1,
-                )
                 session_context = await build_session_context(
                     session_id=session_id,
                     user_id=principal.user_id,
@@ -511,12 +509,16 @@ class SessionApplicationService:
                 raise ApplicationError(
                     ApplicationErrorCode.CONFLICT, "A posse da sessão mudou antes da finalização"
                 )
-            await self._publish_due_summary(
+            summary_task = self._publish_due_summary(
                 session_id=session_id,
                 user_id=principal.user_id,
                 user_message_count=accepted_message.user_message_number or 0,
                 through_sequence=committed_message.sequence,
             )
+            if self._background_task_scheduler is None:
+                await summary_task
+            else:
+                self._background_task_scheduler(summary_task)
             return response
         finally:
             stop_renewal.set()
@@ -673,7 +675,7 @@ class SessionApplicationService:
         if (
             source is None
             or source.session_id != session.session_id
-            or source.status != InteractionStatus.COMPLETED
+            or source.status not in {InteractionStatus.COMPLETED, InteractionStatus.DEGRADED}
             or not source.result_json
         ):
             raise ApplicationError(ApplicationErrorCode.CONFLICT, "Pergunta inválida")
@@ -981,7 +983,7 @@ def _response_from_state(
         if pending_expiry:
             try:
                 expires_at = min(expires_at, datetime.fromisoformat(pending_expiry))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 expires_at = now
         if expires_at <= now:
             response = AnswerResult(
@@ -993,7 +995,7 @@ def _response_from_state(
                 kind="question",
                 question_id=UUID(str(question_id)),
                 input_type=request.input_type,
-                prompt=minimize_pii(prompt),
+                prompt=minimize_pii(_hide_report_artifact_refs(prompt, state)),
                 reason_code=request.reason_code,
                 options=[
                     QuestionOptionResult.model_validate(item.model_dump())
@@ -1004,7 +1006,9 @@ def _response_from_state(
     else:
         response = AnswerResult(
             kind="answer",
-            text=minimize_pii(state.get("final_answer") or SAFE_ANSWER),
+            text=minimize_pii(
+                _hide_report_artifact_refs(state.get("final_answer") or SAFE_ANSWER, state)
+            ),
         )
     return InteractionOutcome(
         status="degraded" if state.get("errors") else "completed",
@@ -1020,6 +1024,23 @@ def _response_from_state(
         public_request_id=public_request_id,
         response=response,
     )
+
+
+def _hide_report_artifact_refs(text: str, state: dict[str, Any]) -> str:
+    """Remove executor-only artifact references from text returned to the user."""
+    references_by_task = state.get("report_artifact_refs")
+    if not isinstance(references_by_task, dict):
+        return text
+    references: set[str] = set()
+    for value in references_by_task.values():
+        if isinstance(value, str):
+            references.add(value)
+        elif isinstance(value, (tuple, list, set)):
+            references.update(item for item in value if isinstance(item, str))
+    for reference in references:
+        if reference:
+            text = re.sub(re.escape(reference), "[referência interna]", text, flags=re.IGNORECASE)
+    return text
 
 
 def _assistant_message(

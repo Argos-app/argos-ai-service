@@ -13,7 +13,7 @@ def test_langsmith_is_disabled_without_explicit_api_key():
     assert langsmith_module.create_langsmith_tracing(Settings()) is None
 
 
-def test_langsmith_client_hides_content_and_anonymizes_sensitive_values(monkeypatch):
+def test_langsmith_client_hides_content_and_anonymizes_non_email_sensitive_values(monkeypatch):
     client_arguments = {}
 
     class FakeClient:
@@ -51,9 +51,20 @@ def test_langsmith_client_hides_content_and_anonymizes_sensitive_values(monkeypa
         }
     )
     assert "token-value" not in str(anonymized)
-    assert "user@example.com" not in str(anonymized)
+    assert "user@example.com" in str(anonymized)
     assert "123.456.789-00" not in str(anonymized)
     assert "123e4567-e89b-12d3-a456-426614174000" not in str(anonymized)
+
+    correlation_hashes = [
+        "d10f29cd8648fa1b04471ff487187bf6f1143626180dccc2f927c5f739362814",
+        "ad3922d929413df2676254251a147bb98d8fea87c674593cec85f3a21b18adc6",
+        "8c1d8de6a303ae7ae5a583e73227f30c59d3070281372beb1db425db12343a80",
+    ]
+    protected = client_arguments["anonymizer"](
+        {"keys": correlation_hashes[:], "phone": "+55 11 98765-4321"}
+    )
+    assert protected["keys"] == correlation_hashes
+    assert "98765-4321" not in protected["phone"]
 
 
 def test_langsmith_closes_client_when_tracer_setup_fails(monkeypatch, caplog):

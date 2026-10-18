@@ -9,6 +9,7 @@ import time
 from contextlib import nullcontext
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -110,6 +111,20 @@ class DocumentA2AClient:
 
     def bind_observation_collector(self, collector: ObservationCollector) -> None:
         self.observation_collector = collector
+
+    async def check_ready(self) -> None:
+        """Confirma que o serviço A2A e seus próprios pré-requisitos estão prontos."""
+        endpoint = urlsplit(self._endpoint)
+        health_url = urlunsplit((endpoint.scheme, endpoint.netloc, "/health/ready", "", ""))
+        response = await self._http.get(health_url, timeout=httpx.Timeout(2.0))
+        if response.status_code != 200:
+            raise DocumentA2ACallError("serviço documental não está pronto")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise DocumentA2ACallError("healthcheck documental inválido") from exc
+        if not isinstance(payload, dict) or payload.get("status") != "ready":
+            raise DocumentA2ACallError("serviço documental não está pronto")
 
     async def ask(
         self,

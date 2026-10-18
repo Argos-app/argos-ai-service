@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from uuid import uuid4
 
 
@@ -21,6 +21,7 @@ class ToolEvidence:
     tool_name: str
     reference: str
     excerpt: str
+    truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,7 @@ class ExecutionLimits:
     _evidence_sequence: list[ToolEvidence] = field(default_factory=list)
     _non_evidence_results: dict[str, list[NonEvidenceToolResult]] = field(default_factory=dict)
     _evidence_chars: int = 0
+    _evidence_incomplete: bool = False
 
     def reserve_model_call(self) -> None:
         if self.model_calls >= self.max_model_calls:
@@ -59,6 +61,7 @@ class ExecutionLimits:
     def reserve_tool_output(self, output: object) -> None:
         size = len(output) if isinstance(output, str) else len(repr(output))
         if self.tool_output_chars + size > self.max_tool_output_chars:
+            self._evidence_incomplete = True
             raise ExecutionLimitExceeded("tool_output_budget_exceeded")
         self.tool_output_chars += size
 
@@ -90,6 +93,8 @@ class ExecutionLimits:
             return
         remaining = max(0, self.max_evidence_chars - self._evidence_chars)
         bounded_excerpt = excerpt[:remaining]
+        if len(bounded_excerpt) < len(excerpt):
+            self._evidence_incomplete = True
         if not bounded_excerpt:
             return
         self._evidence_chars += len(bounded_excerpt)
@@ -106,7 +111,10 @@ class ExecutionLimits:
 
     def evidence_snapshot(self) -> tuple[ToolEvidence, ...]:
         """Returns all verified tool excerpts in execution order for safe fallback."""
-        return tuple(self._evidence_sequence)
+        evidence = tuple(self._evidence_sequence)
+        if evidence and self._evidence_incomplete:
+            return (*evidence[:-1], replace(evidence[-1], truncated=True))
+        return evidence
 
     def latest_non_evidence_result(self, agent: str) -> NonEvidenceToolResult | None:
         results = self._non_evidence_results.get(agent, ())
@@ -121,7 +129,7 @@ _NON_EVIDENCE_STATUSES = frozenset(
 def _non_evidence_tool_status(excerpt: str) -> str | None:
     try:
         value = json.loads(excerpt)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not isinstance(value, dict):
         return None

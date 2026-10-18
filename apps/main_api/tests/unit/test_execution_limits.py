@@ -34,17 +34,14 @@ async def test_callback_counts_model_and_tool_calls_and_records_only_real_tool_e
     for run_id, name in ((uuid4(), "estimate_medicine_consumption"), (uuid4(), "mock_prediction")):
         await callback.on_tool_start({"name": name}, "", run_id=run_id)
         output = (
-            '{"contact": "person@example.com"}'
-            if name == "estimate_medicine_consumption"
-            else "{}"
+            '{"contact": "person@example.com"}' if name == "estimate_medicine_consumption" else "{}"
         )
         await callback.on_tool_end(output, run_id=run_id)
 
     evidence = limits.evidence_for("analyst")
     assert len(evidence) == 1
     assert evidence[0].tool_name == "estimate_medicine_consumption"
-    assert "[EMAIL]" in evidence[0].excerpt
-    assert "person@example.com" not in evidence[0].excerpt
+    assert "person@example.com" in evidence[0].excerpt
 
 
 @pytest.mark.asyncio

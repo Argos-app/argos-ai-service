@@ -7,6 +7,8 @@ from app.agents.registry import DEFAULT_AGENT_REGISTRY, ModelPolicyId
 from app.ports.agent import AgentId
 from app.settings import Settings
 
+from packages.model_options import thinking_options
+
 
 class ModelRuntimeConfigurationError(RuntimeError):
     """O provider não oferece as capacidades exigidas pelos agentes registrados."""
@@ -120,8 +122,12 @@ def create_configured_models(
         models = {}
         for policy, model_name in model_names.items():
             if model_name not in model_instances:
+                options = thinking_options(
+                    model_name, settings.model_api_base_url, settings.model_thinking
+                )
                 model_instances[model_name] = chat_model_factory(
                     model=model_name,
+                    **({"extra_body": options} if options else {}),
                     **shared_options,
                 )
             models[policy] = model_instances[model_name]

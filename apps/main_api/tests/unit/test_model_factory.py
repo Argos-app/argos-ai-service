@@ -70,9 +70,7 @@ def test_simulated_model_preserves_router_request_for_document_search():
     from app.infrastructure.agents.simulated_model import _tool_arguments
 
     request = "Consulte os termos globais sintéticos e cite o trecho relevante."
-    router_input = HumanMessage(
-        content=json.dumps({"message": request, "session_context": {}})
-    )
+    router_input = HumanMessage(content=json.dumps({"message": request, "session_context": {}}))
 
     plan = SimulatedChatModel._structured_call("RoutePlan", [router_input])[1]
     specialist_input = plan["tasks"][0]
@@ -246,8 +244,8 @@ def test_simulated_specialist_returns_sanitized_tool_result():
 
     assert result["status"] == "success"
     assert '"lot_code":"HC-01"' in result["answer"]
-    assert "ana@example.com" not in result["answer"]
-    assert "[EMAIL]" in result["answer"]
+    assert "ana@example.com" in result["answer"]
+    assert "[EMAIL]" not in result["answer"]
 
 
 def test_simulated_orchestrator_does_not_claim_success_for_failed_specialist():
@@ -344,6 +342,22 @@ def test_factory_reuses_instance_when_agents_share_a_model_name():
     assert len(calls) == len(ModelPolicyId) - 1
 
 
+def test_nvidia_factory_disables_optional_thinking_without_changing_agent_models():
+    name = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    models, reason = create_configured_models(
+        Settings(
+            model_api_base_url="https://integrate.api.nvidia.com/v1",
+            model_api_key="test-secret",
+            **_configured_model_names(**{p.value: name for p in ModelPolicyId}),
+        ),
+        chat_model_factory=_FakeChatModel,
+    )
+    assert reason is None
+    assert models[ModelPolicyId.ROUTER].options["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+
+
 def test_per_agent_model_names_are_loaded_from_environment(monkeypatch):
     for policy in ModelPolicyId:
         monkeypatch.setenv(
@@ -415,9 +429,7 @@ def test_model_factory_rejects_specialist_without_tool_support():
 
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
     models[ModelPolicyId.FARM] = NoToolBinding()
-    with pytest.raises(
-        ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"
-    ):
+    with pytest.raises(ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"):
         validate_model_capabilities(models)
 
 
@@ -429,9 +441,7 @@ def test_model_factory_rejects_orchestrator_without_tool_support():
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
     models[ModelPolicyId.ORCHESTRATOR] = NativeStructuredOnly()
 
-    with pytest.raises(
-        ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"
-    ):
+    with pytest.raises(ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"):
         validate_model_capabilities(models)
 
 

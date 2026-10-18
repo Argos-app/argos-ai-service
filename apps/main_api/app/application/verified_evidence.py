@@ -18,16 +18,20 @@ def verified_evidence_fallback(
         raise ValueError("etapa indisponível inválida")
     blocks: list[str] = []
     remaining = MAX_FALLBACK_EVIDENCE_CHARS
+    truncated = any(item.truncated for item in evidence)
     for item in evidence:
         if remaining <= 0:
+            truncated = True
             break
         try:
             decoded = json.loads(item.excerpt)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             rendered = item.excerpt
         else:
             rendered = json.dumps(decoded, ensure_ascii=False, indent=2, default=str)
-        block = f"{item.tool_name}:\n{rendered}"[:remaining]
+        full_block = f"{item.tool_name}:\n{rendered}"
+        block = full_block[:remaining]
+        truncated = truncated or len(block) < len(full_block)
         if block.strip():
             blocks.append(block)
             remaining -= len(block)
@@ -38,4 +42,10 @@ def verified_evidence_fallback(
         "Abaixo estão os resultados estruturados retornados diretamente pelas "
         "ferramentas; eles não receberam interpretação adicional:\n\n"
         + "\n\n".join(blocks)
+        + (
+            "\n\nAviso: os resultados estão incompletos porque parte das evidências foi limitada. "
+            "Repita a consulta com filtros mais específicos."
+            if truncated
+            else ""
+        )
     )

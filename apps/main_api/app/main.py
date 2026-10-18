@@ -1,5 +1,6 @@
 """Ponto de entrada HTTP do serviço principal."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -97,6 +98,13 @@ def create_app(
             yield
         finally:
             try:
+                pending = tuple(getattr(app.state, "background_tasks", ()))
+                if pending:
+                    _, unfinished = await asyncio.wait(pending, timeout=2.0)
+                    for task in unfinished:
+                        task.cancel()
+                    if unfinished:
+                        await asyncio.gather(*unfinished, return_exceptions=True)
                 if runtime:
                     await runtime.close()
             finally:
@@ -123,6 +131,7 @@ def create_app(
         return JSONResponse(status_code=status_code, content={"detail": error.detail})
 
     app.state.agent_graph = agent_graph
+    app.state.background_tasks = set()
     app.state.models = models
     app.state.model_initialization_error = model_initialization_error
     app.state.checkpointer = checkpointer
@@ -256,6 +265,20 @@ def create_app(
                 status_code=503,
                 content={"status": "unavailable", "reason": "session_store_unavailable"},
             )
+        if configured.document_a2a_url:
+            client = getattr(app.state, "documental_a2a_client", None)
+            if client is None:
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "unavailable", "reason": "document_a2a_not_configured"},
+                )
+            try:
+                await client.check_ready()
+            except Exception:
+                return JSONResponse(
+                    status_code=503,
+                    content={"status": "unavailable", "reason": "document_a2a_unavailable"},
+                )
         return {"status": "ok"}
 
     app.include_router(v1_router)

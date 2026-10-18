@@ -1,5 +1,6 @@
 """Interfaces e injeção dos serviços da aplicação."""
 
+import asyncio
 from typing import Annotated, Protocol
 from uuid import UUID
 
@@ -171,6 +172,13 @@ def get_session_service(request: Request) -> SessionService:
     persistence = getattr(request.app.state, "persistence", None)
     if persistence is None:
         raise HTTPException(status_code=503, detail="Sessões indisponíveis")
+
+    def schedule_background_task(coroutine) -> None:
+        task = asyncio.create_task(coroutine)
+        tasks = request.app.state.background_tasks
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
     return SessionApplicationService(
         sessions=persistence.sessions,
         interactions=persistence.interactions,
@@ -190,6 +198,7 @@ def get_session_service(request: Request) -> SessionService:
         email_preparations=persistence.email_preparations,
         summary_generator_provider=lambda: _summary_generator_provider(request),
         user_memory_extractor_provider=lambda: _user_memory_extractor_provider(request),
+        background_task_scheduler=schedule_background_task,
         graph_provider=lambda: _graph_provider(request),
         execution_max_model_calls=getattr(
             getattr(request.app.state, "settings", None), "execution_max_model_calls", 12

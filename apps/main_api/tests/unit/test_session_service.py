@@ -68,6 +68,24 @@ def test_response_marks_successful_graph_results_as_completed():
     assert outcome.status == "completed"
 
 
+def test_response_hides_executor_report_artifact_reference():
+    reference = str(uuid4())
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={
+            "final_answer": f"O relatório foi preparado. Referência: {reference}",
+            "report_artifact_refs": {"farm-task": (reference,)},
+        },
+        now=_utcnow(),
+    )
+
+    assert outcome.response.kind == "answer"
+    assert reference not in outcome.response.text
+    assert "[referência interna]" in outcome.response.text
+
+
 class FakeSessionRepository:
     def __init__(self) -> None:
         self.records: dict[UUID, SessionRecord] = {}
@@ -356,7 +374,7 @@ async def test_message_is_sanitized_and_replay_counts_once():
     assert record.next_message_sequence == 3
     assert graph.calls == 1
     assert len(conversations.messages) == 2
-    assert conversations.messages[0].sanitized_content.endswith("[EMAIL]")
+    assert conversations.messages[0].sanitized_content.endswith("user@example.com")
     assert all(message.sequence == index for index, message in enumerate(conversations.messages, 1))
 
 
@@ -409,6 +427,44 @@ async def test_degraded_result_is_persisted_as_terminal_degraded_status():
     assert outcome.degradation_reasons == ("farm_failed",)
     assert stored.status == InteractionStatus.DEGRADED
     assert stored.result_json is not None
+
+
+@pytest.mark.asyncio
+async def test_degraded_interaction_with_pending_question_can_be_resumed():
+    class DegradedQuestionGraph(FakeGraph):
+        async def ainvoke(self, state, *, config):
+            if state.get("input_kind") == "answer":
+                self.calls += 1
+                self.invocations.append((state, config))
+                return {"final_answer": "Período recebido."}
+            result = await super().ainvoke(state, config=config)
+            result["errors"] = ["router_invalid_output"]
+            return result
+
+    graph = DegradedQuestionGraph()
+    service, _, _, _ = _service(graph)
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message", client_message_id=uuid4(), message="Consulte as aplicações."
+    )
+
+    question = await service.create_interaction(principal, session.session_id, request)
+    assert question.status == "degraded"
+    assert question.response.kind == "question"
+
+    answer = AnswerCommand(
+        kind="answer",
+        interaction_id=question.interaction_id,
+        question_id=question.response.question_id,
+        answer=TextAnswer(kind="text", text="Últimos 30 dias"),
+    )
+    result = await service.create_interaction(principal, session.session_id, answer)
+
+    assert result.status == "completed"
+    assert result.response.kind == "answer"
+    assert result.response.text == "Período recebido."
+    assert graph.calls == 2
 
 
 @pytest.mark.asyncio

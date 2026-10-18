@@ -24,6 +24,15 @@ class SimulatedChatModel(BaseChatModel):
     def bind_tools(self, tools: list[Any], **kwargs: Any) -> Any:
         return self.bind(tools=tools, **kwargs)
 
+    def get_num_tokens(self, text: str) -> int:
+        """Estima tokens de forma local e conservadora, sem tokenizer externo."""
+        if not text:
+            return 0
+        # O simulador só precisa de uma medida determinística para respeitar os
+        # limites de contexto durante testes. Três bytes por token é deliberadamente
+        # conservador para texto UTF-8 e não depende de modelo ou provider.
+        return (len(text.encode("utf-8")) + 2) // 3
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -81,18 +90,22 @@ class SimulatedChatModel(BaseChatModel):
             normalized_request = request.casefold()
             lot_code = _extract_lot_code(request)
             explicit_send = protect_user_input(request).send_intent_requested
-            is_send_confirmation = explicit_send and any(
-                term in normalized_request
-                for term in (
-                    "confirmo",
-                    "confirme",
-                    "confirmação",
-                    "confirmacao",
-                    "preparação",
-                    "preparacao",
-                    "preparado",
+            is_send_confirmation = (
+                explicit_send
+                and any(
+                    term in normalized_request
+                    for term in (
+                        "confirmo",
+                        "confirme",
+                        "confirmação",
+                        "confirmacao",
+                        "preparação",
+                        "preparacao",
+                        "preparado",
+                    )
                 )
-            ) and not re.search(r"\[DESTINATARIO_\d+\]", request, re.IGNORECASE)
+                and not re.search(r"\[DESTINATARIO_\d+\]", request, re.IGNORECASE)
+            )
             if is_send_confirmation:
                 return name, {
                     "intent": "confirmar envio de preparação existente",
@@ -258,6 +271,8 @@ class SimulatedChatModel(BaseChatModel):
         if name == "UserMemoryDraft":
             unchanged = {"action": "unchanged", "value": None, "source_excerpt": None}
             return name, {"tone": unchanged, "general_goal": unchanged}
+        if name == "SessionSummaryDraft":
+            return name, _simulated_session_summary(messages)
         return name, {}
 
 
@@ -268,7 +283,70 @@ _STRUCTURED_NAMES = {
     "JudgeResult",
     "QuestionFormatterResult",
     "UserMemoryDraft",
+    "SessionSummaryDraft",
 }
+
+
+def _simulated_session_summary(messages: list[BaseMessage]) -> dict[str, Any]:
+    """Gera um resumo estruturalmente válido sem alegar síntese de provider."""
+    payload_text = _last_human_text(messages)
+    try:
+        payload = json.loads(payload_text)
+    except TypeError, json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    prior = payload.get("summary_to_compact") or payload.get("previous_summary") or {}
+    if not isinstance(prior, dict):
+        prior = {}
+    prior_activity = prior.get("activity")
+    prior_activity = prior_activity.strip() if isinstance(prior_activity, str) else ""
+    facts = prior.get("important_facts", [])
+    decisions = prior.get("decisions", [])
+    limitations = prior.get("limitations", [])
+    pending = prior.get("pending_activity")
+
+    interactions = payload.get("new_interactions", [])
+    user_messages = (
+        [
+            item.get("content", "").strip()
+            for item in interactions
+            if isinstance(item, dict)
+            and item.get("source") == "conversation_message"
+            and item.get("role") == "user"
+            and isinstance(item.get("content"), str)
+            and item["content"].strip()
+        ]
+        if isinstance(interactions, list)
+        else []
+    )
+    recent = user_messages[-10:]
+    recent_activity = "Solicitações recentes: " + " | ".join(recent) if recent else ""
+    activity = " — ".join(part for part in (prior_activity, recent_activity) if part)
+    if not activity:
+        activity = "Sessão de teste em modo simulado."
+    activity = activity[:2_500]
+
+    token_budget = payload.get("token_budget")
+    if isinstance(token_budget, int) and token_budget > 0:
+        # Mantém folga para os demais campos na serialização do contrato.
+        activity = activity[: min(2_500, token_budget * 5)]
+    simulated_limitation = (
+        "Resumo determinístico do modo simulado; não representa síntese de provider."
+    )
+    normalized_limitations = (
+        [item for item in limitations if isinstance(item, str)]
+        if isinstance(limitations, list)
+        else []
+    )
+    return {
+        "activity": activity,
+        "important_facts": facts[:40] if isinstance(facts, list) else [],
+        "decisions": decisions[:40] if isinstance(decisions, list) else [],
+        "pending_activity": pending if isinstance(pending, str) else None,
+        "limitations": list(dict.fromkeys((*normalized_limitations, simulated_limitation)))[:40],
+    }
 
 
 def _tool_name(tool: Any) -> str:
@@ -292,7 +370,7 @@ def _router_request_text(messages: list[BaseMessage]) -> str:
     text = _last_human_text(messages)
     try:
         payload = json.loads(text)
-    except (TypeError, json.JSONDecodeError):
+    except TypeError, json.JSONDecodeError:
         return text
     if isinstance(payload, dict) and isinstance(payload.get("message"), str):
         return payload["message"]
