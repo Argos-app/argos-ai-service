@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Any, Protocol, TypeVar
+from typing import Protocol, TypeVar
 
 
 class AgentId(StrEnum):
@@ -30,5 +30,5 @@ class Agent(Protocol[InputT, OutputT]):
         self,
         input: InputT,
         *,
-        context: Mapping[str, Any] | None = None,
+        context: Mapping[str, str] | None = None,
     ) -> OutputT: ...

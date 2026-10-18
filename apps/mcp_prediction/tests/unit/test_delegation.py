@@ -34,7 +34,7 @@ def make_verifier_and_token(*, overrides: dict[str, object] | None = None):
         "sub": str(uuid4()),
         "authorized_property_ids": [property_id],
         "operations": ["prediction.read"],
-        "agent": "analista",
+        "agent": "analyst",
         "iat": now - 1,
         "nbf": now - 1,
         "exp": now + 120,
@@ -51,7 +51,7 @@ def make_verifier_and_token(*, overrides: dict[str, object] | None = None):
         issuer="argos-main-service",
         audience="https://prediction.example.test/mcp",
         clock=lambda: now,
-        agent_operations={"analista": frozenset({"prediction.read"})},
+        agent_operations={"analyst": frozenset({"prediction.read"})},
     )
     return verifier, token, claims
 
@@ -64,13 +64,14 @@ def test_valid_delegation_produces_immutable_access_context() -> None:
     assert str(context.user_id) == claims["sub"]
     assert str(context.authorized_property_ids[0]) == claims["authorized_property_ids"][0]
     assert context.operations == frozenset({"prediction.read"})
-    assert context.agent_id == "analista"
+    assert context.agent_id == "analyst"
 
 
 @pytest.mark.parametrize(
     "overrides",
     [
         {"agent": "fazenda"},
+        {"agent": "analista"},
         {"operations": ["medicine.read"]},
         {"iat": 1_800_000_031},
         {"nbf": 1_800_000_031},
@@ -121,7 +122,7 @@ def test_access_context_cannot_select_property_outside_claim_or_current_access()
         user_id=uuid4(),
         authorized_property_ids=(property_a,),
         operations=frozenset({"prediction.read"}),
-        agent_id="analista",
+        agent_id="analyst",
         issued_at=datetime.now(UTC),
         expires_at=datetime.now(UTC) + timedelta(minutes=5),
         token_id="jti",
@@ -155,3 +156,15 @@ def test_access_context_cannot_select_property_outside_claim_or_current_access()
 def test_missing_request_context_is_denied() -> None:
     with pytest.raises(AccessContextError):
         get_access_context()
+
+
+@pytest.mark.parametrize("count", [100, 101, 1000])
+def test_delegation_property_limit(count):
+    properties = [str(uuid4()) for _ in range(count)]
+    verifier, token, _ = make_verifier_and_token(overrides={"authorized_property_ids": properties})
+    if count > 100:
+        with pytest.raises(AccessContextError):
+            verifier.verify(token)
+    else:
+        context = verifier.verify(token)
+        assert tuple(map(str, context.authorized_property_ids)) == tuple(properties)

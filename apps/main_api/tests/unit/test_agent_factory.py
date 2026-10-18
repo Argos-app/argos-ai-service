@@ -17,7 +17,6 @@ from app.agents.registry import ModelPolicyId
 from app.agents.specialists import build_agent_factory
 from app.domain.sessions import ExecutionStatus
 from app.infrastructure.agents import langchain_factory
-from app.infrastructure.mcp.client import McpClients
 from app.ports.agent import AgentId
 
 
@@ -54,7 +53,7 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
         return _FakeRunnable()
 
     monkeypatch.setattr(specialists, "create_agent", fake_create_agent)
-    factory = build_agent_factory(_models(), use_mock_tools=True)
+    factory = build_agent_factory(_models())
 
     assert len(calls) == 9
     farm_call = next(
@@ -86,7 +85,7 @@ def test_build_agent_factory_registers_question_formatter_without_tools(monkeypa
         return _FakeRunnable()
 
     monkeypatch.setattr(specialists, "create_agent", fake_create_agent)
-    factory = build_agent_factory(_models(), use_mock_tools=True)
+    factory = build_agent_factory(_models())
     factory.create(AgentId.QUESTION_FORMATTER)
 
     formatter_call = next(
@@ -111,7 +110,6 @@ def test_build_agent_factory_accepts_real_tools_by_registered_slot(monkeypatch) 
     build_agent_factory(
         _models(),
         tool_bindings={AgentId.FARM: {"farm_data": (get_lot_summary,)}},
-        use_mock_tools=True,
     )
 
     farm_call = next(
@@ -127,38 +125,7 @@ def test_build_agent_factory_rejects_tool_slot_not_allowed_for_agent() -> None:
             tool_bindings={
                 AgentId.FARM: {"report_delivery": (mock_consultar_fazenda,)},
             },
-            use_mock_tools=True,
         )
-
-
-def test_build_agent_factory_rejects_unapproved_secretary_tool_name() -> None:
-    with pytest.raises(
-        langchain_factory.AgentFactoryConfigurationError, match="Tools não permitidas"
-    ):
-        build_agent_factory(
-            _models(),
-            tool_bindings={AgentId.SECRETARY: {"report_delivery": (mock_consultar_fazenda,)}},
-            use_mock_tools=True,
-        )
-
-
-def test_build_agent_factory_does_not_silently_select_mock_tools() -> None:
-    with pytest.raises(langchain_factory.AgentFactoryConfigurationError, match="incompletos"):
-        build_agent_factory(_models())
-
-
-def test_explicit_mcp_configuration_binds_unavailable_tools_instead_of_mocks(monkeypatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    def fake_create_agent(**kwargs: Any) -> _FakeRunnable:
-        calls.append(kwargs)
-        return _FakeRunnable()
-
-    monkeypatch.setattr(specialists, "create_agent", fake_create_agent)
-    build_agent_factory(_models(), mcp_clients=McpClients())
-
-    assert any([tool.name for tool in call["tools"]] == ["mcp_email_unavailable"] for call in calls)
-    assert all(not tool.name.startswith("mock_") for call in calls for tool in call["tools"])
 
 
 def test_factory_fails_when_model_for_policy_is_missing() -> None:
@@ -166,13 +133,13 @@ def test_factory_fails_when_model_for_policy_is_missing() -> None:
     del models[ModelPolicyId.FARM]
 
     with pytest.raises(langchain_factory.AgentFactoryConfigurationError, match="Modelo"):
-        build_agent_factory(models, use_mock_tools=True)
+        build_agent_factory(models)
 
 
 @pytest.mark.asyncio
 async def test_langchain_adapter_rejects_invalid_input(monkeypatch) -> None:
     monkeypatch.setattr(specialists, "create_agent", lambda **_: _FakeRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
+    agent = build_agent_factory(_models()).create(AgentId.FARM)
 
     with pytest.raises(ValidationError):
         await agent.run({"task_id": "", "goal": "", "brief_sanitized": ""})
@@ -183,7 +150,7 @@ async def test_agent_passes_context_to_runnable(monkeypatch) -> None:
     runnable = _FakeRunnable()
     monkeypatch.setattr(specialists, "create_agent", lambda **_: runnable)
 
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
+    agent = build_agent_factory(_models()).create(AgentId.FARM)
     await agent.run(
         SpecialistInput(
             task_id="task-1",
@@ -220,7 +187,7 @@ async def test_agent_persists_correlated_events_when_interaction_context_exists(
     runnable = _FakeRunnable()
     repository = FakeEventRepository()
     monkeypatch.setattr(specialists, "create_agent", lambda **_: runnable)
-    factory = build_agent_factory(_models(), execution_events=repository, use_mock_tools=True)
+    factory = build_agent_factory(_models(), execution_events=repository)
 
     await factory.create(AgentId.FARM).run(
         SpecialistInput(
@@ -262,7 +229,7 @@ async def test_farm_agent_adapter_can_call_mock_tool_with_farm_context(monkeypat
             }
 
     monkeypatch.setattr(specialists, "create_agent", lambda **_: ToolCallingFakeRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
+    agent = build_agent_factory(_models()).create(AgentId.FARM)
 
     result = await agent.run(
         SpecialistInput(

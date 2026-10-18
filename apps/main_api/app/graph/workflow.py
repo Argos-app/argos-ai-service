@@ -1,13 +1,12 @@
 import re
 from functools import partial
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from app.agent_schemas.inputs import (
     DependencyResult,
     QuestionFormatterInput,
     QuestionFormattingRequest,
-    QuestionOption,
     RouterInput,
     SessionContext,
     SpecialistInput,
@@ -27,24 +26,11 @@ from app.agent_schemas.synthesis import (
     OrchestratorResult,
     TaskOutcome,
 )
-from app.application.email_dispatch_workflow import EmailDispatchWorkflow
-from app.application.report_artifact_service import (
-    ReportSourceExpiredError,
-    ReportSourceValidationError,
-    validate_report_source,
-)
-from app.domain.email_preparations import PendingRecipientResolution
-from app.domain.report_artifacts import (
-    ReportArtifactExpiredError,
-    ReportArtifactNotFoundError,
-)
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
-from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventWriteError
-from app.ports.report_artifact_repository import ReportArtifactRepository
-from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
+from app.privacy import minimize_pii
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -61,13 +47,7 @@ SECRET_REQUEST_PATTERN = re.compile(
 )
 
 
-def build_agent_context(
-    state: AgentState,
-    *,
-    config: RunnableConfig | None = None,
-    report_artifact_scopes: dict[str, dict[str, str]] | None = None,
-    recipient_selectors: dict[str, dict[str, str]] | None = None,
-) -> dict[str, Any]:
+def build_agent_context(state: AgentState) -> dict[str, str]:
     context = {
         "user_id": state["user_id"],
         "farm_id": state["farm_id"],
@@ -75,25 +55,6 @@ def build_agent_context(
     }
     if state.get("interaction_id"):
         context["interaction_id"] = state["interaction_id"]
-    task_index = state.get("current_task_index", 0)
-    tasks = state.get("ordered_tasks", ())
-    if 0 <= task_index < len(tasks):
-        context["argos_task_id"] = tasks[task_index].task_id
-    configurable = (config or {}).get("configurable") or {}
-    if configurable.get("argos_user_id"):
-        context["argos_user_id"] = configurable["argos_user_id"]
-    if configurable.get("argos_authorized_property_ids"):
-        context["argos_authorized_property_ids"] = configurable["argos_authorized_property_ids"]
-    if configurable.get("argos_request_id"):
-        context["argos_request_id"] = configurable["argos_request_id"]
-    if report_artifact_scopes:
-        context["argos_report_artifact_scopes"] = report_artifact_scopes
-    if recipient_selectors is not None:
-        context["recipient_selectors"] = recipient_selectors
-        context["argos_send_intent_requested"] = bool(state.get("send_intent_requested"))
-        context["argos_send_intent_source_interaction_id"] = state.get(
-            "send_intent_source_interaction_id"
-        )
     return context
 
 
@@ -116,10 +77,6 @@ def _preference_context(state: AgentState) -> SessionContext:
 def reset_turn_state() -> dict:
     return {
         "pii_map": {},
-        "recipient_selectors": {},
-        "send_intent_requested": False,
-        "send_intent_source_interaction_id": None,
-        "email_action_summary": None,
         "sanitized_message": "",
         "route": [],
         "route_plan": None,
@@ -128,14 +85,10 @@ def reset_turn_state() -> dict:
         "called_agents": [],
         "task_outcomes": (),
         "sources": [],
-        "report_artifact_refs": {},
-        "report_artifact_origin_interaction_id": None,
-        "report_source_renewal_count": 0,
         "missing_fields": [],
         "clarification_request": None,
         "clarification_question": None,
         "question_id": None,
-        "clarification_expires_at": None,
         "pending_task_id": None,
         "resume_target": None,
         "draft_result": None,
@@ -163,17 +116,9 @@ def initial_state(
     session_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
-    recipient_selectors: dict[str, dict[str, str]] | None = None,
-    send_intent_requested: bool = False,
 ) -> dict:
-    protected = protect_user_input(message)
-    protected_recipients, sanitized_message = merge_recipient_selectors(
-        dict(recipient_selectors or {}),
-        protected.recipient_selectors,
-        protected.sanitized_text,
-    )
     return {
-        "messages": [HumanMessage(content=sanitized_message)],
+        "messages": [HumanMessage(content=minimize_pii(message))],
         "user_id": user_id,
         "farm_id": farm_id,
         "session_id": session_id,
@@ -182,14 +127,6 @@ def initial_state(
         "answer_question_id": None,
         "session_context": session_context or SessionContext(),
         "pii_map": {},
-        "report_artifact_refs": {},
-        "report_artifact_origin_interaction_id": interaction_id,
-        "report_source_renewal_count": 0,
-        "recipient_selectors": protected_recipients,
-        "send_intent_requested": send_intent_requested or protected.send_intent_requested,
-        "send_intent_source_interaction_id": (
-            interaction_id if send_intent_requested or protected.send_intent_requested else None
-        ),
     }
 
 
@@ -199,25 +136,13 @@ def answer_state(
     question_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
-    recipient_selectors: dict[str, dict[str, str]] | None = None,
-    send_intent_requested: bool = False,
-    send_intent_source_interaction_id: str | None = None,
 ) -> dict:
-    protected = protect_user_input(answer)
-    protected_recipients, sanitized_answer = merge_recipient_selectors(
-        dict(recipient_selectors or {}),
-        protected.recipient_selectors,
-        protected.sanitized_text,
-    )
     return {
-        "messages": [HumanMessage(content=sanitized_answer)],
+        "messages": [HumanMessage(content=minimize_pii(answer))],
         "input_kind": "answer",
         "answer_question_id": question_id,
         "interaction_id": interaction_id,
         "session_context": session_context or SessionContext(),
-        "recipient_selectors": protected_recipients,
-        "send_intent_requested": send_intent_requested,
-        "send_intent_source_interaction_id": send_intent_source_interaction_id,
     }
 
 
@@ -270,22 +195,7 @@ def no_guardrail_entrada(state: AgentState) -> dict:
             "blocked_secret_request",
         )
 
-    protected = protect_user_input(raw_text)
-    recipient_selectors, sanitized = merge_recipient_selectors(
-        dict(state.get("recipient_selectors") or {}),
-        protected.recipient_selectors,
-        protected.sanitized_text,
-    )
-    send_intent_requested = bool(state.get("send_intent_requested")) or (
-        state.get("input_kind") != "answer" and protected.send_intent_requested
-    )
-    send_intent_source_interaction_id = state.get("send_intent_source_interaction_id")
-    if (
-        send_intent_source_interaction_id is None
-        and state.get("input_kind") != "answer"
-        and send_intent_requested
-    ):
-        send_intent_source_interaction_id = state.get("interaction_id")
+    sanitized = minimize_pii(raw_text)
     replacement = [HumanMessage(content=sanitized)]
     if message.id:
         replacement.insert(0, RemoveMessage(id=message.id))
@@ -294,9 +204,6 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         return {
             **reset_turn_state(),
             "sanitized_message": sanitized,
-            "recipient_selectors": recipient_selectors,
-            "send_intent_requested": send_intent_requested,
-            "send_intent_source_interaction_id": send_intent_source_interaction_id,
             "messages": replacement,
         }
 
@@ -318,9 +225,6 @@ def no_guardrail_entrada(state: AgentState) -> dict:
             "called_agents": list(state.get("called_agents", [])),
             "errors": list(state.get("errors", [])),
             "sanitized_message": resumed_message,
-            "recipient_selectors": recipient_selectors,
-            "send_intent_requested": send_intent_requested,
-            "send_intent_source_interaction_id": send_intent_source_interaction_id,
             "resume_target": "router",
             "messages": replacement,
         }
@@ -332,9 +236,6 @@ def no_guardrail_entrada(state: AgentState) -> dict:
             **reset_turn_state(),
             "called_agents": list(state.get("called_agents", [])),
             "final_answer": SAFE_ANSWER,
-            "recipient_selectors": recipient_selectors,
-            "send_intent_requested": send_intent_requested,
-            "send_intent_source_interaction_id": send_intent_source_interaction_id,
             "errors": [*state.get("errors", []), "missing_pending_task"],
         }
 
@@ -359,33 +260,18 @@ def no_guardrail_entrada(state: AgentState) -> dict:
         "called_agents": list(state.get("called_agents", [])),
         "errors": list(state.get("errors", [])),
         "sanitized_message": resumed_message,
-        "recipient_selectors": recipient_selectors,
-        "send_intent_requested": send_intent_requested,
-        "send_intent_source_interaction_id": send_intent_source_interaction_id,
         "route_plan": state.get("route_plan"),
         "ordered_tasks": updated_tasks,
         "current_task_index": index,
         "task_outcomes": prior_outcomes,
         "sources": prior_sources,
-        "report_artifact_refs": {
-            task_id: references
-            for task_id, references in state.get("report_artifact_refs", {}).items()
-            if task_id in {outcome.task.task_id for outcome in prior_outcomes}
-        },
-        "report_artifact_origin_interaction_id": state.get("report_artifact_origin_interaction_id"),
-        "report_source_renewal_count": state.get("report_source_renewal_count", 0),
         "route": state.get("route", []),
         "resume_target": updated_task.agent.value,
         "messages": replacement,
     }
 
 
-async def no_roteador(
-    state: AgentState,
-    *,
-    factory: AgentFactory,
-    config: RunnableConfig | None = None,
-) -> dict:
+async def no_roteador(state: AgentState, *, factory: AgentFactory) -> dict:
     called = [*state.get("called_agents", []), AgentId.ROUTER.value]
     try:
         response = await factory.create(AgentId.ROUTER).run(
@@ -393,7 +279,7 @@ async def no_roteador(
                 message=state["sanitized_message"],
                 session_context=_history_context(state),
             ),
-            context=build_agent_context(state, config=config),
+            context=build_agent_context(state),
         )
         plan = RoutePlan.model_validate(response)
         ordered = order_tasks(plan)
@@ -427,16 +313,7 @@ async def no_roteador(
     return update
 
 
-async def no_especialista(
-    state: AgentState,
-    *,
-    factory: AgentFactory,
-    agent_id: AgentId,
-    report_artifacts: ReportArtifactRepository | None = None,
-    email_preparations: EmailPreparationRepository | None = None,
-    email_dispatch: EmailDispatchWorkflow | None = None,
-    config: RunnableConfig | None = None,
-) -> dict:
+async def no_especialista(state: AgentState, *, factory: AgentFactory, agent_id: AgentId) -> dict:
     tasks = state["ordered_tasks"]
     index = state["current_task_index"]
     if index >= len(tasks) or tasks[index].agent.value != agent_id.value:
@@ -457,95 +334,8 @@ async def no_especialista(
         outcome.result.status not in (SpecialistStatus.SUCCESS, SpecialistStatus.PARTIAL)
         for outcome in dependencies
     )
-    errors = list(state.get("errors", []))
-    trusted_recipient_question: PendingRecipientResolution | None = None
-    report_refs_by_dependency: dict[str, tuple[str, ...]] = {}
-    report_artifact_scopes: dict[str, dict[str, str]] = {}
-    farm_dependencies = tuple(
-        outcome for outcome in dependencies if outcome.task.agent.value == AgentId.FARM.value
-    )
-    if task.agent.value == AgentId.SECRETARY.value and farm_dependencies and not blocked:
-        configurable = (config or {}).get("configurable") or {}
-        try:
-            principal_user_id = UUID(str(configurable["argos_user_id"]))
-            authorized_property_ids = tuple(
-                UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
-            )
-            origin_interaction_id = UUID(
-                str(
-                    state.get("report_artifact_origin_interaction_id")
-                    or state.get("interaction_id")
-                )
-            )
-            session_id = UUID(state["session_id"])
-            if principal_user_id != UUID(state["user_id"]):
-                raise ValueError("principal_mismatch")
-            if report_artifacts is None:
-                raise ReportArtifactNotFoundError("artifact_store_unavailable")
-            for dependency in farm_dependencies:
-                refs = tuple(state.get("report_artifact_refs", {}).get(dependency.task.task_id, ()))
-                if not refs:
-                    raise ReportArtifactNotFoundError("missing_report_artifact")
-                for reference in refs:
-                    artifact = await report_artifacts.get(
-                        UUID(reference),
-                        principal_user_id=principal_user_id,
-                        session_id=session_id,
-                        interaction_id=origin_interaction_id,
-                        task_id=dependency.task.task_id,
-                    )
-                    validate_report_source(
-                        artifact.envelope,
-                        principal_user_id=principal_user_id,
-                        lot_id=artifact.envelope.report.requested_lot.lot_id,
-                        authorized_property_ids=authorized_property_ids,
-                    )
-                    report_artifact_scopes[reference] = {
-                        "interaction_id": str(origin_interaction_id),
-                        "task_id": dependency.task.task_id,
-                    }
-                report_refs_by_dependency[dependency.task.task_id] = refs
-        except ReportArtifactExpiredError, ReportSourceExpiredError:
-            if state.get("report_source_renewal_count", 0) < 1:
-                source_index = next(
-                    index
-                    for index, candidate_task in enumerate(state["ordered_tasks"])
-                    if candidate_task.task_id == farm_dependencies[0].task.task_id
-                )
-                prior_outcomes = tuple(
-                    outcome
-                    for outcome in state.get("task_outcomes", ())
-                    if outcome.task.task_id
-                    in {candidate.task_id for candidate in state["ordered_tasks"][:source_index]}
-                )
-                prior_task_ids = {outcome.task.task_id for outcome in prior_outcomes}
-                prior_sources = unique_sources(
-                    [source for outcome in prior_outcomes for source in outcome.result.sources]
-                )
-                return {
-                    "current_task_index": source_index,
-                    "task_outcomes": prior_outcomes,
-                    "sources": prior_sources,
-                    "report_artifact_refs": {
-                        key: value
-                        for key, value in state.get("report_artifact_refs", {}).items()
-                        if key in prior_task_ids
-                    },
-                    "report_source_renewal_count": (
-                        state.get("report_source_renewal_count", 0) + 1
-                    ),
-                    "errors": [
-                        *state.get("errors", []),
-                        "expired_report_source_renewed_by_farm",
-                    ],
-                }
-            blocked = True
-            errors = [*state.get("errors", []), "report_source_expired_after_renewal"]
-        except ReportArtifactNotFoundError, ReportSourceValidationError, ValueError:
-            blocked = True
-            errors.append("invalid_or_missing_report_artifact")
-
     called = list(state.get("called_agents", []))
+    errors = list(state.get("errors", []))
 
     if blocked:
         result = SpecialistResult(
@@ -560,7 +350,6 @@ async def no_especialista(
                 task_id=outcome.task.task_id,
                 answer=outcome.result.answer,
                 source_references=tuple(source.reference for source in outcome.result.sources),
-                report_artifact_refs=report_refs_by_dependency.get(outcome.task.task_id, ()),
             )
             for outcome in dependencies
         )
@@ -576,15 +365,9 @@ async def no_especialista(
         )
         called.append(agent_id.value)
         try:
-            context = build_agent_context(
-                state,
-                config=config,
-                report_artifact_scopes=report_artifact_scopes,
-                recipient_selectors=(
-                    state.get("recipient_selectors", {}) if agent_id == AgentId.SECRETARY else None
-                ),
+            response = await factory.create(agent_id).run(
+                agent_input, context=build_agent_context(state)
             )
-            response = await factory.create(agent_id).run(agent_input, context=context)
             result = SpecialistResult.model_validate(response)
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")
@@ -598,48 +381,6 @@ async def no_especialista(
             )
             errors.append(f"{agent_id.value}_failed")
 
-    if agent_id == AgentId.SECRETARY and email_preparations is not None:
-        configurable = (config or {}).get("configurable") or {}
-        try:
-            trusted_recipient_question = await email_preparations.get_pending_recipient_resolution(
-                principal_user_id=UUID(str(configurable["argos_user_id"])),
-                session_id=UUID(state["session_id"]),
-                interaction_id=UUID(state["interaction_id"]),
-            )
-        except Exception:
-            result = SpecialistResult(
-                agent=task.agent,
-                status=SpecialistStatus.ERROR,
-                error="recipient_resolution_storage_unavailable",
-            )
-            errors.append("recipient_resolution_storage_unavailable")
-        if trusted_recipient_question is not None:
-            result = SpecialistResult(
-                agent=task.agent,
-                status=SpecialistStatus.NEEDS_CLARIFICATION,
-                answer="É necessário resolver um destinatário antes de preparar o relatório.",
-                missing_fields=("recipient",),
-            )
-
-    email_action_summary = None
-    if (
-        agent_id == AgentId.SECRETARY
-        and email_dispatch is not None
-        and state.get("send_intent_requested")
-    ):
-        configurable = (config or {}).get("configurable") or {}
-        recovery_context = dict(configurable)
-        recovery_context.setdefault("argos_user_id", state["user_id"])
-        recovery_context.setdefault("session_id", state["session_id"])
-        if state.get("send_intent_source_interaction_id"):
-            recovery_context.setdefault(
-                "argos_send_intent_source_interaction_id",
-                state["send_intent_source_interaction_id"],
-            )
-        email_action_summary = await email_dispatch.recover_interaction_outcome(
-            configurable=recovery_context
-        )
-
     outcome = TaskOutcome(task=task, result=result)
     if result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE):
         errors.append(f"{agent_id.value}_{result.status.value}")
@@ -651,45 +392,6 @@ async def no_especialista(
         "task_outcomes": (*state.get("task_outcomes", ()), outcome),
         "sources": sources,
     }
-    if email_action_summary is not None:
-        update["email_action_summary"] = email_action_summary
-    if agent_id == AgentId.FARM and report_artifacts is not None:
-        configurable = (config or {}).get("configurable") or {}
-        try:
-            principal_user_id = UUID(str(configurable["argos_user_id"]))
-            session_id = UUID(state["session_id"])
-            interaction_id = UUID(state["interaction_id"])
-            artifacts = await report_artifacts.list_for_task(
-                principal_user_id=principal_user_id,
-                session_id=session_id,
-                interaction_id=interaction_id,
-                task_id=task.task_id,
-            )
-            for artifact in artifacts:
-                validate_report_source(
-                    artifact.envelope,
-                    principal_user_id=principal_user_id,
-                    lot_id=artifact.envelope.report.requested_lot.lot_id,
-                    authorized_property_ids=tuple(
-                        UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
-                    ),
-                    now=artifact.created_at,
-                )
-            refs = tuple(str(artifact.reference) for artifact in artifacts)
-            refs_by_task = dict(state.get("report_artifact_refs", {}))
-            if refs:
-                refs_by_task[task.task_id] = refs
-                update["report_artifact_origin_interaction_id"] = str(interaction_id)
-            else:
-                refs_by_task.pop(task.task_id, None)
-            update["report_artifact_refs"] = refs_by_task
-        except Exception:
-            update["report_artifact_refs"] = {
-                key: value
-                for key, value in state.get("report_artifact_refs", {}).items()
-                if key != task.task_id
-            }
-            update["errors"] = [*update["errors"], "invalid_report_artifact_created"]
     if (
         result.status in (SpecialistStatus.NEEDS_CLARIFICATION, SpecialistStatus.NEEDS_INPUT)
         or result.missing_fields
@@ -703,28 +405,10 @@ async def no_especialista(
             question_goal=f"Esclareça: {goal}.",
         )
         update["pending_task_id"] = task.task_id
-    if trusted_recipient_question is not None:
-        update["clarification_request"] = QuestionFormattingRequest(
-            reason_code=trusted_recipient_question.reason_code,
-            input_type=trusted_recipient_question.input_type,
-            question_goal=trusted_recipient_question.question_goal,
-            options=tuple(
-                QuestionOption(option_id=option.option_id, label=option.label)
-                for option in trusted_recipient_question.options
-            ),
-        )
-        update["question_id"] = str(trusted_recipient_question.question_id)
-        update["clarification_expires_at"] = trusted_recipient_question.expires_at.isoformat()
-        update["pending_task_id"] = task.task_id
     return update
 
 
-async def no_orquestrador(
-    state: AgentState,
-    *,
-    factory: AgentFactory,
-    config: RunnableConfig | None = None,
-) -> dict:
+async def no_orquestrador(state: AgentState, *, factory: AgentFactory) -> dict:
     called = [*state.get("called_agents", []), AgentId.ORCHESTRATOR.value]
     previous_review = state.get("judge_result")
     feedback = (
@@ -740,7 +424,7 @@ async def no_orquestrador(
                 revision_feedback=feedback,
                 session_context=_preference_context(state),
             ),
-            context=build_agent_context(state, config=config),
+            context=build_agent_context(state),
         )
         draft = OrchestratorResult.model_validate(response)
         trusted_sources = state.get("sources", [])
@@ -757,12 +441,7 @@ async def no_orquestrador(
     return {"called_agents": called, "draft_result": draft}
 
 
-async def no_juiz(
-    state: AgentState,
-    *,
-    factory: AgentFactory,
-    config: RunnableConfig | None = None,
-) -> dict:
+async def no_juiz(state: AgentState, *, factory: AgentFactory) -> dict:
     called = [*state.get("called_agents", []), AgentId.JUDGE.value]
     draft = state.get("draft_result")
     if draft is None:
@@ -779,7 +458,7 @@ async def no_juiz(
                 sources=draft.sources,
                 outcomes=state["task_outcomes"],
             ),
-            context=build_agent_context(state, config=config),
+            context=build_agent_context(state),
         )
         review = JudgeResult.model_validate(response)
     except ExecutionEventWriteError:
@@ -796,12 +475,7 @@ async def no_juiz(
     return {"called_agents": called, "judge_result": review, "retry_count": retry_count}
 
 
-async def no_formatador(
-    state: AgentState,
-    *,
-    factory: AgentFactory,
-    config: RunnableConfig | None = None,
-) -> dict:
+async def no_formatador(state: AgentState, *, factory: AgentFactory) -> dict:
     called = [*state.get("called_agents", []), AgentId.QUESTION_FORMATTER.value]
     request = state.get("clarification_request")
     if request is None:
@@ -812,8 +486,7 @@ async def no_formatador(
         }
     try:
         response = await factory.create(AgentId.QUESTION_FORMATTER).run(
-            QuestionFormatterInput(request=request),
-            context=build_agent_context(state, config=config),
+            QuestionFormatterInput(request=request), context=build_agent_context(state)
         )
         question = response.prompt.strip()
         if not question:
@@ -826,12 +499,12 @@ async def no_formatador(
             "called_agents": called,
             "errors": [*state.get("errors", []), "question_formatter_failed"],
             "clarification_question": question,
-            "question_id": state.get("question_id") or str(uuid4()),
+            "question_id": str(uuid4()),
         }
     return {
         "called_agents": called,
         "clarification_question": question,
-        "question_id": state.get("question_id") or str(uuid4()),
+        "question_id": str(uuid4()),
     }
 
 
@@ -858,22 +531,12 @@ def no_guardrail_saida(state: AgentState) -> dict:
         for identifier in build_agent_context(state).values():
             if identifier:
                 answer = answer.replace(identifier, "[identificador protegido]")
-    answer = _include_email_action_summary(answer, state.get("email_action_summary"))
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
 def no_saida_segura(state: AgentState) -> dict:
-    answer = _include_email_action_summary(
-        state.get("final_answer") or SAFE_ANSWER,
-        state.get("email_action_summary"),
-    )
+    answer = state.get("final_answer") or SAFE_ANSWER
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
-
-
-def _include_email_action_summary(answer: str, summary: str | None) -> str:
-    if not summary:
-        return answer
-    return f"{answer}\n\nEstado do envio: {summary}"
 
 
 def decidir_pos_entrada(state: AgentState) -> str:
@@ -920,14 +583,7 @@ def decidir_pos_formatador(state: AgentState) -> str:
     return "safe" if state.get("final_answer") else "question_guardrail"
 
 
-def build_graph(
-    factory: AgentFactory,
-    *,
-    checkpointer: Any = None,
-    report_artifacts: ReportArtifactRepository | None = None,
-    email_preparations: EmailPreparationRepository | None = None,
-    email_dispatch: EmailDispatchWorkflow | None = None,
-):
+def build_graph(factory: AgentFactory, *, checkpointer: Any = None):
     graph = StateGraph(AgentState)
     graph.add_node("guardrail_input", no_guardrail_entrada)
     graph.add_node("router", partial(no_roteador, factory=factory))
@@ -940,14 +596,7 @@ def build_graph(
     ):
         graph.add_node(
             agent_id.value,
-            partial(
-                no_especialista,
-                factory=factory,
-                agent_id=agent_id,
-                report_artifacts=report_artifacts,
-                email_preparations=email_preparations,
-                email_dispatch=email_dispatch,
-            ),
+            partial(no_especialista, factory=factory, agent_id=agent_id),
         )
     graph.add_node("orchestrator", partial(no_orquestrador, factory=factory))
     graph.add_node("judge", partial(no_juiz, factory=factory))
@@ -1015,8 +664,6 @@ async def executar_fluxo(
     session_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
-    recipient_selectors: dict[str, dict[str, str]] | None = None,
-    send_intent_requested: bool = False,
     config: RunnableConfig | None = None,
 ) -> dict:
     state = initial_state(
@@ -1026,8 +673,6 @@ async def executar_fluxo(
         session_id=session_id,
         interaction_id=interaction_id,
         session_context=session_context,
-        recipient_selectors=recipient_selectors,
-        send_intent_requested=send_intent_requested,
     )
     return await graph.ainvoke(
         state,
@@ -1047,9 +692,6 @@ async def executar_resposta(
     session_id: str,
     interaction_id: str | None = None,
     session_context: SessionContext | None = None,
-    recipient_selectors: dict[str, dict[str, str]] | None = None,
-    send_intent_requested: bool = False,
-    send_intent_source_interaction_id: str | None = None,
     checkpoint_namespace: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
@@ -1058,9 +700,6 @@ async def executar_resposta(
         question_id=question_id,
         interaction_id=interaction_id,
         session_context=session_context,
-        recipient_selectors=recipient_selectors,
-        send_intent_requested=send_intent_requested,
-        send_intent_source_interaction_id=send_intent_source_interaction_id,
     )
     return await graph.ainvoke(
         state,

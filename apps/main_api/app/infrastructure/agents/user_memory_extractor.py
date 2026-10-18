@@ -8,11 +8,8 @@ from uuid import UUID
 
 from app.agent_schemas.user_memory import UserMemoryDraft
 from app.domain.memory import UserMemory, UserMemoryChange
-from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.privacy import minimize_sensitive_memory_input
 from langchain_core.messages import HumanMessage, SystemMessage
-
-from packages.observability import ObservationCollector
 
 USER_MEMORY_SYSTEM_PROMPT = """
 Extraia somente preferências duradouras do usuário para seu perfil entre sessões.
@@ -41,19 +38,11 @@ class UserMemoryExtractionError(RuntimeError):
 
 
 class LangChainUserMemoryExtractor:
-    def __init__(
-        self,
-        model: Any,
-        *,
-        observation_collector: ObservationCollector | None = None,
-        langsmith_callback: Any | None = None,
-    ) -> None:
+    def __init__(self, model: Any) -> None:
         structured = getattr(model, "with_structured_output", None)
         if not callable(structured):
             raise ValueError("o modelo de memória deve aceitar saída estruturada")
         self._structured = structured(UserMemoryDraft)
-        self._observation_collector = observation_collector
-        self._langsmith_callback = langsmith_callback
 
     async def extract(
         self,
@@ -78,19 +67,12 @@ class LangChainUserMemoryExtractor:
             separators=(",", ":"),
         )
         try:
-            messages = [
-                SystemMessage(content=USER_MEMORY_SYSTEM_PROMPT),
-                HumanMessage(content=payload),
-            ]
-            callbacks = []
-            if self._observation_collector is not None:
-                callbacks.append(
-                    ModelUsageCallback(self._observation_collector, agent="user_memory")
-                )
-            if self._langsmith_callback is not None:
-                callbacks.append(self._langsmith_callback)
-            invoke_options = {"config": {"callbacks": callbacks}} if callbacks else {}
-            result = await self._structured.ainvoke(messages, **invoke_options)
+            result = await self._structured.ainvoke(
+                [
+                    SystemMessage(content=USER_MEMORY_SYSTEM_PROMPT),
+                    HumanMessage(content=payload),
+                ]
+            )
             return UserMemoryDraft.model_validate(result).to_domain()
         except Exception as exc:
             raise UserMemoryExtractionError(

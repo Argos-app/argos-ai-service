@@ -54,25 +54,6 @@ versione `apps/a2a_agent/.env`. O serviço falha fechado quando as configuraçõ
 estão ausentes, a permissão não pode ser confirmada ou um provedor retorna
 resposta inválida.
 
-Para persistir observabilidade bruta, configure `A2A_OBSERVABILITY_MONGO_URI`
-como segredo e informe `A2A_OBSERVABILITY_COLLECTION` e, se necessário,
-`A2A_OBSERVABILITY_MONGO_DATABASE` como configuração. URI e coleção precisam ser
-informadas juntas; quando ambas forem omitidas, a coleta persistente fica
-desativada. O writer usa uma fila limitada em memória, sem spool local; falhas
-de configuração ou indisponibilidade do MongoDB desativam a persistência sem
-interromper as respostas A2A. Os registros incluem tentativas de operações A2A,
-agentes, provedores HTTP, embeddings, autorização PostgreSQL e adapters de
-documentos/Qdrant, sem persistir argumentos, prompts, respostas ou
-identificadores de usuário/task/contexto.
-
-O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
-para registrar o despacho do agente A2A e a chamada de geração de resposta no
-projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
-ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
-perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs e
-tokens Bearer são anonimizados antes do envio. O endpoint HTTPS pode ser
-definido por `A2A_LANGSMITH_ENDPOINT`.
-
 ## Operação e recuperação
 
 - `GET /health/live` verifica o processo; `GET /health/ready` também depende da

@@ -9,12 +9,10 @@ from app.api.v1.dependencies.auth import Principal
 from app.api.v1.models.interactions import InteractionInput, InteractionResult
 from app.api.v1.models.messages import SessionMessagesPage
 from app.api.v1.models.sessions import Session
-from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.message_history_service import (
     MessageHistoryService as MongoMessageHistoryService,
 )
 from app.application.session_service import MongoSessionService
-from app.infrastructure.observability.recording import active_collector
 
 
 class SessionService(Protocol):
@@ -40,7 +38,6 @@ class MessageHistoryQueryService(Protocol):
 
 def _graph_provider(request: Request):
     app_state = request.app.state
-    observation_collector = active_collector(getattr(app_state, "observability_collector", None))
     if app_state.agent_graph is not None:
         return app_state.agent_graph
     from app.agents.registry import ModelPolicyId
@@ -68,36 +65,9 @@ def _graph_provider(request: Request):
     try:
         persistence = getattr(app_state, "persistence", None)
         execution_events = persistence.execution_events if persistence is not None else None
-        mcp_clients = getattr(app_state, "mcp_clients", None)
-        email_dispatch = None
-        if persistence is not None and mcp_clients is not None and mcp_clients.email is not None:
-            email_dispatch = EmailDispatchWorkflow(
-                email_client=mcp_clients.email,
-                preparations=persistence.email_preparations,
-                report_artifacts=persistence.report_artifacts,
-                observation_collector=observation_collector,
-            )
         graph = build_graph(
-            build_agent_factory(
-                models,
-                execution_events=execution_events,
-                mcp_clients=mcp_clients,
-                documental_a2a_client=getattr(app_state, "documental_a2a_client", None),
-                observation_collector=observation_collector,
-                delegation_issuer=getattr(app_state, "mcp_delegation_token_issuer", None),
-                report_artifacts=(
-                    persistence.report_artifacts if persistence is not None else None
-                ),
-                email_preparations=(
-                    persistence.email_preparations if persistence is not None else None
-                ),
-            ),
+            build_agent_factory(models, execution_events=execution_events),
             checkpointer=app_state.checkpointer,
-            report_artifacts=(persistence.report_artifacts if persistence is not None else None),
-            email_preparations=(
-                persistence.email_preparations if persistence is not None else None
-            ),
-            email_dispatch=email_dispatch,
         )
     except Exception as exc:
         raise HTTPException(
@@ -136,12 +106,6 @@ def _summary_generator_provider(request: Request):
             if settings is not None
             else SESSION_SUMMARY_INPUT_MAX_TOKENS
         ),
-        observation_collector=active_collector(getattr(app_state, "observability_collector", None)),
-        langsmith_callback=(
-            app_state.langsmith_tracing.callback
-            if getattr(app_state, "langsmith_tracing", None) is not None
-            else None
-        ),
     )
     app_state.session_summary_generator = generator
     return generator
@@ -164,15 +128,7 @@ def _user_memory_extractor_provider(request: Request):
         return None
     from app.infrastructure.agents.user_memory_extractor import LangChainUserMemoryExtractor
 
-    extractor = LangChainUserMemoryExtractor(
-        model,
-        observation_collector=active_collector(getattr(app_state, "observability_collector", None)),
-        langsmith_callback=(
-            app_state.langsmith_tracing.callback
-            if getattr(app_state, "langsmith_tracing", None) is not None
-            else None
-        ),
-    )
+    extractor = LangChainUserMemoryExtractor(model)
     app_state.user_memory_extractor = extractor
     return extractor
 
@@ -189,15 +145,6 @@ def get_session_service(request: Request) -> SessionService:
         summaries=persistence.session_summaries,
         user_memory=persistence.user_memory,
         execution_events=persistence.execution_events,
-        observation_collector=active_collector(
-            getattr(request.app.state, "observability_collector", None)
-        ),
-        langsmith_callback=(
-            request.app.state.langsmith_tracing.callback
-            if getattr(request.app.state, "langsmith_tracing", None) is not None
-            else None
-        ),
-        email_preparations=persistence.email_preparations,
         summary_generator_provider=lambda: _summary_generator_provider(request),
         user_memory_extractor_provider=lambda: _user_memory_extractor_provider(request),
         graph_provider=lambda: _graph_provider(request),

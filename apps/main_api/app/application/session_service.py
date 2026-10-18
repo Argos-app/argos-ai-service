@@ -41,9 +41,7 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
-from app.infrastructure.observability.recording import OperationRecorder, observe_operation
 from app.ports.conversation_repository import ConversationRepository
-from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
 from app.ports.interaction_repository import InteractionRepository
 from app.ports.memory_generators import SessionSummaryGenerator, UserMemoryExtractor
@@ -51,20 +49,11 @@ from app.ports.session_repository import SessionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.session_work_repository import SessionWorkRepository
 from app.ports.user_memory_repository import UserMemoryRepository
-from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
+from app.privacy import minimize_pii
 from app.session_config import (
     CLARIFICATION_TTL_SECONDS,
     SESSION_LEASE_RENEW_SECONDS,
     SESSION_LEASE_SECONDS,
-)
-from packages.contracts import RecipientSelector
-from packages.observability import (
-    ErrorOrigin,
-    ObservationCollector,
-    ObservationLevel,
-    OperationKind,
-    OperationPhase,
-    ResultMetadata,
 )
 
 GraphProvider = Callable[[], Any]
@@ -88,9 +77,6 @@ class MongoSessionService:
         summaries: SessionSummaryRepository | None = None,
         user_memory: UserMemoryRepository | None = None,
         execution_events: ExecutionEventRepository | None = None,
-        observation_collector: ObservationCollector | None = None,
-        langsmith_callback: Any | None = None,
-        email_preparations: EmailPreparationRepository | None = None,
         summary_generator_provider: SummaryGeneratorProvider | None = None,
         user_memory_extractor_provider: MemoryExtractorProvider | None = None,
         lease_seconds: int = SESSION_LEASE_SECONDS,
@@ -101,9 +87,6 @@ class MongoSessionService:
         self._conversations = conversations
         self._session_work = session_work
         self._graph_provider = graph_provider
-        self._observation_collector = observation_collector
-        self._langsmith_callback = langsmith_callback
-        self._email_preparations = email_preparations
         self._summaries = summaries
         self._user_memory = user_memory
         self._user_memory_service = (
@@ -162,31 +145,6 @@ class MongoSessionService:
         session_id: UUID,
         body: InteractionInput,
     ) -> InteractionResult:
-        if self._observation_collector is None:
-            return await self._create_interaction(principal, session_id, body)
-        async with observe_operation(
-            self._observation_collector,
-            operation_kind=OperationKind.INTERACTION,
-            operation_name="interaction.process",
-            operation_phase=OperationPhase.EXECUTION,
-            observation_level=ObservationLevel.LOCAL_OPERATION,
-            error_origin=ErrorOrigin.APPLICATION,
-        ) as recorder:
-            result = await self._create_interaction(principal, session_id, body)
-            recorder.finish(
-                result=ResultMetadata(
-                    source="application",
-                    code=result.response.kind,
-                )
-            )
-            return result
-
-    async def _create_interaction(
-        self,
-        principal: Principal,
-        session_id: UUID,
-        body: InteractionInput,
-    ) -> InteractionResult:
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
             raise HTTPException(
@@ -199,16 +157,9 @@ class MongoSessionService:
                 detail="Nenhuma fazenda desta sessão segue autorizada",
             )
 
-        (
-            kind,
-            deduplication_key,
-            sanitized_input,
-            payload_json,
-            input_hash,
-            public_request_id,
-            recipient_selectors,
-            send_intent_requested,
-        ) = _normalize_input(body)
+        kind, deduplication_key, sanitized_input, payload_json, input_hash, public_request_id = (
+            _normalize_input(body)
+        )
         existing = await self._find_existing(
             session_id,
             principal.user_id,
@@ -227,16 +178,8 @@ class MongoSessionService:
             )
 
         answer_text: str | None = None
-        send_intent_source_interaction_id: str | None = None
         if isinstance(body, AnswerInteraction):
-            (
-                answer_text,
-                recipient_selectors,
-                send_intent_requested,
-                send_intent_source_interaction_id,
-            ) = await self._validate_answer(
-                session, body, graph, new_recipient_selectors=recipient_selectors
-            )
+            answer_text = await self._validate_answer(session, body, graph)
 
         lease_owner = uuid4()
         now = _utcnow()
@@ -361,69 +304,26 @@ class MongoSessionService:
                     executar_resposta,
                 )
 
-                graph_recorder = (
-                    OperationRecorder(
-                        self._observation_collector,
-                        operation_kind=OperationKind.GRAPH,
-                        operation_name=(
-                            "graph.execute"
-                            if isinstance(body, MessageInteraction)
-                            else "graph.resume"
-                        ),
-                        operation_phase=OperationPhase.EXECUTION,
-                        observation_level=ObservationLevel.LOCAL_OPERATION,
-                        error_origin=ErrorOrigin.APPLICATION,
+                if isinstance(body, MessageInteraction):
+                    state = await executar_fluxo(
+                        graph,
+                        sanitized_input,
+                        user_id=str(principal.user_id),
+                        farm_id=str(authorized_farms[0]),
+                        session_id=str(session_id),
+                        interaction_id=str(interaction_id),
+                        session_context=session_context,
                     )
-                    if self._observation_collector is not None
-                    else None
-                )
-                try:
-                    graph_config = {
-                        "configurable": {
-                            "argos_user_id": str(principal.user_id),
-                            "argos_authorized_property_ids": tuple(
-                                str(farm_id) for farm_id in authorized_farms
-                            ),
-                            "argos_request_id": str(interaction_id),
-                        }
-                    }
-                    if self._langsmith_callback is not None:
-                        graph_config["callbacks"] = [self._langsmith_callback]
-                        graph_config["metadata"] = {"argos_operation": "session.interaction"}
-                    if isinstance(body, MessageInteraction):
-                        state = await executar_fluxo(
-                            graph,
-                            sanitized_input,
-                            user_id=str(principal.user_id),
-                            farm_id=str(authorized_farms[0]),
-                            session_id=str(session_id),
-                            interaction_id=str(interaction_id),
-                            session_context=session_context,
-                            recipient_selectors=recipient_selectors,
-                            send_intent_requested=send_intent_requested,
-                            config=graph_config,
-                        )
-                    else:
-                        state = await executar_resposta(
-                            graph,
-                            answer_text or sanitized_input,
-                            question_id=str(body.question_id),
-                            session_id=str(session_id),
-                            interaction_id=str(interaction_id),
-                            checkpoint_namespace=str(body.interaction_id),
-                            session_context=session_context,
-                            recipient_selectors=recipient_selectors,
-                            send_intent_requested=send_intent_requested,
-                            send_intent_source_interaction_id=send_intent_source_interaction_id,
-                            config=graph_config,
-                        )
-                except BaseException as exc:
-                    if graph_recorder is not None:
-                        graph_recorder.finish(error=exc, error_origin=ErrorOrigin.APPLICATION)
-                    raise
                 else:
-                    if graph_recorder is not None:
-                        graph_recorder.finish()
+                    state = await executar_resposta(
+                        graph,
+                        answer_text or sanitized_input,
+                        question_id=str(body.question_id),
+                        session_id=str(session_id),
+                        interaction_id=str(interaction_id),
+                        checkpoint_namespace=str(body.interaction_id),
+                        session_context=session_context,
+                    )
             except Exception:
                 failed = True
                 state = {"final_answer": SAFE_ANSWER}
@@ -554,42 +454,6 @@ class MongoSessionService:
     async def _replay_or_reject(
         self, interaction: InteractionRecord, session: SessionRecord
     ) -> InteractionResult:
-        recorder = (
-            OperationRecorder(
-                self._observation_collector,
-                operation_kind=OperationKind.INTERACTION,
-                operation_name="interaction.replay_or_recovery",
-                operation_phase=OperationPhase.RECOVERY,
-                observation_level=ObservationLevel.LOCAL_OPERATION,
-                error_origin=ErrorOrigin.APPLICATION,
-            )
-            if self._observation_collector is not None
-            else None
-        )
-        try:
-            result = await self._resolve_existing_interaction(interaction, session)
-        except BaseException as exc:
-            if recorder is not None:
-                recorder.finish(error=exc)
-            raise
-        if recorder is not None:
-            is_replay = interaction.status in {
-                InteractionStatus.COMPLETED,
-                InteractionStatus.FAILED,
-            }
-            recorder.finish(
-                result=ResultMetadata(
-                    source="application",
-                    code="replayed_result" if is_replay else "recovery_result",
-                    recovered=not is_replay,
-                ),
-                replayed_result=is_replay,
-            )
-        return result
-
-    async def _resolve_existing_interaction(
-        self, interaction: InteractionRecord, session: SessionRecord
-    ) -> InteractionResult:
         if interaction.status in {InteractionStatus.COMPLETED, InteractionStatus.FAILED}:
             if interaction.result_json:
                 return InteractionResult.model_validate_json(interaction.result_json)
@@ -615,13 +479,8 @@ class MongoSessionService:
         )
 
     async def _validate_answer(
-        self,
-        session: SessionRecord,
-        body: AnswerInteraction,
-        graph: Any,
-        *,
-        new_recipient_selectors: dict[str, dict[str, str]],
-    ) -> tuple[str, dict[str, dict[str, str]], bool, str | None]:
+        self, session: SessionRecord, body: AnswerInteraction, graph: Any
+    ) -> str:
         source = await self._interactions.get_owned(body.interaction_id, session.user_id)
         if (
             source is None
@@ -647,60 +506,13 @@ class MongoSessionService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A pergunta não está mais pendente",
             )
-        pending_recipient_resolution = None
-        if question.reason_code in {"RECIPIENT_AMBIGUOUS", "RECIPIENT_NOT_FOUND"}:
-            if self._email_preparations is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A resolução de destinatário não está disponível",
-                )
-            try:
-                pending_recipient_resolution = (
-                    await self._email_preparations.get_pending_recipient_resolution(
-                        principal_user_id=session.user_id,
-                        session_id=session.session_id,
-                        interaction_id=body.interaction_id,
-                        question_id=body.question_id,
-                    )
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="A resolução de destinatário está indisponível",
-                ) from exc
-            if (
-                pending_recipient_resolution is None
-                or pending_recipient_resolution.reason_code != question.reason_code
-                or pending_recipient_resolution.input_type != question.input_type
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="A resolução de destinatário expirou ou não corresponde à pergunta",
-                )
-        recipient_update: dict[str, dict[str, str]] = new_recipient_selectors
         if isinstance(body.answer, AnswerText):
             if question.input_type != "free_text":
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Tipo de resposta incompatível",
                 )
-            if pending_recipient_resolution is not None:
-                value = body.answer.text.strip()
-                try:
-                    selector = RecipientSelector(
-                        kind="email" if "@" in value else "name",
-                        value=value,
-                    )
-                except ValueError as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Destinatário inválido",
-                    ) from exc
-                graph_answer = "[DESTINATARIO_1]"
-                recipient_update = {"[DESTINATARIO_1]": selector.model_dump(mode="json")}
-            else:
-                protected_answer = protect_user_input(body.answer.text)
-                graph_answer = protected_answer.sanitized_text
+            graph_answer = minimize_pii(body.answer.text)
         elif isinstance(body.answer, AnswerChoice):
             if question.input_type != "single_choice":
                 raise HTTPException(
@@ -714,24 +526,7 @@ class MongoSessionService:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Opção inválida"
                 )
-            if pending_recipient_resolution is not None:
-                selected = next(
-                    (
-                        item
-                        for item in pending_recipient_resolution.options
-                        if item.option_id == body.answer.option_id
-                    ),
-                    None,
-                )
-                if selected is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Opção de destinatário inválida",
-                    )
-                graph_answer = "[DESTINATARIO_1]"
-                recipient_update = {"[DESTINATARIO_1]": selected.selector.model_dump(mode="json")}
-            else:
-                graph_answer = option.label
+            graph_answer = option.label
         elif isinstance(body.answer, AnswerConfirmation):
             if question.input_type != "confirmation":
                 raise HTTPException(
@@ -763,34 +558,7 @@ class MongoSessionService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A pergunta não corresponde ao estado atual da sessão",
             )
-        values = getattr(snapshot, "values", {})
-        saved_recipient_selectors = dict(values.get("recipient_selectors") or {})
-        if pending_recipient_resolution is not None:
-            unresolved = pending_recipient_resolution.unresolved_selector
-            saved_recipient_selectors = {
-                reference: selector
-                for reference, selector in saved_recipient_selectors.items()
-                if not (
-                    selector.get("kind") == unresolved.kind
-                    and selector.get("value", "").strip().casefold()
-                    == unresolved.value.strip().casefold()
-                )
-            }
-        recipient_selectors, graph_answer = merge_recipient_selectors(
-            saved_recipient_selectors,
-            recipient_update,
-            graph_answer,
-        )
-        send_intent_requested = bool(values.get("send_intent_requested"))
-        source_interaction_id = values.get("send_intent_source_interaction_id")
-        if send_intent_requested and source_interaction_id is None:
-            source_interaction_id = str(body.interaction_id)
-        return (
-            graph_answer,
-            recipient_selectors,
-            send_intent_requested,
-            source_interaction_id,
-        )
+        return graph_answer
 
     async def _renew_lease(
         self,
@@ -838,23 +606,9 @@ def _session_response(session: SessionRecord, current_farms: list[UUID]) -> Sess
 
 def _normalize_input(
     body: InteractionInput,
-) -> tuple[
-    InteractionKind,
-    str,
-    str,
-    str,
-    str,
-    UUID,
-    dict[str, dict[str, str]],
-    bool,
-]:
-    recipient_selectors: dict[str, dict[str, str]] = {}
-    send_intent_requested = False
+) -> tuple[InteractionKind, str, str, str, str, UUID]:
     if isinstance(body, MessageInteraction):
-        protected = protect_user_input(body.message)
-        sanitized = protected.sanitized_text
-        recipient_selectors = protected.recipient_selectors
-        send_intent_requested = protected.send_intent_requested
+        sanitized = minimize_pii(body.message)
         if not sanitized.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -868,9 +622,7 @@ def _normalize_input(
     else:
         answer = body.answer.model_dump(mode="json")
         if isinstance(body.answer, AnswerText):
-            protected = protect_user_input(body.answer.text)
-            answer["text"] = protected.sanitized_text
-            recipient_selectors = protected.recipient_selectors
+            answer["text"] = minimize_pii(body.answer.text)
             content = answer["text"]
         elif isinstance(body.answer, AnswerChoice):
             content = f"Opção selecionada: {body.answer.option_id}"
@@ -891,21 +643,8 @@ def _normalize_input(
         public_id = body.question_id
         kind = InteractionKind.ANSWER
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    protected_digest = hashlib.sha256(
-        json.dumps(recipient_selectors, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    hash_payload = f"{payload_json}:{protected_digest}:{send_intent_requested}"
-    digest = hashlib.sha256(hash_payload.encode("utf-8")).hexdigest()
-    return (
-        kind,
-        key,
-        content,
-        payload_json,
-        digest,
-        public_id,
-        recipient_selectors,
-        send_intent_requested,
-    )
+    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    return kind, key, content, payload_json, digest, public_id
 
 
 def _memory_input(
@@ -941,30 +680,15 @@ def _response_from_state(
     prompt = state.get("clarification_question")
     question_id = state.get("question_id")
     if request is not None and prompt and question_id:
-        expires_at = now + timedelta(seconds=CLARIFICATION_TTL_SECONDS)
-        pending_expiry = state.get("clarification_expires_at")
-        if pending_expiry:
-            try:
-                expires_at = min(expires_at, datetime.fromisoformat(pending_expiry))
-            except TypeError, ValueError:
-                expires_at = now
-        if expires_at <= now:
-            response = AnswerResponse(
-                kind="answer",
-                text="A pergunta expirou. Inicie uma nova solicitação para continuar.",
-            )
-        else:
-            response = QuestionResponse(
-                kind="question",
-                question_id=UUID(str(question_id)),
-                input_type=request.input_type,
-                prompt=minimize_pii(prompt),
-                reason_code=request.reason_code,
-                options=[
-                    QuestionOption.model_validate(item.model_dump()) for item in request.options
-                ],
-                expires_at=expires_at,
-            )
+        response = QuestionResponse(
+            kind="question",
+            question_id=UUID(str(question_id)),
+            input_type=request.input_type,
+            prompt=minimize_pii(prompt),
+            reason_code=request.reason_code,
+            options=[QuestionOption.model_validate(item.model_dump()) for item in request.options],
+            expires_at=now + timedelta(seconds=CLARIFICATION_TTL_SECONDS),
+        )
     else:
         response = AnswerResponse(
             kind="answer",

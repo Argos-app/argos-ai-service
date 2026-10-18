@@ -21,17 +21,13 @@ from app.agent_schemas.synthesis import OrchestratorResult
 from app.graph.workflow import (
     SAFE_ANSWER,
     answer_state,
-    build_agent_context,
     build_graph,
     executar_fluxo,
     executar_resposta,
     initial_state,
-    no_guardrail_entrada,
-    no_saida_segura,
 )
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventWriteError
-from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -56,26 +52,12 @@ class FakeFactory:
         return self.agents[agent_id]
 
 
-def test_safe_response_preserves_recovered_email_action_outcome() -> None:
-    result = no_saida_segura(
-        {
-            "final_answer": SAFE_ANSWER,
-            "email_action_summary": "O MCP confirmou o recebimento do envio.",
-        }
-    )
-
-    assert result["final_answer"] == (
-        f"{SAFE_ANSWER}\n\nEstado do envio: O MCP confirmou o recebimento do envio."
-    )
-
-
 def request_state(message: str = "Quais aplicações existem?") -> dict:
     return initial_state(
         message,
         user_id="user-demo",
         farm_id="farm-demo",
         session_id="session-demo",
-        interaction_id="interaction-origin",
     )
 
 
@@ -110,71 +92,6 @@ def test_judge_cannot_approve_with_unsupported_claims() -> None:
             reason="Há uma afirmação sem fonte",
             unsupported_claims=("Afirmação sem fonte",),
         )
-
-
-def test_initial_state_sanitizes_recipient_but_keeps_private_selector():
-    state = initial_state(
-        "Envie para ana@example.com",
-        user_id="user-demo",
-        farm_id="farm-demo",
-        session_id="session-demo",
-        interaction_id="interaction-origin",
-    )
-
-    assert state["messages"][0].content == "Envie para [DESTINATARIO_1]"
-    assert state["recipient_selectors"] == {
-        "[DESTINATARIO_1]": {"kind": "email", "value": "ana@example.com"}
-    }
-    assert state["send_intent_requested"] is True
-    assert state["send_intent_source_interaction_id"] == "interaction-origin"
-
-
-def test_send_intent_is_only_added_to_secretary_tool_context():
-    state = {
-        "user_id": "user-demo",
-        "farm_id": "farm-demo",
-        "session_id": "session-demo",
-        "interaction_id": "interaction-origin",
-        "send_intent_requested": True,
-        "send_intent_source_interaction_id": "interaction-origin",
-    }
-    config = {"configurable": {"argos_user_id": "user-demo"}}
-
-    secretary_context = build_agent_context(state, config=config, recipient_selectors={})
-    farm_context = build_agent_context(state, config=config)
-
-    assert secretary_context["argos_send_intent_requested"] is True
-    assert secretary_context["argos_send_intent_source_interaction_id"] == "interaction-origin"
-    assert "argos_send_intent_requested" not in farm_context
-
-
-def test_clarification_guardrail_preserves_recipients_and_source_intent():
-    state = {
-        **request_state("Use [DESTINATARIO_1]"),
-        "input_kind": "answer",
-        "answer_question_id": "question-1",
-        "question_id": "question-1",
-        "clarification_request": QuestionFormattingRequest(
-            reason_code="missing_recipient",
-            input_type="free_text",
-            question_goal="Informe o destinatário",
-        ),
-        "sanitized_message": "Envie o relatório para [DESTINATARIO_1]",
-        "recipient_selectors": {"[DESTINATARIO_1]": {"kind": "email", "value": "ana@example.com"}},
-        "send_intent_requested": True,
-        "send_intent_source_interaction_id": "interaction-origin",
-    }
-    state["messages"] = [HumanMessage(content="para Bruno Lima")]
-
-    result = no_guardrail_entrada(state)
-
-    assert "Bruno Lima" not in result["sanitized_message"]
-    assert "[DESTINATARIO_1]" in result["sanitized_message"]
-    assert "[DESTINATARIO_2]" in result["sanitized_message"]
-    assert result["recipient_selectors"]["[DESTINATARIO_1]"]["value"] == "ana@example.com"
-    assert result["recipient_selectors"]["[DESTINATARIO_2]"]["value"] == "Bruno Lima"
-    assert result["send_intent_requested"] is True
-    assert result["send_intent_source_interaction_id"] == "interaction-origin"
 
 
 @pytest.mark.asyncio
@@ -291,8 +208,6 @@ async def test_graph_routes_to_specialist_orchestrator_and_judge() -> None:
         "user_id": "user-demo",
         "farm_id": "farm-demo",
         "session_id": "session-demo",
-        "interaction_id": "interaction-origin",
-        "argos_task_id": "t1",
     }
     assert judge.calls[0][0].sources == (source,)
     assert router.calls[0][0].session_context.session_summary == "Continuidade da tarefa"

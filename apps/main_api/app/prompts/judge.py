@@ -6,9 +6,6 @@ Compare as afirmações do rascunho com os resultados dos especialistas e suas
 fontes. Uma referência inventada, uma conclusão mais forte que a evidência ou
 uma simulação apresentada como dado real não deve ser aprovada. Não confunda
 ausência de resultado com prova de que um registro não existe.
-Para ações de e-mail, aceite somente o estado retornado pela tool do Secretário.
-`accepted` indica aceite pelo provedor, não entrega ou leitura; não aprove a
-afirmação de envio concluído quando o estado for `pending` ou `unknown`.
 
 Preencha JudgeResult:
 - approved: as afirmações estão apoiadas, as limitações estão claras e

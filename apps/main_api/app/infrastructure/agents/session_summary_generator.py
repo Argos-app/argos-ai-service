@@ -11,14 +11,11 @@ from uuid import UUID
 from app.agent_schemas.session_summary import SessionSummaryDraft, SummaryFactDraft
 from app.domain.memory import SessionSummary, SummaryFact
 from app.domain.sessions import ConversationMessage, ExecutionEvent
-from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.session_config import (
     SESSION_SUMMARY_COMPACTION_ATTEMPTS,
     SESSION_SUMMARY_MAX_TOKENS,
 )
 from langchain_core.messages import HumanMessage, SystemMessage
-
-from packages.observability import ObservationCollector
 
 SUMMARY_SYSTEM_PROMPT = """
 Você resume uma conversa do Argos para preservar continuidade. Retorne apenas
@@ -53,14 +50,7 @@ class SummaryGenerationError(RuntimeError):
 class LangChainSessionSummaryGenerator:
     """Adapta um ChatModel já configurado ao contrato SessionSummaryGenerator."""
 
-    def __init__(
-        self,
-        model: Any,
-        *,
-        input_token_limit: int,
-        observation_collector: ObservationCollector | None = None,
-        langsmith_callback: Any | None = None,
-    ) -> None:
+    def __init__(self, model: Any, *, input_token_limit: int) -> None:
         if input_token_limit < 1:
             raise ValueError("input_token_limit deve ser positivo")
         if not callable(getattr(model, "get_num_tokens", None)):
@@ -71,8 +61,6 @@ class LangChainSessionSummaryGenerator:
         self._model = model
         self._structured = structured(SessionSummaryDraft)
         self._input_token_limit = input_token_limit
-        self._observation_collector = observation_collector
-        self._langsmith_callback = langsmith_callback
 
     async def generate(
         self,
@@ -208,16 +196,9 @@ class LangChainSessionSummaryGenerator:
 
     async def _invoke(self, system_prompt: str, payload: str) -> SessionSummaryDraft:
         try:
-            messages = [SystemMessage(content=system_prompt), HumanMessage(content=payload)]
-            callbacks = []
-            if self._observation_collector is not None:
-                callbacks.append(
-                    ModelUsageCallback(self._observation_collector, agent="session_summary")
-                )
-            if self._langsmith_callback is not None:
-                callbacks.append(self._langsmith_callback)
-            invoke_options = {"config": {"callbacks": callbacks}} if callbacks else {}
-            result = await self._structured.ainvoke(messages, **invoke_options)
+            result = await self._structured.ainvoke(
+                [SystemMessage(content=system_prompt), HumanMessage(content=payload)]
+            )
             return SessionSummaryDraft.model_validate(result)
         except Exception as exc:
             raise SummaryGenerationError("modelo não gerou um resumo estruturado válido") from exc

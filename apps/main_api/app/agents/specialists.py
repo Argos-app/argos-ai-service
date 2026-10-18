@@ -9,26 +9,14 @@ from app.agent_schemas.results import (
 )
 from app.agent_schemas.synthesis import OrchestratorResult
 from app.agents.mock_tools import MOCK_AGENT_TOOL_BINDINGS
-from app.agents.registry import (
-    ALLOWED_TOOL_NAMES_BY_SLOT,
-    DEFAULT_AGENT_REGISTRY,
-    AgentRegistry,
-    ModelPolicyId,
-)
-from app.infrastructure.a2a.client import DocumentA2AClient
-from app.infrastructure.a2a.langchain_tool import build_document_a2a_tool
+from app.agents.registry import DEFAULT_AGENT_REGISTRY, AgentRegistry, ModelPolicyId
 from app.infrastructure.agents.langchain_factory import (
     AgentFactoryConfigurationError,
     LangChainAgentFactory,
     validate_agent_configuration,
 )
-from app.infrastructure.mcp.client import McpClients
-from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
-from app.infrastructure.mcp.langchain_tools import build_mcp_tool_bindings
 from app.ports.agent import AgentId
-from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventRepository
-from app.ports.report_artifact_repository import ReportArtifactRepository
 from app.prompts.judge import JUDGE_SYSTEM_PROMPT
 from app.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from app.prompts.question_formatter import QUESTION_FORMATTER_SYSTEM_PROMPT
@@ -43,25 +31,17 @@ from app.prompts.specialists import (
 from langchain.agents import create_agent
 from langchain_core.tools import BaseTool
 
-from packages.observability import ObservationCollector
-
 AgentToolBindings = Mapping[AgentId, Mapping[str, Sequence[BaseTool]]]
 
 
 def resolve_tool_bindings(
     registry: AgentRegistry,
     overrides: AgentToolBindings | None,
-    *,
-    use_mock_tools: bool = False,
 ) -> dict[AgentId, dict[str, tuple[BaseTool, ...]]]:
-    resolved = (
-        {
-            agent_id: {slot: tuple(tools) for slot, tools in slots.items()}
-            for agent_id, slots in MOCK_AGENT_TOOL_BINDINGS.items()
-        }
-        if use_mock_tools
-        else {}
-    )
+    resolved = {
+        agent_id: {slot: tuple(tools) for slot, tools in slots.items()}
+        for agent_id, slots in MOCK_AGENT_TOOL_BINDINGS.items()
+    }
     for agent_id in AgentId:
         resolved.setdefault(agent_id, {})
 
@@ -94,14 +74,6 @@ def resolve_tool_bindings(
             raise AgentFactoryConfigurationError(
                 f"Slot de ferramenta sem implementação para {agent_id.value}"
             )
-        for slot, tools in slots.items():
-            allowed_names = ALLOWED_TOOL_NAMES_BY_SLOT.get((agent_id, slot))
-            if allowed_names is not None:
-                unexpected = {tool.name for tool in tools} - allowed_names
-                if unexpected:
-                    raise AgentFactoryConfigurationError(
-                        f"Tools não permitidas em {agent_id.value}.{slot}: {sorted(unexpected)}"
-                    )
 
     return resolved
 
@@ -111,39 +83,8 @@ def build_agent_factory(
     registry: AgentRegistry = DEFAULT_AGENT_REGISTRY,
     tool_bindings: AgentToolBindings | None = None,
     execution_events: ExecutionEventRepository | None = None,
-    *,
-    mcp_clients: McpClients | None = None,
-    delegation_issuer: McpDelegationTokenIssuer | None = None,
-    report_artifacts: ReportArtifactRepository | None = None,
-    email_preparations: EmailPreparationRepository | None = None,
-    observation_collector: ObservationCollector | None = None,
-    documental_a2a_client: DocumentA2AClient | None = None,
-    use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
-    overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
-    if mcp_clients is not None:
-        overrides.update(
-            build_mcp_tool_bindings(
-                mcp_clients,
-                delegation_issuer,
-                report_artifacts=report_artifacts,
-                email_preparations=email_preparations,
-                observation_collector=observation_collector,
-            )
-        )
-    if documental_a2a_client is not None:
-        overrides.setdefault(AgentId.INFORMATION, {})["documental_a2a"] = (
-            build_document_a2a_tool(documental_a2a_client),
-        )
-    for agent_id, slots in (tool_bindings or {}).items():
-        overrides.setdefault(agent_id, {}).update(
-            {slot: tuple(tools) for slot, tools in slots.items()}
-        )
-    resolved_tool_bindings = resolve_tool_bindings(
-        registry,
-        overrides,
-        use_mock_tools=use_mock_tools,
-    )
+    resolved_tool_bindings = resolve_tool_bindings(registry, tool_bindings)
 
     def tools_for(agent_id: AgentId) -> list[BaseTool]:
         definition = registry.get(agent_id)
@@ -256,5 +197,4 @@ def build_agent_factory(
             AgentId.QUESTION_FORMATTER: question_formatter_app,
         },
         execution_events=execution_events,
-        observation_collector=observation_collector,
     )

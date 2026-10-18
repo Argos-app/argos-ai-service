@@ -8,17 +8,8 @@ from uuid import UUID, uuid4
 import pytest
 from app.agent_schemas.inputs import QuestionFormattingRequest
 from app.api.v1.dependencies.auth import Principal
-from app.api.v1.models.interactions import (
-    AnswerChoice,
-    AnswerInteraction,
-    AnswerText,
-    InteractionResult,
-    MessageInteraction,
-    QuestionOption,
-    QuestionResponse,
-)
+from app.api.v1.models.interactions import AnswerInteraction, AnswerText, MessageInteraction
 from app.application.session_service import MongoSessionService
-from app.domain.email_preparations import PendingRecipientOption, PendingRecipientResolution
 from app.domain.memory import (
     MemoryFieldAction,
     SessionSummary,
@@ -29,13 +20,10 @@ from app.domain.sessions import (
     ConversationMessage,
     InteractionKind,
     InteractionRecord,
-    InteractionStatus,
     ProcessingLease,
     SessionRecord,
 )
 from fastapi import HTTPException
-
-from packages.contracts import RecipientSelector
 
 
 def _utcnow() -> datetime:
@@ -245,34 +233,6 @@ class FakeGraph:
         return SimpleNamespace(values={"question_id": self.question_id})
 
 
-class FakeRecipientQuestionGraph(FakeGraph):
-    def __init__(self, question_id, selectors):
-        super().__init__()
-        self.question_id = str(question_id)
-        self.selectors = selectors
-
-    async def aget_state(self, config):
-        self.state_configs.append(config)
-        return SimpleNamespace(
-            values={"question_id": self.question_id, "recipient_selectors": self.selectors}
-        )
-
-
-class FakePendingRecipientRepository:
-    def __init__(self, resolution):
-        self.resolution = resolution
-
-    async def get_pending_recipient_resolution(self, **scope):
-        current = self.resolution
-        matches = (
-            current.principal_user_id == scope["principal_user_id"]
-            and current.session_id == scope["session_id"]
-            and current.interaction_id == scope["interaction_id"]
-            and (scope.get("question_id") is None or current.question_id == scope["question_id"])
-        )
-        return current if matches else None
-
-
 def _principal() -> Principal:
     return Principal(
         user_id=uuid4(),
@@ -310,7 +270,7 @@ async def test_create_and_list_sessions_are_scoped_to_principal():
     other = await service.list_sessions(_principal())
 
     assert created.session_id == listed[0].session_id
-    assert tuple(created.farm_ids) == tuple(principal.farm_ids)
+    assert created.farm_ids == principal.farm_ids
     assert other == []
     assert sessions.records[created.session_id].user_id == principal.user_id
 
@@ -372,97 +332,6 @@ async def test_answer_is_counted_once_and_conflicting_replay_is_rejected():
         await service.create_interaction(principal, session.session_id, conflicting)
     assert error.value.status_code == 409
     assert graph.calls == 2
-
-
-@pytest.mark.asyncio
-async def test_ambiguous_recipient_choice_resolves_to_protected_email_selector():
-    principal = _principal()
-    question_interaction_id = uuid4()
-    question_id = uuid4()
-    selected_option_id = str(uuid4())
-    now = _utcnow()
-    graph = FakeRecipientQuestionGraph(
-        question_id,
-        {
-            "[DESTINATARIO_1]": {"kind": "name", "value": "Alex"},
-            "[DESTINATARIO_2]": {"kind": "name", "value": "Bruno"},
-        },
-    )
-    repository = FakePendingRecipientRepository(None)
-    service, sessions, interactions, _ = _service(graph, email_preparations=repository)
-    session = await service.create_session(principal)
-    selector = RecipientSelector(kind="email", value="alex.silva@example.com")
-    pending = PendingRecipientResolution(
-        question_id=question_id,
-        principal_user_id=principal.user_id,
-        session_id=session.session_id,
-        interaction_id=question_interaction_id,
-        report_artifact_ref=uuid4(),
-        input_type="single_choice",
-        reason_code="RECIPIENT_AMBIGUOUS",
-        question_goal="Escolha o destinatário correto.",
-        unresolved_selector=RecipientSelector(kind="name", value="Alex"),
-        options=(
-            PendingRecipientOption(
-                option_id=selected_option_id,
-                label="Alex Silva (a***@example.com)",
-                selector=selector,
-            ),
-        ),
-        expires_at=now.replace(year=now.year + 1),
-    )
-    repository.resolution = pending
-    question = QuestionResponse(
-        kind="question",
-        question_id=question_id,
-        input_type="single_choice",
-        prompt="Qual Alex?",
-        reason_code="RECIPIENT_AMBIGUOUS",
-        options=[
-            QuestionOption(
-                option_id=selected_option_id,
-                label="Alex Silva (a***@example.com)",
-            )
-        ],
-        expires_at=now.replace(year=now.year + 1),
-    )
-    interactions.records[question_interaction_id] = InteractionRecord(
-        interaction_id=question_interaction_id,
-        session_id=session.session_id,
-        user_id=principal.user_id,
-        deduplication_key="request",
-        kind=InteractionKind.MESSAGE,
-        sanitized_input="Prepare relatório para Alex",
-        input_hash="hash",
-        status=InteractionStatus.COMPLETED,
-        created_at=now,
-        updated_at=now,
-        result_json=InteractionResult(
-            session_id=session.session_id,
-            interaction_id=question_interaction_id,
-            public_request_id=uuid4(),
-            response=question,
-        ).model_dump_json(),
-    )
-    answer = AnswerInteraction(
-        kind="answer",
-        interaction_id=question_interaction_id,
-        question_id=question_id,
-        answer=AnswerChoice(kind="choice", option_id=selected_option_id),
-    )
-
-    result = await service._validate_answer(
-        sessions.records[session.session_id],
-        answer,
-        graph,
-        new_recipient_selectors={},
-    )
-
-    graph_answer, selectors, _, _ = result
-    assert graph_answer == "[DESTINATARIO_3]"
-    assert selectors["[DESTINATARIO_3]"]["value"] == "alex.silva@example.com"
-    assert "[DESTINATARIO_1]" not in selectors
-    assert selectors["[DESTINATARIO_2]"]["value"] == "Bruno"
 
 
 class FakeSummaryRepository:

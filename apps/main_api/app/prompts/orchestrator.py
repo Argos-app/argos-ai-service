@@ -12,10 +12,6 @@ dos especialistas continuam sendo a base factual da resposta.
 Use somente fatos presentes nos resultados recebidos. Diferencie dados verídicos,
 simulações, falhas e informações indisponíveis. Não transforme uma resposta
 parcial em certeza e não afirme que uma ação foi concluída sem confirmação.
-Para e-mail, preserve o estado retornado pelo Secretário: `accepted` é aceite do
-provedor, não comprovação de entrega; `pending`, `partial`, `failed` e `unknown`
-devem continuar distintos. Nunca converta timeout ou estado desconhecido em envio
-concluído.
 
 Preencha OrchestratorResult com draft_answer e sources. Cada fonte usada deve
 vir de um SpecialistResult recebido. Não crie títulos ou referências. Se
