@@ -74,19 +74,22 @@ identificadores de usuário/task/contexto.
 O principal inclui correlation ID e ID do span pai na delegação assinada. O
 executor valida esses claims, grava `correlation_id` e `parent_observation_id`
 na observação A2A e associa os spans de execução. O ID de protocolo da task
-continua distinto. A resposta da API principal expõe
-`X-Argos-Correlation-ID`; veja o guia de
-[operação](../../docs/operacao-observabilidade.md) para seguir a requisição nas
-collections de ambos os serviços. A coleta Mongo funciona sem LangSmith.
+continua distinto. A resposta da API principal expõe `X-Argos-Correlation-ID`;
+veja o guia de [operação](../../docs/operacao-observabilidade.md) para seguir a
+requisição nas collections de ambos os serviços. A coleta Mongo funciona sem
+LangSmith.
 
 O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
 para registrar o despacho do agente A2A e a chamada de geração de resposta no
 projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
 ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
-perguntas, trechos e respostas. Com essa opção ativa, e-mails, UUIDs, CPFs,
-CNPJs, telefones e tokens Bearer são anonimizados antes do envio. O endpoint
-HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`. Para chaves de escopo
-organizacional, configure `A2A_LANGSMITH_WORKSPACE_ID` com o ID do workspace.
+perguntas, trechos e respostas. Com essa opção ativa, UUIDs, CPFs, CNPJs,
+telefones e tokens Bearer são anonimizados antes do envio; e-mails permanecem
+sem anonimização por decisão do projeto e podem ser enviados ao LangSmith nessa
+modalidade. Considere essa exposição ao habilitar captura de conteúdo. O
+endpoint HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`. Para chaves de
+escopo organizacional, configure `A2A_LANGSMITH_WORKSPACE_ID` com o ID do
+workspace.
 
 ## Contrato A2A
 
@@ -102,12 +105,12 @@ O conteúdo JSON da mensagem segue `DocumentQuestionRequest` em
 
 ```json
 {
-  "request_id": "00000000-0000-0000-0000-000000000001",
-  "question": "Quais condições constam no documento?",
-  "skill": "documental",
-  "document_types": ["terms_conditions"],
-  "evidence_requirements": ["source", "page"],
-  "deadline_at": "2026-10-13T15:00:00Z"
+	"request_id": "00000000-0000-0000-0000-000000000001",
+	"question": "Quais condições constam no documento?",
+	"skill": "documental",
+	"document_types": ["terms_conditions"],
+	"evidence_requirements": ["source", "page"],
+	"deadline_at": "2026-10-13T15:00:00Z"
 }
 ```
 

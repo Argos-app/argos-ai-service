@@ -104,19 +104,23 @@ O tracing LangSmith do `main_api` é opcional e só é ativado quando
 chamadas a modelos e ferramentas ocultam entradas e saídas; habilite
 `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true` somente após aprovar o envio de
 prompts, respostas e argumentos de ferramentas ao projeto LangSmith configurado.
-A chave deve ficar no gerenciador de secrets do ambiente. Para chaves de escopo
-organizacional, configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` com o ID do
-workspace LangSmith.
-`MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e `MAIN_API_LANGSMITH_ENDPOINT`
-permite apontar para uma instância aprovada. O Mongo continua armazenando apenas
-os eventos brutos sanitizados existentes; conteúdo de trace é armazenado
-separadamente pelo LangSmith. A coleta local no Mongo independe do LangSmith e
-inclui `X-Argos-Correlation-ID` na resposta, `correlation_id` nos spans e
-`parent_observation_id` para relacionar chamadas aninhadas. O correlation ID é
-enviado às chamadas MCP e segue assinado para Data, Prediction e A2A; os MCPs
-não persistem observações próprias no momento. Filas limitadas podem perder
-observações, então ausência não significa zero uso. Operação, ranking de
-chamadas e tokens por usuário e limites estão em
+E-mails não são anonimizados no código: podem seguir aos modelos e permanecer no
+histórico/checkpoint; com captura de conteúdo ativa, também podem ser enviados
+ao LangSmith. Essa decisão permite preservar endereços usados pelo fluxo de
+destinatários, mas amplia a exposição de PII. Avalie acesso, retenção e política
+do provider antes de usar dados pessoais reais. A chave deve ficar no
+gerenciador de secrets do ambiente. Para chaves de escopo organizacional,
+configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` com o ID do workspace
+LangSmith. `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e
+`MAIN_API_LANGSMITH_ENDPOINT` permite apontar para uma instância aprovada. O
+Mongo continua armazenando apenas os eventos brutos sanitizados existentes;
+conteúdo de trace é armazenado separadamente pelo LangSmith. A coleta local no
+Mongo independe do LangSmith e inclui `X-Argos-Correlation-ID` na resposta,
+`correlation_id` nos spans e `parent_observation_id` para relacionar chamadas
+aninhadas. O correlation ID é enviado às chamadas MCP e segue assinado para
+Data, Prediction e A2A; os MCPs não persistem observações próprias no momento.
+Filas limitadas podem perder observações, então ausência não significa zero uso.
+Operação, ranking de chamadas e tokens por usuário e limites estão em
 [`docs/operacao-observabilidade.md`](docs/operacao-observabilidade.md); a
 extração e o dicionário BI estão em
 [`docs/observabilidade-extracao-mongo.md`](docs/observabilidade-extracao-mongo.md)
@@ -164,14 +168,15 @@ O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
 aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
 registrados separadamente. Sem `MAIN_API_LANGSMITH_API_KEY`, nada é enviado.
 Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
-habilita prompts, respostas e argumentos de ferramentas após aprovação. Com a
-captura ativa, e-mails, UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
-anonimizados. O projeto é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o
-endpoint HTTPS opcional por `MAIN_API_LANGSMITH_ENDPOINT`. Para chaves de escopo
-organizacional, configure `MAIN_API_LANGSMITH_WORKSPACE_ID`. O serviço A2A possui
-configuração própria; IDs assinados de correlação e pai permitem relacionar a
-observação de chamada do principal às observações A2A quando ambas as
-persistências estiverem habilitadas.
+habilita prompts, respostas e argumentos de ferramentas após aprovação. E-mails
+permanecem sem anonimização; UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
+anonimizados antes do envio. O projeto é selecionado por
+`MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
+`MAIN_API_LANGSMITH_ENDPOINT`. Para chaves de escopo organizacional, configure
+`MAIN_API_LANGSMITH_WORKSPACE_ID`. O serviço A2A possui configuração própria;
+IDs assinados de correlação e pai permitem relacionar a observação de chamada do
+principal às observações A2A quando ambas as persistências estiverem
+habilitadas.
 
 Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
 persistência e retomada com Mongo replica set descartável: siga

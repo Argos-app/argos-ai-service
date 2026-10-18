@@ -1,5 +1,22 @@
 # Execução local integrada com Docker
 
+### Thinking e prazo de execução
+
+`MAIN_API_MODEL_THINKING=auto` e `A2A_ANSWER_THINKING=auto` desativam thinking
+nos modelos NVIDIA Nemotron 3 Super e 3.5 Super VL quando o endpoint é
+`integrate.api.nvidia.com`. Outros modelos e endpoints não recebem esse
+parâmetro. `enabled` e `disabled` são opções explícitas somente para esses
+modelos suportados; uma combinação não suportada falha na configuração, sem
+enviar parâmetros indevidos. A opção é compartilhada pelos agentes do Principal;
+embeddings não usam thinking.
+
+`MAIN_API_EXECUTION_TIMEOUT_SECONDS=300` define o prazo total de uma interação.
+O timeout de cada chamada, o orçamento de chamadas e a validade das preparações
+continuam sendo limites independentes. Aumentar o prazo não transforma uma falha
+em sucesso: o retorno permanece degradado quando a interpretação falha, mas
+preserva resultados externos verificados. Nenhuma ação de e-mail é repetida para
+reparar a saída do modelo.
+
 O Compose da raiz reúne MongoDB, PostgreSQL, Qdrant, Mailpit e os cinco serviços
 Argos. O perfil `apps` ativa os processos de aplicação. O setup usa dados
 fictícios, credenciais descartáveis e modelos simulados; não configure chaves de
@@ -24,6 +41,18 @@ Para recriá-lo, especifique `--force`; isso invalida as credenciais de uma pilh
 já iniciada. O arquivo `.env.example` da raiz serve como referência; prefira o
 script para gerar o `.env` com as credenciais internas.
 
+Por padrão, o ambiente local usa `AUTH_MODE=stub`, que representa todos os
+requests como um único usuário sintético. Para validar o contrato de identidade
+do backend, configure no `.env` `AUTH_MODE=jwt`, `MAIN_API_AUTH_ISSUER`,
+`MAIN_API_AUTH_AUDIENCE` e `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`, depois recrie a
+API. O último campo é um objeto JSON que mapeia cada `kid` para a chave pública
+Ed25519 raw de 32 bytes, codificada em Base64. Configure somente chaves
+públicas; a chave privada permanece no backend que assina o token. Em modo JWT,
+cada token precisa conter a identidade, operações autorizadas e propriedades no
+contrato validado pela API. O teste local pode usar tokens sintéticos assinados;
+a homologação da integração real exige uma chave pública e um token emitido pelo
+backend de identidade do ambiente.
+
 ## Banco PostgreSQL e dados sintéticos
 
 Em um volume PostgreSQL novo, a imagem executa, em ordem, os módulos
@@ -37,9 +66,9 @@ separados de `argos-data-engineering`; o arquivo monolítico histórico
 fictícios em todas as tabelas do schema. O módulo 11 expõe uma view de cobertura
 para testar a predição com essa base sintética. O módulo 13 preenche o histórico
 sintético exigido por essa cobertura; o módulo 14 cria os cinco contatos de
-teste do fluxo de e-mail, sem criar credenciais ou vínculos de acesso. O script 99 cria o usuário
-`argos_reader` somente depois de schema, carga e view, concedendo leitura aos
-serviços.
+teste do fluxo de e-mail, sem criar credenciais ou vínculos de acesso. O script
+99 cria o usuário `argos_reader` somente depois de schema, carga e view,
+concedendo leitura aos serviços.
 
 A carga destina-se a volume vazio. Ela não é executada de novo em um volume
 existente. Para apagar a base local e recriá-la do zero, pare a pilha e remova
