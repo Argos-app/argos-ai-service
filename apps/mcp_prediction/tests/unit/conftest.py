@@ -57,7 +57,7 @@ def signed_delegation(delegation_key, configured_settings):
             "aud": configured_settings.mcp_resource_server_url,
             "sub": str(uuid4()),
             "authorized_property_ids": [str(uuid4())],
-            "agent": "analista",
+            "agent": "analyst",
             "operations": ["prediction.read"],
             "iat": now - 1,
             "nbf": now - 1,

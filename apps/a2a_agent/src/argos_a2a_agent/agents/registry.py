@@ -2,8 +2,6 @@
 
 from collections.abc import Mapping
 
-from langsmith import traceable
-
 from argos_a2a_agent.agents.protocol import DocumentAgent
 from packages.contracts.a2a import (
     DocumentAnswerResponse,
@@ -45,7 +43,6 @@ class DocumentAgentRegistry:
         except KeyError as exc:
             raise ValueError("skill documental não registrada") from exc
 
-    @traceable(name="a2a.agent.dispatch", run_type="chain")
     async def execute(
         self,
         request: DocumentQuestionRequest,

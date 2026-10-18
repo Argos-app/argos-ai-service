@@ -1,23 +1,11 @@
 """Adapter do endpoint OpenAI-compatible de embeddings."""
 
 import math
-import re
 from collections.abc import Sequence
 from typing import Any
 
-from argos_a2a_agent.adapters.observability.recording import (
-    OperationRecorder,
-    active_collector,
-)
 from argos_a2a_agent.adapters.providers.http import OpenAICompatibleHTTP
 from argos_a2a_agent.domain.errors import EmbeddingProviderError
-from packages.observability import (
-    ErrorOrigin,
-    ObservationCollector,
-    ObservationLevel,
-    OperationKind,
-    OperationPhase,
-)
 
 
 class OpenAICompatibleEmbeddingProvider:
@@ -29,14 +17,12 @@ class OpenAICompatibleEmbeddingProvider:
         timeout_seconds: float,
         *,
         max_batch_size: int = 128,
-        observation_collector: ObservationCollector | None = None,
     ) -> None:
         if not 1 <= max_batch_size <= 128:
             raise ValueError("max_batch_size deve estar entre 1 e 128")
         self._http = OpenAICompatibleHTTP(endpoint, api_key, timeout_seconds)
         self._model = model
         self._max_batch_size = max_batch_size
-        self._observation_collector = active_collector(observation_collector)
 
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
         if not texts or len(texts) > self._max_batch_size:
@@ -45,26 +31,8 @@ class OpenAICompatibleEmbeddingProvider:
             not isinstance(text, str) or not text.strip() or len(text) > 32_000 for text in texts
         ):
             raise EmbeddingProviderError("texto de embedding vazio ou acima do limite")
-        recorder = (
-            OperationRecorder(
-                self._observation_collector,
-                operation_kind=OperationKind.EMBEDDING,
-                operation_name="embedding.a2a.embed",
-                operation_phase=OperationPhase.EXECUTION,
-                observation_level=ObservationLevel.TRANSPORT_ATTEMPT,
-                provider="openai_compatible",
-                model_requested=_safe_model_name(self._model),
-                error_origin=ErrorOrigin.PROVIDER,
-            )
-            if self._observation_collector is not None
-            else None
-        )
         try:
-            result = await self._http.post_json(
-                {"model": self._model, "input": list(texts)},
-                recorder=recorder,
-                operation_route="/embeddings",
-            )
+            result = await self._http.post_json({"model": self._model, "input": list(texts)})
             vectors = _ordered_vectors(result, len(texts))
         except Exception as exc:
             if isinstance(exc, EmbeddingProviderError):
@@ -105,7 +73,3 @@ def _ordered_vectors(result: dict[str, Any], expected_count: int) -> tuple[tuple
     if set(indexed) != set(range(expected_count)):
         raise ValueError("resposta não contém todos os índices")
     return tuple(indexed[index] for index in range(expected_count))
-
-
-def _safe_model_name(value: str) -> str | None:
-    return value if re.fullmatch(r"[A-Za-z0-9_.:/-]{1,120}", value) else None

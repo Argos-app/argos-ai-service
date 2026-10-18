@@ -7,19 +7,9 @@ from uuid import UUID
 
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
 from app.infrastructure.agents.execution_observer import ExecutionObserver
-from app.infrastructure.observability.langchain_callbacks import ObservabilityToolCallback
-from app.infrastructure.observability.model_callbacks import ModelUsageCallback
-from app.infrastructure.observability.recording import OperationRecorder
 from app.ports.agent import Agent, AgentId
 from app.ports.execution_event_repository import ExecutionEventRepository
 from pydantic import BaseModel, ValidationError
-
-from packages.observability import (
-    ObservationCollector,
-    ObservationLevel,
-    OperationKind,
-    OperationPhase,
-)
 
 
 class AgentFactoryConfigurationError(RuntimeError):
@@ -46,7 +36,7 @@ def validate_agent_configuration(
             f"Modelo não configurado para a política {definition.model_policy.value}"
         )
 
-    if definition.prompt_key != agent_id.value:
+    if (definition.prompt_key, definition.prompt_version) != (agent_id.value, "1"):
         raise AgentFactoryConfigurationError(
             f"Referência de prompt incompatível para {agent_id.value}"
         )
@@ -80,52 +70,28 @@ class _LangChainAgent(Agent[Any, BaseModel]):
         runnable: Any,
         definition: AgentDefinition,
         execution_events: ExecutionEventRepository | None = None,
-        observation_collector: ObservationCollector | None = None,
     ) -> None:
         self._runnable = runnable
         self._input_schema = definition.input_schema
         self._output_schema = definition.output_schema
         self._agent_id = definition.agent_id
         self._execution_events = execution_events
-        self._observation_collector = observation_collector
 
     async def run(
         self,
         input: Any,
         *,
-        context: Mapping[str, Any] | None = None,
+        context: Mapping[str, str] | None = None,
     ) -> BaseModel:
         validated_input = self._input_schema.model_validate(input)
         observer = _observer_for_context(self._execution_events, context)
         invocation_id = None
         if observer is not None:
             invocation_id = await observer.agent_started(self._agent_id.value, validated_input)
-        metric = (
-            OperationRecorder(
-                self._observation_collector,
-                operation_kind=OperationKind.AGENT,
-                operation_name=f"agent.{self._agent_id.value}",
-                operation_phase=OperationPhase.EXECUTION,
-                observation_level=ObservationLevel.SDK_INVOCATION,
-                agent=self._agent_id.value,
-            )
-            if self._observation_collector is not None
-            else None
-        )
         config: dict[str, Any] | None = {"configurable": dict(context)} if context else None
-        callbacks = []
         if observer is not None:
-            callbacks.append(observer.tool_callback())
-        if self._observation_collector is not None:
-            callbacks.append(
-                ObservabilityToolCallback(self._observation_collector, self._agent_id.value)
-            )
-            callbacks.append(
-                ModelUsageCallback(self._observation_collector, agent=self._agent_id.value)
-            )
-        if callbacks:
             config = config or {}
-            config["callbacks"] = callbacks
+            config["callbacks"] = [observer.tool_callback()]
         try:
             result = await self._runnable.ainvoke(
                 {
@@ -146,9 +112,7 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                 raise AgentResponseError(
                     "Resposta do agente não corresponde ao schema registrado"
                 ) from exc
-        except BaseException as exc:
-            if metric is not None:
-                metric.finish(error=exc)
+        except BaseException:
             if observer is not None and invocation_id is not None:
                 import asyncio
 
@@ -156,8 +120,6 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                     observer.agent_finished(invocation_id, self._agent_id.value, failed=True)
                 )
             raise
-        if metric is not None:
-            metric.finish()
         if observer is not None and invocation_id is not None:
             await observer.agent_finished(
                 invocation_id,
@@ -169,7 +131,7 @@ class _LangChainAgent(Agent[Any, BaseModel]):
 
 def _observer_for_context(
     repository: ExecutionEventRepository | None,
-    context: Mapping[str, Any] | None,
+    context: Mapping[str, str] | None,
 ) -> ExecutionObserver | None:
     if repository is None or context is None:
         return None
@@ -192,12 +154,10 @@ class LangChainAgentFactory:
         registry: AgentRegistry,
         runnables: Mapping[AgentId, Any],
         execution_events: ExecutionEventRepository | None = None,
-        observation_collector: ObservationCollector | None = None,
     ) -> None:
         self._registry = registry
         self._runnables = MappingProxyType(dict(runnables))
         self._execution_events = execution_events
-        self._observation_collector = observation_collector
 
     def create(self, agent_id: AgentId) -> Agent[Any, Any]:
         definition = self._registry.get(agent_id)
@@ -207,9 +167,4 @@ class LangChainAgentFactory:
                 f"Agente não configurado: {definition.agent_id.value}"
             )
 
-        return _LangChainAgent(
-            runnable,
-            definition,
-            self._execution_events,
-            self._observation_collector,
-        )
+        return _LangChainAgent(runnable, definition, self._execution_events)

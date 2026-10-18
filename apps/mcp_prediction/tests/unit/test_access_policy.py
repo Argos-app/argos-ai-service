@@ -19,7 +19,7 @@ def make_context(properties):
         user_id=uuid4(),
         authorized_property_ids=properties,
         operations=frozenset({"prediction.read"}),
-        agent_id="analista",
+        agent_id="analyst",
         issued_at=datetime.now(UTC),
         expires_at=datetime.now(UTC) + timedelta(seconds=120),
         token_id="token",
@@ -97,10 +97,15 @@ async def test_operation_and_property_limit_are_enforced():
     with pytest.raises(AccessDeniedError):
         await policy.authorize(make_context(properties), operation="prediction.read")
     scope = await policy.authorize(
-        make_context(properties),
+        make_context(properties[:100]),
         operation="prediction.read",
-        selected_property_ids=properties[:100],
     )
-    assert len(scope.property_ids) == 100
+    assert scope.property_ids == properties[:100]
+    with pytest.raises(AccessDeniedError):
+        await policy.authorize(
+            make_context(properties),
+            operation="prediction.read",
+            selected_property_ids=properties[:100],
+        )
     with pytest.raises(AccessDeniedError):
         await policy.authorize(make_context(properties[:1]), operation="medicine.read")

@@ -72,13 +72,16 @@ def mock_consultar_documental(pergunta: str) -> str:
 MOCK_FARM_TOOLS = [mock_consultar_fazenda]
 MOCK_DOCTOR_TOOLS = [mock_consultar_medicamento]
 MOCK_ANALYST_TOOLS = [mock_calcular_previsao]
-MOCK_SECRETARY_TOOLS = [mock_preparar_relatorio]
+MOCK_SECRETARY_TOOLS = [mock_consultar_fazenda, mock_preparar_relatorio]
 MOCK_INFORMATION_TOOLS = [mock_consultar_documental]
 
 MOCK_AGENT_TOOL_BINDINGS = {
     AgentId.FARM: {"farm_data": tuple(MOCK_FARM_TOOLS)},
     AgentId.DOCTOR: {"medicine_reference": tuple(MOCK_DOCTOR_TOOLS)},
     AgentId.ANALYST: {"prediction": tuple(MOCK_ANALYST_TOOLS)},
-    AgentId.SECRETARY: {"report_delivery": (mock_preparar_relatorio,)},
+    AgentId.SECRETARY: {
+        "farm_data": (mock_consultar_fazenda,),
+        "report_delivery": (mock_preparar_relatorio,),
+    },
     AgentId.INFORMATION: {"documental_a2a": tuple(MOCK_INFORMATION_TOOLS)},
 }

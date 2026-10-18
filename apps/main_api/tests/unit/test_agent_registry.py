@@ -31,7 +31,6 @@ def test_default_registry_contains_routable_agents_and_question_formatter() -> N
         }
     )
     assert DEFAULT_AGENT_REGISTRY.get(AgentId.QUESTION_FORMATTER).tool_slots == ()
-    assert DEFAULT_AGENT_REGISTRY.get(AgentId.SECRETARY).tool_slots == ("report_delivery",)
 
 
 def test_registry_rejects_unknown_ids() -> None:

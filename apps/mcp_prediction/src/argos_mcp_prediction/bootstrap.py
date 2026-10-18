@@ -41,7 +41,7 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
         dict(configured.trusted_delegation_keys),
         issuer=configured.delegation_issuer,
         audience=configured.mcp_resource_server_url,
-        agent_operations={"analista": frozenset({"prediction.read"})},
+        agent_operations={"analyst": frozenset({"prediction.read"})},
         max_ttl_seconds=configured.delegation_max_ttl_seconds,
         clock_skew_seconds=configured.delegation_clock_skew_seconds,
     )
