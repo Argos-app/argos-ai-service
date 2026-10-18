@@ -60,6 +60,7 @@ class Settings:
     answer_api_url: str | None = None
     answer_api_key: str | None = field(default=None, repr=False)
     answer_model: str | None = None
+    answer_thinking: str = "auto"
     permission_sql_dsn: str | None = field(default=None, repr=False)
     model_timeout_seconds: float = 40
     model_max_output_tokens: int = 4_096
@@ -146,6 +147,7 @@ class Settings:
             answer_api_url=os.getenv("A2A_ANSWER_API_URL"),
             answer_api_key=os.getenv("A2A_ANSWER_API_KEY"),
             answer_model=os.getenv("A2A_ANSWER_MODEL"),
+            answer_thinking=os.getenv("A2A_ANSWER_THINKING", "auto").strip().casefold(),
             permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
             model_timeout_seconds=model_timeout,
             model_max_output_tokens=read_int("A2A_MODEL_MAX_OUTPUT_TOKENS", 4_096),
@@ -195,6 +197,8 @@ class Settings:
         require_providers: bool = True,
         require_permission_sql: bool = True,
     ) -> None:
+        if self.answer_thinking not in {"auto", "enabled", "disabled"}:
+            raise ValueError("A2A_ANSWER_THINKING deve ser auto, enabled ou disabled")
         required = {
             "A2A_QDRANT_URL": self.qdrant_url,
             "A2A_QDRANT_READ_API_KEY": self.qdrant_read_api_key,

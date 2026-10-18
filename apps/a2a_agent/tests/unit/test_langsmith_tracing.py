@@ -46,6 +46,16 @@ def test_langsmith_context_enables_configured_client_and_project(monkeypatch):
     assert client_arguments["workspace_id"] == "workspace-id"
     assert client_arguments["hide_inputs"] is True
     assert client_arguments["hide_outputs"] is True
+    trace_data = client_arguments["anonymizer"]({"input": "recipient@example.com"})
+    assert trace_data["input"] == "recipient@example.com"
+    hashes = [
+        "d10f29cd8648fa1b04471ff487187bf6f1143626180dccc2f927c5f739362814",
+        "ad3922d929413df2676254251a147bb98d8fea87c674593cec85f3a21b18adc6",
+        "8c1d8de6a303ae7ae5a583e73227f30c59d3070281372beb1db425db12343a80",
+    ]
+    protected = client_arguments["anonymizer"]({"keys": hashes[:], "phone": "+55 11 98765-4321"})
+    assert protected["keys"] == hashes
+    assert "98765-4321" not in protected["phone"]
     with tracing.context("corr-123"):
         pass
     assert context_arguments == {

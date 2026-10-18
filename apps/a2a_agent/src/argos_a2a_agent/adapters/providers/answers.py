@@ -21,6 +21,7 @@ from argos_a2a_agent.domain.agent_answers import (
 )
 from argos_a2a_agent.domain.errors import DocumentAnswerGenerationError
 from packages.contracts.a2a import DocumentAnswerStatus
+from packages.model_options import thinking_options
 from packages.observability import (
     ErrorOrigin,
     ObservationCollector,
@@ -30,7 +31,6 @@ from packages.observability import (
 )
 
 _PERSONAL_PATTERNS = (
-    (re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b"), "[EMAIL]"),
     (re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b"), "[CPF]"),
     (re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b"), "[CNPJ]"),
     (
@@ -84,6 +84,7 @@ class OpenAICompatibleAnswerGenerator:
         timeout_seconds: float,
         *,
         max_output_tokens: int = 2_400,
+        thinking: str = "auto",
         observation_collector: ObservationCollector | None = None,
     ) -> None:
         if not 128 <= max_output_tokens <= 8_192:
@@ -91,6 +92,7 @@ class OpenAICompatibleAnswerGenerator:
         self._http = OpenAICompatibleHTTP(endpoint, api_key, timeout_seconds)
         self._model = model
         self._max_output_tokens = max_output_tokens
+        self._thinking_options = thinking_options(model, endpoint, thinking)
         self._observation_collector = active_collector(observation_collector)
 
     @traceable(name="a2a.model.answer", run_type="llm")
@@ -166,6 +168,7 @@ class OpenAICompatibleAnswerGenerator:
             response = await self._http.post_json(
                 {
                     "model": self._model,
+                    **self._thinking_options,
                     "temperature": 0,
                     "max_tokens": self._max_output_tokens,
                     "response_format": {"type": "json_object"},
@@ -216,10 +219,15 @@ def _answer_from_json(raw: Any) -> GeneratedDocumentAnswer:
             raise ValueError("citações no texto divergem das evidências estruturadas")
         if not citations:
             citations = inline_citations
-    elif citations and isinstance(status, str) and status.casefold() in {
-        DocumentAnswerStatus.SUCCESS.value,
-        DocumentAnswerStatus.PARTIAL.value,
-    }:
+    elif (
+        citations
+        and isinstance(status, str)
+        and status.casefold()
+        in {
+            DocumentAnswerStatus.SUCCESS.value,
+            DocumentAnswerStatus.PARTIAL.value,
+        }
+    ):
         answer = f"{answer.rstrip()} {' '.join(f'[[{item}]]' for item in citations)}"
     normalized_status = _normalized_answer_status(status, answer, citations)
     if normalized_status == DocumentAnswerStatus.SUCCESS and not answer.strip():
@@ -227,8 +235,7 @@ def _answer_from_json(raw: Any) -> GeneratedDocumentAnswer:
     if (
         not inline_citations
         and citations
-        and normalized_status
-        in {DocumentAnswerStatus.SUCCESS, DocumentAnswerStatus.PARTIAL}
+        and normalized_status in {DocumentAnswerStatus.SUCCESS, DocumentAnswerStatus.PARTIAL}
     ):
         answer = f"{answer.rstrip()} {' '.join(f'[[{item}]]' for item in citations)}"
     if normalized_status == DocumentAnswerStatus.PARTIAL and not limitations:

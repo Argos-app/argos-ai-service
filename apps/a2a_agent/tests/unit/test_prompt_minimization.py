@@ -5,7 +5,7 @@ from argos_a2a_agent.adapters.providers.answers import (
 )
 
 
-def test_external_model_payload_minimizes_contact_and_secret_values_recursively():
+def test_external_model_payload_preserves_email_and_minimizes_other_sensitive_values():
     sanitized = _minimize_prompt_value(
         {
             "question": "Ligue para (11) 98765-4321, CPF 123.456.789-00",
@@ -17,12 +17,12 @@ def test_external_model_payload_minimizes_contact_and_secret_values_recursively(
     text = str(sanitized)
     assert "(11) 98765-4321" not in text
     assert "123.456.789-00" not in text
-    assert "ana@example.com" not in text
+    assert "ana@example.com" in text
     assert "12.345.678/0001-90" not in text
     assert "abc123" not in text
     assert "[TELEFONE]" in text
     assert "[CPF]" in text
-    assert "[EMAIL]" in text
+    assert "[EMAIL]" not in text
     assert "[CNPJ]" in text
     assert "[REDACTED]" in text
 

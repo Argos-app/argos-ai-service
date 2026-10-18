@@ -210,6 +210,7 @@ async def create_runtime_dependencies(
             settings.answer_model,
             settings.model_timeout_seconds,
             max_output_tokens=settings.model_max_output_tokens,
+            thinking=settings.answer_thinking,
             observation_collector=observation_collector,
         )
         provider_resources.append(answer_generator)

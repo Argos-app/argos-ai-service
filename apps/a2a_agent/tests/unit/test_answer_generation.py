@@ -1,6 +1,7 @@
 import json
 from uuid import uuid4
 
+import pytest
 from argos_a2a_agent.adapters.providers.answers import _answer_from_json, _answer_from_response
 from argos_a2a_agent.agents.specialists import _uninterpreted_evidence_answer
 from argos_a2a_agent.domain.agent_answers import AgentEvidence
@@ -8,6 +9,52 @@ from argos_a2a_agent.domain.agent_answers import AgentEvidence
 from packages.contracts.a2a import DocumentAnswerStatus, DocumentSourceReference, DocumentType
 
 _EVIDENCE_ID = "ev_0123456789abcdef01234567"
+
+
+@pytest.mark.asyncio
+async def test_nvidia_answer_request_disables_optional_thinking(monkeypatch):
+    from argos_a2a_agent.adapters.providers import answers
+
+    payloads = []
+
+    class HTTP:
+        def __init__(self, *args):
+            pass
+
+        async def post_json(self, payload, **kwargs):
+            payloads.append(payload)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "answer": "Trecho verificável 1.",
+                                    "status": "success",
+                                    "cited_evidence_ids": [f"ev_{1:024x}"],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(answers, "OpenAICompatibleHTTP", HTTP)
+    generator = answers.OpenAICompatibleAnswerGenerator(
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        "test-secret",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        40,
+    )
+    result = await generator.generate(
+        system_prompt="Consulte a evidência.",
+        question="Qual o trecho?",
+        jurisdiction=None,
+        reference_date=None,
+        evidence=(_evidence(),),
+    )
+    assert payloads[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert result.status == DocumentAnswerStatus.SUCCESS
 
 
 def _evidence(index: int = 1) -> AgentEvidence:
@@ -138,8 +185,7 @@ def test_answer_parser_accepts_plain_text_only_when_it_cites_retrieved_evidence(
                 {
                     "message": {
                         "content": (
-                            "O documento é demonstrativo, sem regra real. "
-                            f"[[{_EVIDENCE_ID}]]"
+                            f"O documento é demonstrativo, sem regra real. [[{_EVIDENCE_ID}]]"
                         )
                     }
                 }
