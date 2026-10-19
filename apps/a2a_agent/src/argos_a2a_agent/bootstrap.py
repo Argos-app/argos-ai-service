@@ -185,7 +185,7 @@ async def create_runtime_dependencies(
         if settings.model_mode == "simulated":
             embeddings = SimulatedEmbeddingProvider(settings.qdrant_vector_size)
             answer_generator = SimulatedAnswerGenerator()
-            fingerprint_material = f"argos-simulated-embedding-v1:{settings.qdrant_vector_size}"
+            fingerprint_material = f"argos-simulated-embedding-v2:{settings.qdrant_vector_size}"
             return RuntimeDependencies(
                 embeddings=embeddings,
                 embedding_fingerprint=hashlib.sha256(
