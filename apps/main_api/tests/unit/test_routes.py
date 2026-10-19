@@ -121,12 +121,13 @@ def test_planned_routes_are_present() -> None:
         ("/v1/sessions/{session_id}/interactions", "post"),
     }
     assert all(method in paths[path] for path, method in expected)
-    assert app.openapi()["components"]["schemas"]["InteractionResult"]["properties"][
-        "status"
-    ]["enum"] == ["completed", "degraded"]
-    assert "degradation_reasons" in app.openapi()["components"]["schemas"][
-        "InteractionResult"
-    ]["properties"]
+    assert app.openapi()["components"]["schemas"]["InteractionResult"]["properties"]["status"][
+        "enum"
+    ] == ["completed", "degraded"]
+    assert (
+        "degradation_reasons"
+        in app.openapi()["components"]["schemas"]["InteractionResult"]["properties"]
+    )
     assert "/v1/sessions/{session_id}/answers" not in paths
     assert "/v1/sessions/{session_id}" not in paths
     assert "/v1/sessions/{session_id}/interactions/{interaction_id}" not in paths

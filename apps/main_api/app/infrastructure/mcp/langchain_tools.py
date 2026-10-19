@@ -208,9 +208,7 @@ def _make_tool(
             request_payload = dict(payload)
         else:
             raw_payload = (
-                payload.model_dump(mode="python")
-                if isinstance(payload, BaseModel)
-                else payload
+                payload.model_dump(mode="python") if isinstance(payload, BaseModel) else payload
             )
             normalized_payload = _normalize_model_payload(name, raw_payload)
             request_payload = payload_schema.model_validate(normalized_payload).model_dump(

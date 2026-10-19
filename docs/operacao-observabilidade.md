@@ -36,8 +36,13 @@ correlation_id = "UUID recebido no header X-Argos-Correlation-ID"
 for item in collection.find({"correlation_id": correlation_id}).sort(
     [("started_at", ASCENDING), ("_id", ASCENDING)]
 ):
-    print(item["_id"], item.get("parent_observation_id"), item["service"],
-          item["operation_name"], item["status"])
+    print(
+        item["_id"],
+        item.get("parent_observation_id"),
+        item["service"],
+        item["operation_name"],
+        item["status"],
+    )
 ```
 
 Para buscar diretamente todas as observações da interação persistida, use seu
@@ -50,8 +55,13 @@ interaction_id = "UUID da interação armazenada em ai_interactions"
 for item in collection.find({"interaction_id": interaction_id}).sort(
     [("started_at", ASCENDING), ("_id", ASCENDING)]
 ):
-    print(item["_id"], item.get("parent_observation_id"), item["service"],
-          item["operation_name"], item["status"])
+    print(
+        item["_id"],
+        item.get("parent_observation_id"),
+        item["service"],
+        item["operation_name"],
+        item["status"],
+    )
 ```
 
 Use os `_id` e `parent_observation_id` para montar a árvore. O identificador é

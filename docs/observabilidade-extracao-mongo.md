@@ -101,6 +101,7 @@ collection = client[os.environ["BI_OBSERVABILITY_DATABASE"]][
     os.environ["BI_OBSERVABILITY_COLLECTION"]
 ]
 
+
 def read_page(
     run_watermark: datetime,
     checkpoint_updated_at: datetime | None,
@@ -117,12 +118,14 @@ def read_page(
         clauses.append({"updated_at": {"$gte": lower_bound}})
     if page_after is not None:
         page_updated_at, page_id = page_after
-        clauses.append({
-            "$or": [
-                {"updated_at": {"$gt": page_updated_at}},
-                {"updated_at": page_updated_at, "_id": {"$gt": page_id}},
-            ]
-        })
+        clauses.append(
+            {
+                "$or": [
+                    {"updated_at": {"$gt": page_updated_at}},
+                    {"updated_at": page_updated_at, "_id": {"$gt": page_id}},
+                ]
+            }
+        )
     query = {"$and": clauses}
     return list(
         collection.find(query)

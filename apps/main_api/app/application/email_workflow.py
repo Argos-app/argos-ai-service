@@ -207,7 +207,7 @@ class EmailWorkflow:
             )
             try:
                 payload = json.loads(result)
-            except (TypeError, json.JSONDecodeError):
+            except TypeError, json.JSONDecodeError:
                 payload = None
             code = payload.get("status") if isinstance(payload, dict) else None
             if not isinstance(code, str) or len(code) > 120:

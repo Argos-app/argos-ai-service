@@ -149,9 +149,9 @@ async def test_medicine_tools_forward_search_and_use_contract_filters():
             "argos_request_id": str(uuid4()),
         }
     }
-    tools = build_mcp_tool_bindings(McpClients(data=data_client), _FakeIssuer())[
-        AgentId.DOCTOR
-    ]["medicine_reference"]
+    tools = build_mcp_tool_bindings(McpClients(data=data_client), _FakeIssuer())[AgentId.DOCTOR][
+        "medicine_reference"
+    ]
     tool = _tool(tools, "list_medicines")
 
     await tool.ainvoke({"payload": {"search": "Ivervet Teste"}}, config=config)
@@ -200,12 +200,8 @@ async def test_tool_argument_aliases_are_normalized_before_mcp_call():
 
     assert data_client.calls[0]["arguments"]["payload"]["medicine_name"] == "Ivervet Teste"
     assert data_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
-    assert prediction_client.calls[0]["arguments"]["payload"]["medicine_names"] == [
-        "Ivervet Teste"
-    ]
-    assert prediction_client.calls[0]["arguments"]["payload"]["property_ids"] == [
-        str(property_id)
-    ]
+    assert prediction_client.calls[0]["arguments"]["payload"]["medicine_names"] == ["Ivervet Teste"]
+    assert prediction_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
 
 
 @pytest.mark.asyncio
@@ -220,9 +216,9 @@ async def test_prediction_tool_uses_contract_names_and_defaults_a_closed_date():
         }
     }
     tool = _tool(
-        build_mcp_tool_bindings(
-            McpClients(prediction=prediction_client), _FakeIssuer()
-        )[AgentId.ANALYST]["prediction"],
+        build_mcp_tool_bindings(McpClients(prediction=prediction_client), _FakeIssuer())[
+            AgentId.ANALYST
+        ]["prediction"],
         "estimate_medicine_consumption",
     )
 

@@ -127,7 +127,7 @@ def _decode_cursor(cursor: str, session_id: UUID, user_id: UUID) -> int:
         ):
             raise ValueError("cursor inválido")
         return payload["before_sequence"]
-    except (UnicodeEncodeError, UnicodeDecodeError, binascii.Error, ValueError, TypeError):
+    except UnicodeEncodeError, UnicodeDecodeError, binascii.Error, ValueError, TypeError:
         raise _invalid_cursor() from None
 
 
@@ -182,7 +182,7 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
                         response = response.model_copy(
                             update={"text": minimize_sensitive_memory_input(response.text)}
                         )
-        except (AttributeError, KeyError, TypeError, ValueError, ValidationError):
+        except AttributeError, KeyError, TypeError, ValueError, ValidationError:
             # Um payload interno/corrompido nunca é propagado ao contrato público.
             answer = None
             question_id = None

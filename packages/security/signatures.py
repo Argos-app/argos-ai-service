@@ -21,7 +21,7 @@ class TrustedEd25519SignatureVerifier:
             if len(decoded) != 64:
                 return False
             key.verify(decoded, payload)
-        except (InvalidSignature, ValueError, binascii.Error):
+        except InvalidSignature, ValueError, binascii.Error:
             return False
         return True
 

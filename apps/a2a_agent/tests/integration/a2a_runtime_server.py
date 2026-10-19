@@ -58,7 +58,7 @@ class FilePermissionDirectory:
     async def has_active_documents_read_permission(self, user_id: UUID) -> bool:
         try:
             authorized = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             return False
         return str(user_id) in authorized
 

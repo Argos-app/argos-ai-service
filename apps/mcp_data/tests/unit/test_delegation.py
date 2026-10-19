@@ -65,9 +65,7 @@ def test_valid_delegation_produces_immutable_access_context() -> None:
 
 
 def test_analyst_delegation_accepts_only_cattle_read():
-    verifier, token, _ = make_verifier_and_token(
-        overrides={"agent": "analista"}
-    )
+    verifier, token, _ = make_verifier_and_token(overrides={"agent": "analista"})
 
     context = verifier.verify(token)
 

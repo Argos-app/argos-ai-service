@@ -89,9 +89,7 @@ async def test_analyst_can_resolve_properties_only_inside_delegated_scope():
 
     context = _context(agent_id="analista", authorized_property_ids=(authorized_id,))
     repository = AuthorizedRepository()
-    service = CattleQueryService(
-        AccessPolicy(_Directory({authorized_id})), repository, object()
-    )
+    service = CattleQueryService(AccessPolicy(_Directory({authorized_id})), repository, object())
 
     await service.list_properties(context, ListPropertiesRequest())
 

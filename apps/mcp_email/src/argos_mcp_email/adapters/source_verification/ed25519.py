@@ -26,7 +26,7 @@ class TrustedEd25519KeyVerifier:
             return False
         try:
             public_key.verify(self._decode(signature), payload)
-        except (InvalidSignature, ValueError, binascii.Error):
+        except InvalidSignature, ValueError, binascii.Error:
             return False
         return True
 

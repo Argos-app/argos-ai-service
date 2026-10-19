@@ -260,7 +260,7 @@ class DelegationContextMiddleware:
         try:
             token = values[0].decode("ascii")
             context = self._verifier.verify(token)
-        except (UnicodeDecodeError, AccessContextError):
+        except UnicodeDecodeError, AccessContextError:
             await JSONResponse(
                 {"detail": "contexto de acesso obrigatório ou inválido"}, status_code=401
             )(scope, receive, send)

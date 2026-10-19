@@ -52,9 +52,7 @@ class _Repository:
     def _filtered(self, filters: DocumentFilter):
         selected = self.documents
         if filters.document_ids is not None:
-            selected = tuple(
-                item for item in selected if item.document_id in filters.document_ids
-            )
+            selected = tuple(item for item in selected if item.document_id in filters.document_ids)
         if filters.document_types is not None:
             selected = tuple(
                 item for item in selected if item.document_type in filters.document_types

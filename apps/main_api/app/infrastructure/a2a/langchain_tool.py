@@ -25,9 +25,7 @@ def build_document_a2a_tool(
 ) -> StructuredTool:
     """Cria uma tool fixa com identidade obtida do contexto autenticado."""
 
-    tool_name = (
-        "consultar_legal" if skill is DocumentSkill.LEGAL else "consultar_documental"
-    )
+    tool_name = "consultar_legal" if skill is DocumentSkill.LEGAL else "consultar_documental"
     schema_fields = {"question": (str, Field(min_length=1, max_length=4_000))}
     if skill is DocumentSkill.LEGAL:
         schema_fields.update(

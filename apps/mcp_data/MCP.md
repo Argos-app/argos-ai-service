@@ -76,9 +76,9 @@ Coleções e representações dos UUIDs devem refletir a implantação real.
 O principal inclui correlation ID e ID do span pai em claims opcionais da
 delegação Ed25519 validada por este servidor e envia `X-Argos-Correlation-ID`
 como header diagnóstico. Isso permite correlacionar a chamada com a observação
-de saída do `main_api`.
-O MCP de dados não persiste uma observação própria; logs do processo podem ser
-associados pelo ID de delegação/request quando disponíveis. Valores ausentes em
-telemetria não indicam ausência de consulta nem consumo zero. Os IDs não são
-argumentos das tools. Consulte [operação de observabilidade](../../docs/operacao-observabilidade.md)
-e o [dicionário MongoDB BI](../../docs/dicionario-mongodb-bi.md).
+de saída do `main_api`. O MCP de dados não persiste uma observação própria; logs
+do processo podem ser associados pelo ID de delegação/request quando
+disponíveis. Valores ausentes em telemetria não indicam ausência de consulta nem
+consumo zero. Os IDs não são argumentos das tools. Consulte
+[operação de observabilidade](../../docs/operacao-observabilidade.md) e o
+[dicionário MongoDB BI](../../docs/dicionario-mongodb-bi.md).

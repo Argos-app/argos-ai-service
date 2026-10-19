@@ -8,9 +8,7 @@
   "paths": {
     "/health/live": {
       "get": {
-        "tags": [
-          "health"
-        ],
+        "tags": ["health"],
         "summary": "Live",
         "operationId": "live_health_live_get",
         "responses": {
@@ -33,9 +31,7 @@
     },
     "/health/ready": {
       "get": {
-        "tags": [
-          "health"
-        ],
+        "tags": ["health"],
         "summary": "Ready",
         "operationId": "ready_health_ready_get",
         "responses": {
@@ -55,9 +51,7 @@
     },
     "/v1/sessions": {
       "get": {
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "summary": "List Sessions",
         "operationId": "list_sessions_v1_sessions_get",
         "responses": {
@@ -87,9 +81,7 @@
         }
       },
       "post": {
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "summary": "Create Session",
         "operationId": "create_session_v1_sessions_post",
         "responses": {
@@ -117,9 +109,7 @@
     },
     "/v1/sessions/{session_id}/messages": {
       "get": {
-        "tags": [
-          "sessions"
-        ],
+        "tags": ["sessions"],
         "summary": "List Session Messages",
         "operationId": "list_session_messages_v1_sessions__session_id__messages_get",
         "parameters": [
@@ -208,9 +198,7 @@
     },
     "/v1/sessions/{session_id}/interactions": {
       "post": {
-        "tags": [
-          "interactions"
-        ],
+        "tags": ["interactions"],
         "summary": "Create Interaction",
         "operationId": "create_interaction_v1_sessions__session_id__interactions_post",
         "parameters": [
@@ -311,10 +299,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "option_id"
-        ],
+        "required": ["kind", "option_id"],
         "title": "AnswerChoice"
       },
       "AnswerConfirmation": {
@@ -331,10 +316,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "confirm"
-        ],
+        "required": ["kind", "confirm"],
         "title": "AnswerConfirmation"
       },
       "AnswerInteraction": {
@@ -379,12 +361,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "interaction_id",
-          "question_id",
-          "answer"
-        ],
+        "required": ["kind", "interaction_id", "question_id", "answer"],
         "title": "AnswerInteraction"
       },
       "AnswerResponse": {
@@ -401,10 +378,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "text"
-        ],
+        "required": ["kind", "text"],
         "title": "AnswerResponse"
       },
       "AnswerText": {
@@ -423,10 +397,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "text"
-        ],
+        "required": ["kind", "text"],
         "title": "AnswerText"
       },
       "HTTPValidationError": {
@@ -452,10 +423,7 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "completed",
-              "degraded"
-            ],
+            "enum": ["completed", "degraded"],
             "title": "Status",
             "default": "completed"
           },
@@ -502,12 +470,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "session_id",
-          "interaction_id",
-          "public_request_id",
-          "response"
-        ],
+        "required": ["session_id", "interaction_id", "public_request_id", "response"],
         "title": "InteractionResult"
       },
       "MessageInteraction": {
@@ -531,11 +494,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "client_message_id",
-          "message"
-        ],
+        "required": ["kind", "client_message_id", "message"],
         "title": "MessageInteraction"
       },
       "QuestionOption": {
@@ -551,10 +510,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "option_id",
-          "label"
-        ],
+        "required": ["option_id", "label"],
         "title": "QuestionOption"
       },
       "QuestionResponse": {
@@ -571,11 +527,7 @@
           },
           "input_type": {
             "type": "string",
-            "enum": [
-              "free_text",
-              "single_choice",
-              "confirmation"
-            ],
+            "enum": ["free_text", "single_choice", "confirmation"],
             "title": "Input Type"
           },
           "prompt": {
@@ -601,14 +553,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "kind",
-          "question_id",
-          "input_type",
-          "prompt",
-          "reason_code",
-          "expires_at"
-        ],
+        "required": ["kind", "question_id", "input_type", "prompt", "reason_code", "expires_at"],
         "title": "QuestionResponse"
       },
       "Session": {
@@ -640,11 +585,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "session_id",
-          "farm_ids",
-          "created_at"
-        ],
+        "required": ["session_id", "farm_ids", "created_at"],
         "title": "Session"
       },
       "SessionMessage": {
@@ -666,19 +607,12 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "user",
-              "assistant"
-            ],
+            "enum": ["user", "assistant"],
             "title": "Role"
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "user_input",
-              "assistant_answer",
-              "clarification_question"
-            ],
+            "enum": ["user_input", "assistant_answer", "clarification_question"],
             "title": "Kind"
           },
           "content": {
@@ -816,12 +750,7 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "session_id",
-          "items",
-          "next_cursor",
-          "has_more"
-        ],
+        "required": ["session_id", "items", "next_cursor", "has_more"],
         "title": "SessionMessagesPage",
         "description": "Página cronológica de mensagens anteriores à fronteira do cursor."
       },
@@ -858,11 +787,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
+        "required": ["loc", "msg", "type"],
         "title": "ValidationError"
       }
     }

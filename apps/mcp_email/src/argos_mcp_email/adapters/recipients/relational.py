@@ -48,9 +48,7 @@ class RelationalRecipientDirectory:
     def _lookup_value(selector: RecipientSelector) -> str:
         if selector.kind != "name":
             return selector.value
-        return selector.value.translate(
-            str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "＇": "'"})
-        )
+        return selector.value.translate(str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "＇": "'"}))
 
     async def resolve(
         self,

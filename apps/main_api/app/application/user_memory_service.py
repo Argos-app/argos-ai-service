@@ -34,9 +34,7 @@ _NEGATED_IMPERATIVE = re.compile(r"\b(?:nao|nunca)(?:\s+\w+){0,4}\s*$")
 _TONE_MARKERS = re.compile(
     r"\b(?:tom|estilo|linguagem|forma de falar|jeito de falar|respostas?|explicacoes?)\b"
 )
-_TONE_DECLARATION = re.compile(
-    r"\b(?:prefiro|gosto|quero|peco|sempre|use|responda)\b"
-)
+_TONE_DECLARATION = re.compile(r"\b(?:prefiro|gosto|quero|peco|sempre|use|responda)\b")
 _GOAL_MARKERS = re.compile(r"\b(?:objetivo|meta|proposito|finalidade)\b")
 _PERSONAL_GOAL = re.compile(r"\b(?:meu|minha)\s+(?:objetivo|meta|proposito|finalidade)\b")
 _ALL_MEMORY_MARKERS = re.compile(r"\b(?:memoria|perfil|preferencias)\b")

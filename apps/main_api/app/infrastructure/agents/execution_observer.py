@@ -53,7 +53,7 @@ def _safe_value(value: Any, *, key: str | None = None) -> Any:
         if sanitized.lstrip().startswith(("{", "[")):
             try:
                 decoded = json.loads(sanitized)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
             else:
                 if isinstance(decoded, (dict, list)):
@@ -70,7 +70,7 @@ def _safe_text(value: Any) -> str:
         sanitized = json.dumps(
             _safe_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         sanitized = json.dumps("[unavailable]", ensure_ascii=False)
     if len(sanitized) > MAX_EVENT_TEXT_LENGTH:
         sanitized = sanitized[: MAX_EVENT_TEXT_LENGTH - 15] + "…[truncated]"

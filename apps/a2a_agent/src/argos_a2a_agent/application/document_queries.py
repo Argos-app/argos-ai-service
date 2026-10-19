@@ -110,9 +110,7 @@ class _DocumentQuery:
             seen_cursors.add(page.next_cursor)
             cursor = page.next_cursor
             if len(documents) > _MAX_AGGREGATE_DOCUMENTS:
-                raise DocumentQueryTooBroadError(
-                    "a consulta excede o limite de 10000 documentos"
-                )
+                raise DocumentQueryTooBroadError("a consulta excede o limite de 10000 documentos")
         if len(documents) != expected_count:
             raise IndexReadError("a listagem não corresponde à contagem distinta do manifesto")
         return tuple(documents)
@@ -206,9 +204,7 @@ class SearchDocuments(_DocumentQuery):
             expected_count=matching_documents,
         )
         explicit_matches = tuple(
-            document
-            for document in documents
-            if _normalize_title(document.title) in query
+            document for document in documents if _normalize_title(document.title) in query
         )
         if len(explicit_matches) != 1:
             return filters
@@ -407,6 +403,7 @@ class AggregateDocuments(_DocumentQuery):
             corpus_revision=revision,
             complete=True,
         )
+
 
 def _filters(
     request: SearchDocumentsRequest | ListDocumentsRequest | AggregateDocumentsRequest,

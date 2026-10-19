@@ -975,7 +975,7 @@ def test_judge_cannot_approve_with_unsupported_claims() -> None:
         )
 
 
-def test_initial_state_sanitizes_recipient_but_keeps_private_selector():
+def test_initial_state_keeps_email_visible_and_stores_private_selector():
     state = initial_state(
         "Envie para ana@example.com",
         user_id="user-demo",
@@ -984,7 +984,7 @@ def test_initial_state_sanitizes_recipient_but_keeps_private_selector():
         interaction_id="interaction-origin",
     )
 
-    assert state["messages"][0].content == "Envie para [DESTINATARIO_1]"
+    assert state["messages"][0].content == "Envie para ana@example.com"
     assert state["recipient_selectors"] == {
         "[DESTINATARIO_1]": {"kind": "email", "value": "ana@example.com"}
     }
