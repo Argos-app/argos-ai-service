@@ -22,6 +22,10 @@ from app.domain.email_preparations import (
     SendAuthorizationOrigin,
 )
 from app.domain.report_artifacts import ReportArtifact
+from app.infrastructure.persistence.email_preparations import (
+    _operation_reference,
+    _operation_reference_document,
+)
 from app.ports.email_preparation_repository import EmailSendAuthorizationConflictError
 
 from packages.contracts import (
@@ -728,6 +732,63 @@ def test_recover_interaction_outcome_reads_mcp_without_resending():
     assert recovered["recipient_count"] == 1
     assert "não confirma a entrega" in recovered["message"]
     assert [name for name, *_ in client.calls] == ["get_report_status"]
+
+
+def test_operation_reference_round_trips_last_known_provider_status():
+    artifact, _ = _artifact()
+    sent = _dispatch_result(uuid4())
+    reference = EmailOperationReference(
+        authorization_id=uuid4(),
+        principal_user_id=artifact.principal_user_id,
+        session_id=artifact.session_id,
+        operation_id=sent.operation_id,
+        recorded_at=datetime.now(UTC),
+        last_known_status=sent.status,
+        last_known_updated_at=sent.updated_at,
+    )
+
+    restored = _operation_reference(_operation_reference_document(reference))
+
+    assert restored == reference
+
+
+def test_recovery_preserves_last_known_send_result_when_status_lookup_fails():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    sent = _dispatch_result(prepared.report_id)
+
+    def respond(name, _arguments):
+        if name == "send_report":
+            return SimpleNamespace(structuredContent=sent.model_dump(mode="json"), content=[])
+        raise TimeoutError("consulta posterior temporariamente indisponível")
+
+    client = _EmailClient(respond)
+    workflow, _, _, config = _authorized_dispatch(artifact, prepared, property_id, client)
+
+    async def send_and_recover():
+        sent_result = json.loads(await workflow.send(configurable=config))
+        recovered_result = json.loads(
+            await workflow.recover_interaction_outcome(configurable=config)
+        )
+        return sent_result, recovered_result
+
+    sent_result, recovered_result = asyncio.run(send_and_recover())
+
+    assert sent_result["status"] == "accepted"
+    assert recovered_result["status"] == "accepted"
+    assert recovered_result["confirmed"] is True
+    assert "não confirma a entrega" in recovered_result["message"]
+    assert "último estado confirmado" in recovered_result["message"]
+    assert [name for name, *_ in client.calls] == ["send_report", "get_report_status"]
 
 
 def test_lost_send_response_retries_with_same_report_and_idempotency_key():

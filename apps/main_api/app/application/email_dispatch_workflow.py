@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -35,6 +36,8 @@ from packages.observability import (
     OperationPhase,
     ResultMetadata,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _recipient_selectors_match(
@@ -72,6 +75,7 @@ def _safe_result(
     *,
     recovered: bool = False,
     recipient_count: int | None = None,
+    status_refresh_failed: bool = False,
 ) -> str:
     labels = {
         DispatchStatus.PENDING: "O envio está em processamento.",
@@ -82,6 +86,9 @@ def _safe_result(
         DispatchStatus.FAILED: "O MCP confirmou que o envio falhou.",
         DispatchStatus.UNKNOWN: "O estado do envio ainda não foi confirmado.",
     }
+    message = labels[result.status]
+    if status_refresh_failed:
+        message += " A consulta posterior ao MCP falhou; este é o último estado confirmado."
     return json.dumps(
         {
             "status": result.status.value,
@@ -90,7 +97,7 @@ def _safe_result(
             "report_id": str(result.report_id),
             "recipient_count": recipient_count,
             "recovered": recovered,
-            "message": labels[result.status],
+            "message": message,
         },
         ensure_ascii=False,
     )
@@ -230,6 +237,8 @@ class EmailDispatchWorkflow:
                 session_id=session_id,
                 operation_id=result.operation_id,
                 recorded_at=datetime.now(UTC),
+                last_known_status=result.status,
+                last_known_updated_at=result.updated_at,
             )
         )
         return _safe_result(result, recipient_count=len(prepared.recipients))
@@ -401,7 +410,11 @@ class EmailDispatchWorkflow:
             if reference is None:
                 return None
             return await self._refresh_status(authorization, reference, principal_user_id)
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning(
+                "email dispatch recovery could not load authorization or operation reference",
+                extra={"failure_type": type(exc).__name__},
+            )
             return _safe_unconfirmed()
 
     async def _observe_workflow(self, name, operation, *, recovered=False, **kwargs):
@@ -492,7 +505,26 @@ class EmailDispatchWorkflow:
             )
             result = ReportStatusResult.model_validate(_payload(response))
             self._validate_result(result, authorization.report_id)
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning(
+                "email dispatch status lookup failed; using last known provider result",
+                extra={"failure_type": type(exc).__name__},
+            )
+            if operation_reference.last_known_status is not None:
+                last_known = SendReportResult(
+                    operation_id=operation_reference.operation_id,
+                    report_id=authorization.report_id,
+                    status=operation_reference.last_known_status,
+                    created_at=operation_reference.recorded_at,
+                    updated_at=(
+                        operation_reference.last_known_updated_at or operation_reference.recorded_at
+                    ),
+                )
+                return _safe_result(
+                    last_known,
+                    recovered=True,
+                    status_refresh_failed=True,
+                )
             return _safe_unconfirmed()
         recipient_count = None
         try:
@@ -507,6 +539,27 @@ class EmailDispatchWorkflow:
             # Status remains authoritative even when the optional count cannot
             # be recovered from the preparation repository.
             pass
+        if (
+            result.status != operation_reference.last_known_status
+            or result.updated_at != operation_reference.last_known_updated_at
+        ):
+            try:
+                await self._preparations.save_send_operation_reference(
+                    EmailOperationReference(
+                        authorization_id=operation_reference.authorization_id,
+                        principal_user_id=operation_reference.principal_user_id,
+                        session_id=operation_reference.session_id,
+                        operation_id=operation_reference.operation_id,
+                        recorded_at=operation_reference.recorded_at,
+                        last_known_status=result.status,
+                        last_known_updated_at=result.updated_at,
+                    )
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "email dispatch status could not be stored as last known result",
+                    extra={"failure_type": type(exc).__name__},
+                )
         return _safe_result(
             result,
             recovered=True,

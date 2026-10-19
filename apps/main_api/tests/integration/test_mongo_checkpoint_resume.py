@@ -114,4 +114,4 @@ async def test_pending_question_resumes_after_recreating_mongo_saver():
 
     assert result["final_answer"] == "Consulta retomada"
     assert farm.calls == 1
-    assert "janeiro" in farm.inputs[0].brief_sanitized
+    assert "janeiro" in farm.inputs[0].request

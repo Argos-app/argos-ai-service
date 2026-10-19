@@ -60,6 +60,12 @@ intermediários.
 | `ai_email_prepared_reports`        | `_id` report UUID; `requested_by`; `recipients[]` (`recipient_id`, `name`, `email`); `subject`, `body`; `attachments[]` (`filename`, `content_type`, `content_base64`, `sha256`); `source_payload_hash`; `created_at`, `expires_at`; `state`. O conteúdo renderizado e o anexo podem incluir dados pessoais e do lote; os bytes base64 do anexo decodificam para o corpo UTF-8 no formato atual. Documentos criados antes do suporte a anexos podem omitir o campo. |
 | `ai_email_dispatches`              | `_id` operation UUID; `report_id`, `requested_by`, `idempotency_key`; `state`; `provider_message_id`, `error_code` opcionais; `created_at`, `updated_at`; `send_claimed` aparece após claim atômico.                                                                                                                                                                                                                                                                |
 
+`ai_email_operation_references` também pode conter `last_known_status` e
+`last_known_updated_at`, gravados somente após respostas confirmadas do MCP. O
+Principal usa esses campos para apresentar o último estado conhecido caso uma
+consulta posterior de status falhe; não persiste a resposta completa do
+provider. Documentos existentes podem não ter esses campos.
+
 Os campos de relatórios e e-mail acima são tipos BSON string/array/documento,
 datas BSON Date e inteiros conforme seus modelos. UUIDs funcionais são strings,
 não BSON Binary. O payload `envelope`/`prepared_report` segue os contratos

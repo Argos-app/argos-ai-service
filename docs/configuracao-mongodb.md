@@ -54,7 +54,7 @@ seguida do nome em maiúsculas:
 | `EMAIL_PREPARATIONS`            | `ai_email_preparations`            | Preparações de e-mail criadas pelo principal.                                         |
 | `PENDING_RECIPIENT_RESOLUTIONS` | `ai_pending_recipient_resolutions` | Resoluções pendentes de destinatário.                                                 |
 | `EMAIL_SEND_AUTHORIZATIONS`     | `ai_email_send_authorizations`     | Autorizações de envio.                                                                |
-| `EMAIL_OPERATION_REFERENCES`    | `ai_email_operation_references`    | Referências idempotentes das operações de e-mail.                                     |
+| `EMAIL_OPERATION_REFERENCES`    | `ai_email_operation_references`    | Referências idempotentes e último estado conhecido das operações de e-mail.           |
 | `LANGGRAPH_CHECKPOINTS`         | `ai_langgraph_checkpoints`         | Checkpoints do grafo.                                                                 |
 | `LANGGRAPH_CHECKPOINT_WRITES`   | `ai_langgraph_checkpoint_writes`   | Escritas do checkpointer.                                                             |
 
