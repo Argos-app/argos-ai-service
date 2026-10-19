@@ -32,6 +32,7 @@ jobs:
                       pylock.toml
                       apps/main_api/requirements.txt
                       apps/mcp_email/requirements.txt
+                      apps/mcp_email/tests/integration/requirements.txt
                       apps/mcp_data/requirements.txt
                       apps/mcp_data/tests/integration/requirements.txt
                       apps/mcp_prediction/requirements.txt
@@ -91,6 +92,14 @@ jobs:
             - name: Stop integrated local stack
               if: always()
               run: docker compose --profile apps --file compose.yaml down --volumes --remove-orphans
+
+            - name: Build standalone A2A image
+              run: docker build --file apps/a2a_agent/Dockerfile --tag argos-a2a-agent:ci .
+
+            - name: Validate standalone A2A Compose
+              run: |
+                  cp apps/a2a_agent/.env.example apps/a2a_agent/.env
+                  docker compose --env-file apps/a2a_agent/.env.example --file apps/a2a_agent/compose.yaml config --quiet
 
             - name: Set up Node.js
               uses: actions/setup-node@v4

@@ -1593,6 +1593,8 @@ async def executar_resposta(
 def build_session_config(
     session_id: str,
     config: RunnableConfig | None,
+    *,
+    checkpoint_namespace: str | None = None,
 ) -> RunnableConfig:
     merged_config: RunnableConfig = dict(config or {})
     configurable = dict(merged_config.get("configurable") or {})
