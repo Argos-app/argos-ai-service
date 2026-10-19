@@ -12,6 +12,7 @@ import pytest
 from app.application.email_dispatch_workflow import (
     EmailDispatchWorkflow,
     _recipient_selectors_match,
+    _safe_result,
 )
 from app.application.email_workflow import EmailWorkflow, _fingerprint
 from app.domain.email_preparations import (
@@ -532,6 +533,20 @@ def _dispatch_result(report_id, operation_id=None, status=DispatchStatus.ACCEPTE
     )
 
 
+def test_dispatch_result_carries_structured_status_and_recipient_count():
+    report_id = uuid4()
+    result = _dispatch_result(report_id)
+
+    payload = json.loads(_safe_result(result, recipient_count=5))
+
+    assert payload["status"] == "accepted"
+    assert payload["confirmed"] is True
+    assert payload["report_id"] == str(report_id)
+    assert payload["operation_id"] == str(result.operation_id)
+    assert payload["recipient_count"] == 5
+    assert "não confirma a entrega" in payload["message"]
+
+
 def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
     artifact, property_id = _artifact()
     prepared = PreparedReport(
@@ -706,7 +721,12 @@ def test_recover_interaction_outcome_reads_mcp_without_resending():
 
     summary = asyncio.run(workflow.recover_interaction_outcome(configurable=config))
 
-    assert summary == "O MCP confirmou o recebimento do envio; isso não confirma a entrega."
+    recovered = json.loads(summary)
+    assert recovered["status"] == "accepted"
+    assert recovered["confirmed"] is True
+    assert recovered["operation_id"] == str(sent.operation_id)
+    assert recovered["recipient_count"] == 1
+    assert "não confirma a entrega" in recovered["message"]
     assert [name for name, *_ in client.calls] == ["get_report_status"]
 
 

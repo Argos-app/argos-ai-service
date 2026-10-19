@@ -36,7 +36,6 @@ class RouterInput(_AgentInput):
 
     message: str = Field(min_length=1)
     session_context: SessionContext = Field(default_factory=SessionContext)
-    routing_feedback: str | None = Field(default=None, max_length=1_000)
 
 
 class DependencyEvidence(_AgentInput):
@@ -70,6 +69,7 @@ class SpecialistInput(_AgentInput):
     dependency_results: tuple[DependencyResult, ...] = ()
     session_context: SessionContext = Field(default_factory=SessionContext)
     email_preparation_count: int | None = Field(default=None, ge=0, le=20)
+    email_send_authorized: bool = False
 
 
 class QuestionOption(_AgentInput):

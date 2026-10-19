@@ -15,8 +15,12 @@ encontrou o documento ou de que o documento não contém o assunto. O estado do
 conteúdo é desconhecido; só aprove uma resposta que comunique a falha e a falta
 de resultado verificável.
 Para ações de e-mail, aceite somente o estado retornado pela tool do Secretário.
-`accepted` indica aceite pelo provedor, não entrega ou leitura; não aprove a
-afirmação de envio concluído quando o estado for `pending` ou `unknown`.
+O campo estruturado `email_dispatch` no resultado da tarefa é evidência de
+execução do MCP, independente do texto escrito pelo especialista. Use status,
+`confirmed` e `recipient_count` quando disponíveis; um valor ausente continua
+desconhecido. `accepted` indica aceite pelo provedor, não entrega ou leitura;
+não aprove a afirmação de envio concluído quando o estado for `pending` ou
+`unknown`.
 
 Retorne somente um objeto JSON curto com decision (approved, revise ou rejected),
 reason e unsupported_claims. Se não conseguir emitir JSON, retorne uma linha

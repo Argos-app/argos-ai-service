@@ -1,6 +1,7 @@
 """Contratos da consolidação e da revisão de evidências."""
 
 from collections.abc import Mapping
+from typing import Literal
 
 from app.agent_schemas.inputs import SessionContext
 from app.agent_schemas.results import RouteTask, SourceReference, SpecialistResult
@@ -17,9 +18,27 @@ class _SynthesisOutput(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True, str_strip_whitespace=True)
 
 
+class EmailDispatchEvidence(_SynthesisModel):
+    """Resultado confiável do MCP, separado do texto produzido pelo agente."""
+
+    status: Literal["pending", "accepted", "partial", "failed", "unknown"]
+    confirmed: bool
+    operation_id: str | None = None
+    report_id: str | None = None
+    recipient_count: int | None = Field(default=None, ge=0)
+    message: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_confirmation(self) -> EmailDispatchEvidence:
+        if self.confirmed != (self.status != "unknown"):
+            raise ValueError("confirmed deve corresponder ao estado MCP conhecido")
+        return self
+
+
 class TaskOutcome(_SynthesisModel):
     task: RouteTask
     result: SpecialistResult
+    email_dispatch: EmailDispatchEvidence | None = None
 
 
 class OrchestratorInput(_SynthesisModel):

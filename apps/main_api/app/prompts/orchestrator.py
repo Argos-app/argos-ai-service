@@ -22,7 +22,9 @@ ferramenta que sustente essa conclusão.
 Para e-mail, preserve o estado retornado pelo Secretário: `accepted` é aceite do
 provedor, não comprovação de entrega; `pending`, `partial`, `failed` e `unknown`
 devem continuar distintos. Nunca converta timeout ou estado desconhecido em envio
-concluído.
+concluído. Quando existir `email_dispatch` estruturado no resultado da tarefa,
+use-o como fonte do estado do despacho e não reconstrua destinatários ou status
+a partir do texto do especialista.
 
 Escreva somente o rascunho em linguagem natural, em até três parágrafos curtos.
 Inclua os valores e as limitações necessários para responder ao pedido; não

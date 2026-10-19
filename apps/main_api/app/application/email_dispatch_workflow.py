@@ -58,9 +58,8 @@ def _recipient_selectors_match(
         matches = [
             index
             for index in unmatched
-            if normalized == normalize(
-                recipients[index].name if kind == "name" else recipients[index].email
-            )
+            if normalized
+            == normalize(recipients[index].name if kind == "name" else recipients[index].email)
         ]
         if len(matches) != 1:
             return False
@@ -68,18 +67,28 @@ def _recipient_selectors_match(
     return not unmatched
 
 
-def _safe_result(result: SendReportResult, *, recovered: bool = False) -> str:
+def _safe_result(
+    result: SendReportResult,
+    *,
+    recovered: bool = False,
+    recipient_count: int | None = None,
+) -> str:
     labels = {
         DispatchStatus.PENDING: "O envio está em processamento.",
-        DispatchStatus.ACCEPTED: "O MCP confirmou o recebimento do envio.",
-        DispatchStatus.PARTIAL: "O MCP confirmou um envio parcial.",
+        DispatchStatus.ACCEPTED: ("O provedor aceitou o despacho; isso não confirma a entrega."),
+        DispatchStatus.PARTIAL: (
+            "O MCP confirmou um despacho parcial; a entrega não está confirmada."
+        ),
         DispatchStatus.FAILED: "O MCP confirmou que o envio falhou.",
         DispatchStatus.UNKNOWN: "O estado do envio ainda não foi confirmado.",
     }
     return json.dumps(
         {
             "status": result.status.value,
+            "confirmed": result.status != DispatchStatus.UNKNOWN,
+            "operation_id": str(result.operation_id),
             "report_id": str(result.report_id),
+            "recipient_count": recipient_count,
             "recovered": recovered,
             "message": labels[result.status],
         },
@@ -92,7 +101,7 @@ def _safe_unconfirmed() -> str:
         {
             "status": DispatchStatus.UNKNOWN.value,
             "confirmed": False,
-            "message": "O resultado do envio não foi confirmado; não solicite outro envio.",
+            "message": "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado.",
         },
         ensure_ascii=False,
     )
@@ -223,7 +232,7 @@ class EmailDispatchWorkflow:
                 recorded_at=datetime.now(UTC),
             )
         )
-        return _safe_result(result)
+        return _safe_result(result, recipient_count=len(prepared.recipients))
 
     async def _authorize_prepared_confirmation(
         self,
@@ -367,7 +376,7 @@ class EmailDispatchWorkflow:
         )
 
     async def _recover_interaction_outcome(self, *, configurable: dict[str, Any]) -> str | None:
-        """Return a deterministic public summary for a send linked to this request.
+        """Return structured, authoritative dispatch evidence for this request.
 
         This only reads the authorization/reference already persisted by the main API and asks
         the MCP for its current status. It never initiates or retries a dispatch.
@@ -391,27 +400,9 @@ class EmailDispatchWorkflow:
             )
             if reference is None:
                 return None
-            result = json.loads(
-                await self._refresh_status(authorization, reference, principal_user_id)
-            )
+            return await self._refresh_status(authorization, reference, principal_user_id)
         except Exception:
-            return "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado."
-
-        summaries = {
-            DispatchStatus.PENDING.value: "O envio está em processamento.",
-            DispatchStatus.ACCEPTED.value: (
-                "O MCP confirmou o recebimento do envio; isso não confirma a entrega."
-            ),
-            DispatchStatus.PARTIAL.value: "O MCP confirmou um envio parcial.",
-            DispatchStatus.FAILED.value: "O MCP confirmou que o envio falhou.",
-            DispatchStatus.UNKNOWN.value: (
-                "O MCP ainda não confirmou o estado do envio; nenhum novo envio foi solicitado."
-            ),
-        }
-        return summaries.get(
-            result.get("status"),
-            "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado.",
-        )
+            return _safe_unconfirmed()
 
     async def _observe_workflow(self, name, operation, *, recovered=False, **kwargs):
         if self._observation_collector is None:
@@ -503,7 +494,24 @@ class EmailDispatchWorkflow:
             self._validate_result(result, authorization.report_id)
         except Exception:
             return _safe_unconfirmed()
-        return _safe_result(result, recovered=True)
+        recipient_count = None
+        try:
+            preparation = await self._preparations.get_by_reference(
+                reference=authorization.preparation_reference,
+                principal_user_id=principal_user_id,
+                session_id=authorization.session_id,
+            )
+            if preparation is not None:
+                recipient_count = len(preparation.prepared_report.recipients)
+        except Exception:
+            # Status remains authoritative even when the optional count cannot
+            # be recovered from the preparation repository.
+            pass
+        return _safe_result(
+            result,
+            recovered=True,
+            recipient_count=recipient_count,
+        )
 
     @staticmethod
     def _validate_result(result: SendReportResult, report_id: UUID) -> None:

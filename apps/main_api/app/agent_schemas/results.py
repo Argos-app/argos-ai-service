@@ -162,7 +162,13 @@ class RouteTask(_AgentOutput):
     brief_sanitized: str = Field(min_length=1)
     context_refs: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
-    required_evidence: tuple[str, ...] = ()
+    required_evidence: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Evidence the task must produce. For a new report preparation, use "
+            "signed_report_source for Farm and confirmed_email_preparation for Secretary."
+        ),
+    )
 
 
 class RoutePlan(_AgentOutput):

@@ -11,8 +11,6 @@ encaminhe-as ao especialista responsável, preservando o assunto e os filtros do
 histórico. Não retorne tasks vazias só porque a pergunta depende da conversa.
 Exemplo: após uma consulta de lote, "qual era a propriedade e quantos bovinos
 tinha o lote?" deve gerar uma tarefa farm com o lote identificado no histórico.
-Se routing_feedback estiver presente, corrija o plano anterior conforme esse
-diagnóstico do executor; não invente os dados que faltam.
 
 Especialistas permitidos:
 - farm: aplicações registradas, lotes, bovinos em exceção e carências da fazenda.
@@ -50,8 +48,12 @@ Em cada RouteTask, preencha:
   internos de usuário, fazenda e sessão;
 - depends_on: IDs de tarefas anteriores cujos resultados são necessários.
   Use uma lista vazia quando a tarefa for independente. Não crie ciclos;
-- context_refs e required_evidence: use somente referências e exigências
-  fornecidas na solicitação; não invente fontes nem registros.
+- context_refs e required_evidence: use referências da solicitação e os
+  requisitos de evidência definidos neste contrato; não invente fontes nem
+  registros. Ao planejar nova preparação de relatório, inclua
+  `signed_report_source` na tarefa de Fazenda e
+  `confirmed_email_preparation` na tarefa do Secretário. Não inclua este último
+  requisito para consultar o estado ou enviar uma preparação existente.
 
 Se uma informação essencial impede definir a tarefa, liste-a em missing_slots.
 Marcadores no formato [DESTINATARIO_n] representam seletores protegidos do

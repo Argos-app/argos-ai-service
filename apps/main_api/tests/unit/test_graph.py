@@ -19,7 +19,7 @@ from app.agent_schemas.results import (
     SourceReference,
     SpecialistResult,
 )
-from app.agent_schemas.synthesis import OrchestratorResult, TaskOutcome
+from app.agent_schemas.synthesis import EmailDispatchEvidence, OrchestratorResult, TaskOutcome
 from app.graph.workflow import (
     NO_VERIFIED_RESULT_ANSWER,
     ROUTER_UNAVAILABLE_ANSWER,
@@ -87,37 +87,33 @@ def test_synthesis_timeout_leaves_room_for_agent_output_persistence():
 
 
 @pytest.mark.asyncio
-async def test_empty_followup_route_is_repaired_once_with_original_context():
+async def test_router_uses_followup_context_without_keyword_retry():
     history = SessionContext(
         recent_messages=(
             ContextMessage(role="user", content="Consulte o lote HC-LOTE-001"),
             ContextMessage(role="assistant", content="Fazenda Sol Nascente, 49 bovinos"),
         )
     )
-    router = FakeAgent(
-        RoutePlan(intent="Consultar o resultado anterior"),
-        RoutePlan(intent="Consultar lote anterior", tasks=(task(),)),
-    )
+    router = FakeAgent(RoutePlan(intent="Consultar lote anterior", tasks=(task(),)))
     state = request_state("Pelo resultado da consulta anterior, qual era a propriedade?")
     state["sanitized_message"] = "Pelo resultado da consulta anterior, qual era a propriedade?"
     state["session_context"] = history
     update = await no_roteador(state, factory=FakeFactory(router=router))
     assert update["route"] == ["farm"]
-    assert len(router.calls) == 2
-    assert router.calls[1][0].session_context.recent_messages == history.recent_messages
-    assert router.calls[1][0].routing_feedback
+    assert len(router.calls) == 1
+    assert router.calls[0][0].session_context.recent_messages == history.recent_messages
 
 
 @pytest.mark.asyncio
-async def test_repeated_empty_followup_route_requests_clarification_without_looping():
-    router = FakeAgent(RoutePlan(intent="anterior"), RoutePlan(intent="anterior"))
+async def test_empty_route_is_not_retried_or_rewritten_by_keyword_rules():
+    router = FakeAgent(RoutePlan(intent="anterior"))
     state = request_state("Qual era o resultado anterior?")
     state["sanitized_message"] = "Qual era o resultado anterior?"
     state["session_context"] = SessionContext(session_summary="Consulta de um lote")
     update = await no_roteador(state, factory=FakeFactory(router=router))
-    assert len(router.calls) == 2
-    assert update["missing_fields"] == ["resultado anterior"]
-    assert "final_answer" not in update
+    assert len(router.calls) == 1
+    assert "missing_fields" not in update
+    assert "Não consegui identificar" in update["final_answer"]
 
 
 @pytest.mark.asyncio
@@ -698,6 +694,7 @@ async def test_judge_receives_all_trusted_tool_evidence_even_if_draft_omits_sour
                     answer="O lote tem 49 bovinos.",
                     sources=(source,),
                 ),
+                email_dispatch=None,
             ),
         ),
         sources=[source],
@@ -716,6 +713,43 @@ async def test_judge_receives_all_trusted_tool_evidence_even_if_draft_omits_sour
     assert outcome_source.title == source.title
     assert outcome_source.excerpt is None
     assert judge_input.sources[0] == source
+
+
+@pytest.mark.asyncio
+async def test_judge_receives_structured_dispatch_evidence_separate_from_agent_text():
+    state = request_state("Envie o relatório para cinco destinatários autorizados.")
+    state.update(
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="secretary"),
+                result=SpecialistResult(
+                    agent="secretary",
+                    status="success",
+                    answer="Enviei cinco cópias e todas foram entregues.",
+                ),
+                email_dispatch=EmailDispatchEvidence(
+                    status="accepted",
+                    confirmed=True,
+                    operation_id="operation-1",
+                    report_id="report-1",
+                    recipient_count=5,
+                    message="O provedor aceitou o despacho; isso não confirma a entrega.",
+                ),
+            ),
+        ),
+        draft_result=OrchestratorResult(
+            draft_answer="O provedor aceitou o despacho para cinco destinatários."
+        ),
+    )
+    judge = FakeAgent(JudgeResult(decision="approved", reason="Evidência explícita recebida."))
+
+    await no_juiz(state, factory=FakeFactory(judge=judge))
+
+    evidence = judge.calls[0][0].outcomes[0].email_dispatch
+    assert evidence is not None
+    assert evidence.status == "accepted"
+    assert evidence.recipient_count == 5
+    assert "não confirma a entrega" in evidence.message
 
 
 @pytest.mark.asyncio
@@ -790,22 +824,18 @@ def request_state(message: str = "Quais aplicações existem?") -> dict:
 
 
 @pytest.mark.asyncio
-async def test_report_route_enforces_signed_farm_source_before_secretary():
+async def test_report_keyword_does_not_inject_farm_into_router_plan():
     router = FakeAgent(RoutePlan(intent="preparar relatório", tasks=(task(agent="secretary"),)))
 
     state = request_state("Envie o relatório do lote HC-LOTE-001 por e-mail.")
     state["sanitized_message"] = "Envie o relatório do lote HC-LOTE-001 por e-mail."
     update = await no_roteador(state, factory=FakeFactory(router=router))
 
-    assert [item.agent.value for item in update["ordered_tasks"]] == ["farm", "secretary"]
-    farm_task, secretary_task = update["ordered_tasks"]
-    assert secretary_task.depends_on == (farm_task.task_id,)
-    assert "signed_report_source" in farm_task.required_evidence
-    assert "resolve_report_lot_report_source" in farm_task.brief_sanitized
+    assert [item.agent.value for item in update["ordered_tasks"]] == ["secretary"]
 
 
 @pytest.mark.asyncio
-async def test_report_route_adds_secretary_when_router_only_plans_farm():
+async def test_report_keyword_does_not_inject_secretary_into_router_plan():
     router = FakeAgent(RoutePlan(intent="obter origem", tasks=(task(agent="farm"),)))
 
     state = request_state(
@@ -816,9 +846,32 @@ async def test_report_route_adds_secretary_when_router_only_plans_farm():
     )
     update = await no_roteador(state, factory=FakeFactory(router=router))
 
+    assert [item.agent.value for item in update["ordered_tasks"]] == ["farm"]
+
+
+@pytest.mark.asyncio
+async def test_router_planned_report_dependency_is_preserved():
+    router = FakeAgent(
+        RoutePlan(
+            intent="preparar relatório",
+            tasks=(
+                task(task_id="farm-source", agent="farm"),
+                task(
+                    task_id="prepare-email",
+                    agent="secretary",
+                    depends_on=("farm-source",),
+                    required_evidence=("confirmed_email_preparation",),
+                ),
+            ),
+        )
+    )
+
+    state = request_state("Prepare o relatório do lote HC-LOTE-001 para conferência.")
+    update = await no_roteador(state, factory=FakeFactory(router=router))
+
     assert [item.agent.value for item in update["ordered_tasks"]] == ["farm", "secretary"]
-    farm_task, secretary_task = update["ordered_tasks"]
-    assert secretary_task.depends_on == (farm_task.task_id,)
+    assert update["ordered_tasks"][1].depends_on == ("farm-source",)
+    assert "confirmed_email_preparation" in update["ordered_tasks"][1].required_evidence
 
 
 @pytest.mark.asyncio
@@ -853,7 +906,9 @@ async def test_secretary_cannot_claim_new_report_prepared_without_mcp_record():
         session_id=str(session),
         interaction_id=str(interaction),
         sanitized_message="Prepare o relatório do lote HC-LOTE-001 para conferência.",
-        ordered_tasks=(task(agent="secretary"),),
+        ordered_tasks=(
+            task(agent="secretary", required_evidence=("confirmed_email_preparation",)),
+        ),
         current_task_index=0,
     )
     result = SpecialistResult(
@@ -894,13 +949,20 @@ class RecordingGraph:
         return state
 
 
-def task(task_id: str = "t1", *, agent: str = "farm", depends_on: tuple[str, ...] = ()):
+def task(
+    task_id: str = "t1",
+    *,
+    agent: str = "farm",
+    depends_on: tuple[str, ...] = (),
+    required_evidence: tuple[str, ...] = (),
+):
     return RouteTask(
         task_id=task_id,
         agent=agent,
         goal="Consultar dados",
         brief_sanitized="Consultar dados autorizados",
         depends_on=depends_on,
+        required_evidence=required_evidence,
     )
 
 

@@ -26,6 +26,7 @@ from app.agent_schemas.results import (
     SpecialistStatus,
 )
 from app.agent_schemas.synthesis import (
+    EmailDispatchEvidence,
     JudgeInput,
     OrchestratorInput,
     OrchestratorResult,
@@ -172,26 +173,6 @@ def _unconfirmed_email_preparation(state: AgentState) -> str | None:
     return None
 
 
-_REPORT_WORD_PATTERN = re.compile(r"\brelat[óo]rio\b", re.IGNORECASE)
-_REPORT_ACTION_PATTERN = re.compile(
-    r"\b(?:prepar\w*|ger\w*|cri\w*|mont\w*|envie|enviar|mande|mandar|"
-    r"encaminhe|encaminhar)\b",
-    re.IGNORECASE,
-)
-_EXISTING_REPORT_PATTERN = re.compile(
-    r"\b(?:já\s+)?(?:(?:está|foi|estava)\s+)?(?:preparad\w*|gerad\w*|criad\w*)\b",
-    re.IGNORECASE,
-)
-
-
-def _requires_new_report_preparation(message: str) -> bool:
-    return bool(
-        _REPORT_WORD_PATTERN.search(message)
-        and _REPORT_ACTION_PATTERN.search(message)
-        and not _EXISTING_REPORT_PATTERN.search(message)
-    )
-
-
 def build_agent_context(
     state: AgentState,
     *,
@@ -254,6 +235,7 @@ def reset_turn_state() -> dict:
         "send_intent_requested": False,
         "send_intent_source_interaction_id": None,
         "email_action_summary": None,
+        "email_dispatch_evidence": None,
         "email_preparation_confirmed": False,
         "sanitized_message": "",
         "route": [],
@@ -386,88 +368,6 @@ def unique_sources(sources: list[SourceReference]) -> list[SourceReference]:
         if source not in unique:
             unique.append(source)
     return unique
-
-
-def _require_report_source_dependency(plan: RoutePlan, message: str) -> RoutePlan:
-    """Impõe Fazenda → Secretário para gerar/enviar um relatório-fonte novo."""
-    if not _requires_new_report_preparation(message) or plan.missing_slots:
-        return plan
-    tasks = list(plan.tasks)
-    secretary_tasks = [task for task in tasks if task.agent == AgentId.SECRETARY]
-    if not secretary_tasks:
-        if len(tasks) >= MAX_TASKS:
-            raise ValueError("too_many_tasks_for_report_preparation")
-        task_id = "report-email"
-        suffix = 2
-        while any(task.task_id == task_id for task in tasks):
-            task_id = f"report-email-{suffix}"
-            suffix += 1
-        secretary_tasks = [
-            RouteTask(
-                task_id=task_id,
-                agent=AgentId.SECRETARY,
-                goal=(
-                    "Preparar o relatório solicitado e confirmar seu estado sem enviar "
-                    "sem autorização"
-                ),
-                brief_sanitized=(
-                    "Preparar o relatório solicitado usando a origem assinada da tarefa Fazenda; "
-                    "se houver destinatários, localizá-los pelo fluxo autorizado. Não afirmar "
-                    "que o relatório foi preparado sem sucesso confirmado pelo MCP de e-mail."
-                ),
-                depends_on=(),
-            )
-        ]
-        tasks.extend(secretary_tasks)
-
-    farm_tasks = [task for task in tasks if task.agent == AgentId.FARM]
-    if not farm_tasks and len(tasks) < MAX_TASKS:
-        task_id = "report-source"
-        suffix = 2
-        while any(task.task_id == task_id for task in tasks):
-            task_id = f"report-source-{suffix}"
-            suffix += 1
-        farm_tasks = [
-            RouteTask(
-                task_id=task_id,
-                agent=AgentId.FARM,
-                goal="Resolver a fonte assinada do relatório solicitado",
-                brief_sanitized=(
-                    "Resolver o lote e obter a fonte assinada do relatório com "
-                    "resolve_report_lot_report_source; não substituir por list_lots."
-                ),
-                required_evidence=("signed_report_source",),
-            )
-        ]
-        tasks.insert(0, farm_tasks[0])
-    elif not farm_tasks:
-        raise ValueError("too_many_tasks_for_report_source")
-
-    farm_ids = {task.task_id for task in farm_tasks}
-    if not farm_ids:
-        return plan
-    required_instruction = (
-        "Este relatório será preparado pelo Secretário. Como requisito obrigatório, "
-        "chame resolve_report_lot_report_source com o lote identificado; list_lots "
-        "sozinho não fornece o artefato assinado."
-    )
-    normalized_tasks: list[RouteTask] = []
-    for task in tasks:
-        if task.agent == AgentId.FARM and task.task_id in farm_ids:
-            task = task.model_copy(
-                update={
-                    "brief_sanitized": f"{task.brief_sanitized}\n{required_instruction}",
-                    "required_evidence": tuple(
-                        dict.fromkeys((*task.required_evidence, "signed_report_source"))
-                    ),
-                }
-            )
-        elif task.agent == AgentId.SECRETARY:
-            task = task.model_copy(
-                update={"depends_on": tuple(dict.fromkeys((*task.depends_on, *farm_ids)))}
-            )
-        normalized_tasks.append(task)
-    return plan.model_copy(update={"tasks": tuple(normalized_tasks)})
 
 
 def _canonicalize_sources(
@@ -633,33 +533,6 @@ async def no_roteador(
             context=build_agent_context(state, config=config),
         )
         plan = RoutePlan.model_validate(response)
-        history = _history_context(state)
-        if (
-            not plan.tasks
-            and not plan.missing_slots
-            and (history.recent_messages or history.session_summary)
-            and re.search(
-                r"\b(?:anterior|anteriores|antes|isso|mesmo lote|qual era|quantos .* tinha)\b",
-                state["sanitized_message"],
-                re.IGNORECASE,
-            )
-        ):
-            response = await factory.create(AgentId.ROUTER).run(
-                RouterInput(
-                    message=state["sanitized_message"],
-                    session_context=history,
-                    routing_feedback=(
-                        "O plano vazio não resolve a referência ao histórico. Encaminhe "
-                        "a pergunta de acompanhamento ao especialista do assunto anterior. "
-                        "Se o histórico não identificar o assunto, use missing_slots."
-                    ),
-                ),
-                context=build_agent_context(state, config=config),
-            )
-            plan = RoutePlan.model_validate(response)
-            if not plan.tasks and not plan.missing_slots:
-                plan = plan.model_copy(update={"missing_slots": ("resultado anterior",)})
-        plan = _require_report_source_dependency(plan, state["sanitized_message"])
         ordered = order_tasks(plan)
     except ExecutionEventWriteError:
         raise
@@ -861,6 +734,11 @@ async def no_especialista(
             required_evidence=task.required_evidence,
             dependency_results=dependency_results,
             session_context=_history_context(state),
+            email_send_authorized=(
+                state.get("send_intent_requested", False)
+                if agent_id == AgentId.SECRETARY
+                else False
+            ),
         )
         called.append(agent_id.value)
         try:
@@ -1030,9 +908,10 @@ async def no_especialista(
                 answer="É necessário resolver um destinatário antes de preparar o relatório.",
                 missing_fields=("recipient",),
             )
-        elif _requires_new_report_preparation(
-            state.get("sanitized_message", "")
-        ) and result.status in {SpecialistStatus.SUCCESS, SpecialistStatus.PARTIAL}:
+        elif "confirmed_email_preparation" in task.required_evidence and result.status in {
+            SpecialistStatus.SUCCESS,
+            SpecialistStatus.PARTIAL,
+        }:
             try:
                 preparations = await email_preparations.list_prepared_for_session(
                     principal_user_id=UUID(str(configurable["argos_user_id"])),
@@ -1094,6 +973,7 @@ async def no_especialista(
                 errors.append("email_preparation_recovery_unavailable")
 
     email_action_summary = None
+    email_dispatch_evidence = None
     if (
         agent_id == AgentId.SECRETARY
         and email_dispatch is not None
@@ -1108,11 +988,25 @@ async def no_especialista(
                 "argos_send_intent_source_interaction_id",
                 state["send_intent_source_interaction_id"],
             )
-        email_action_summary = await email_dispatch.recover_interaction_outcome(
+        dispatch_result = await email_dispatch.recover_interaction_outcome(
             configurable=recovery_context
         )
+        if dispatch_result is not None:
+            try:
+                email_dispatch_evidence = EmailDispatchEvidence.model_validate_json(dispatch_result)
+                email_action_summary = email_dispatch_evidence.message
+            except ValueError, TypeError:
+                # A legacy or malformed provider payload is never presented as
+                # confirmed dispatch evidence.
+                email_action_summary = (
+                    "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado."
+                )
 
-    outcome = TaskOutcome(task=task, result=result)
+    outcome = TaskOutcome(
+        task=task,
+        result=result,
+        email_dispatch=email_dispatch_evidence,
+    )
     if result.status == SpecialistStatus.ABSTAIN:
         errors.append(f"{agent_id.value}_abstained")
     elif result.status == SpecialistStatus.PARTIAL:
@@ -1132,6 +1026,8 @@ async def no_especialista(
     }
     if email_action_summary is not None:
         update["email_action_summary"] = email_action_summary
+    if email_dispatch_evidence is not None:
+        update["email_dispatch_evidence"] = email_dispatch_evidence
     if email_preparation_confirmed:
         update["email_preparation_confirmed"] = True
     if agent_id == AgentId.SECRETARY and result.error in {
