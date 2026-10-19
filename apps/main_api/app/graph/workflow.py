@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
@@ -980,14 +981,7 @@ async def no_especialista(
         and state.get("send_intent_requested")
     ):
         configurable = (config or {}).get("configurable") or {}
-        recovery_context = dict(configurable)
-        recovery_context.setdefault("argos_user_id", state["user_id"])
-        recovery_context.setdefault("session_id", state["session_id"])
-        if state.get("send_intent_source_interaction_id"):
-            recovery_context.setdefault(
-                "argos_send_intent_source_interaction_id",
-                state["send_intent_source_interaction_id"],
-            )
+        recovery_context = _email_dispatch_recovery_context(state, configurable)
         dispatch_result = await email_dispatch.recover_interaction_outcome(
             configurable=recovery_context
         )
@@ -1350,6 +1344,21 @@ def _include_email_action_summary(answer: str, summary: str | None) -> str:
     if not summary:
         return answer
     return f"{answer}\n\nEstado do envio: {summary}"
+
+
+def _email_dispatch_recovery_context(
+    state: AgentState, configurable: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Build status lookup scope from the current turn's trusted graph state."""
+    context = dict(configurable)
+    # RunnableConfig can already contain stale or null values for these keys.
+    # The checkpointed state is authoritative for the operation being recovered.
+    context["argos_user_id"] = state["user_id"]
+    context["session_id"] = state["session_id"]
+    source_interaction_id = state.get("send_intent_source_interaction_id")
+    if source_interaction_id:
+        context["argos_send_intent_source_interaction_id"] = source_interaction_id
+    return context
 
 
 def _include_confirmed_email_preparation(answer: str | None, state: AgentState) -> str | None:

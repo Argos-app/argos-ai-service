@@ -348,6 +348,19 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             assert public_result["response"]["kind"] == "answer"
             public_text = public_result["response"]["text"]
             if expected_dispatch:
+                authorization = await mongo[database_name]["ai_email_send_authorizations"].find_one(
+                    {
+                        "principal_user_id": str(user_id),
+                        "session_id": session_id,
+                        "source_interaction_id": public_result["interaction_id"],
+                    }
+                )
+                assert authorization is not None
+                operation_reference = await mongo[database_name][
+                    "ai_email_operation_references"
+                ].find_one({"_id": authorization["_id"]})
+                assert operation_reference is not None
+                assert operation_reference["last_known_status"] == "accepted"
                 assert "O provedor aceitou o despacho" in public_text
                 assert "não confirma a entrega" in public_text
             else:

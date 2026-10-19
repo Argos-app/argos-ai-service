@@ -25,6 +25,7 @@ from app.graph.workflow import (
     ROUTER_UNAVAILABLE_ANSWER,
     SAFE_ANSWER,
     _agent_failure_reason,
+    _email_dispatch_recovery_context,
     answer_state,
     build_agent_context,
     build_graph,
@@ -1011,6 +1012,32 @@ def test_send_intent_is_only_added_to_secretary_tool_context():
     assert secretary_context["argos_send_intent_requested"] is True
     assert secretary_context["argos_send_intent_source_interaction_id"] == "interaction-origin"
     assert "argos_send_intent_requested" not in farm_context
+
+
+def test_email_recovery_uses_current_turn_identity_over_stale_config_values():
+    state = request_state()
+    state.update(
+        user_id="current-user",
+        session_id="current-session",
+        send_intent_source_interaction_id="current-interaction",
+    )
+
+    context = _email_dispatch_recovery_context(
+        state,
+        {
+            "argos_user_id": None,
+            "session_id": "old-session",
+            "argos_send_intent_source_interaction_id": "old-interaction",
+            "request_id": "preserved",
+        },
+    )
+
+    assert context == {
+        "argos_user_id": "current-user",
+        "session_id": "current-session",
+        "argos_send_intent_source_interaction_id": "current-interaction",
+        "request_id": "preserved",
+    }
 
 
 def test_clarification_guardrail_preserves_recipients_and_source_intent():
