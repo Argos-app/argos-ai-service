@@ -9,19 +9,19 @@ mobile ficam em outros repositórios.
 
 O principal tem contratos HTTP, grafo de agentes, Factory e Registry. Ele usa
 Mongo para sessões, mensagens, eventos de execução, checkpoints, resumos e
-preferências limitadas do usuário. A API valida identidade JWT EdDSA do backend
-e vincula ferramentas LangChain aos MCPs configurados, com delegação por
-usuário, propriedade, agente e operação. O backend ainda não inclui `farm_ids`,
-então a criação de sessão permanece bloqueada até delegar o escopo autorizado. O
-runtime principal configura um modelo por agente (`MAIN_API_MODEL_ROUTER`,
-`MAIN_API_MODEL_FARM`, `MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`,
-`MAIN_API_MODEL_SECRETARY`, `MAIN_API_MODEL_INFORMATION`,
-`MAIN_API_MODEL_ORCHESTRATOR`, `MAIN_API_MODEL_JUDGE` e
-`MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são compartilhadas entre os
-agentes; cada variável pode apontar para o mesmo modelo ou para um modelo
-diferente. A sumarização de sessão e a extração de memória reutilizam o modelo
-do Router. Sem runtime válido, `/health/ready` retorna indisponível. Os testes
-injetam modelos simulados explicitamente por `create_app(models=...)`.
+preferências limitadas do usuário. A API valida o JWT próprio emitido após a
+troca do Firebase ID token e carrega do PostgreSQL as fazendas autorizadas em
+cada chamada. Ferramentas LangChain vinculam os MCPs configurados com delegação
+por usuário, propriedade, agente e operação. O runtime principal configura um
+modelo por agente (`MAIN_API_MODEL_ROUTER`, `MAIN_API_MODEL_FARM`,
+`MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`, `MAIN_API_MODEL_SECRETARY`,
+`MAIN_API_MODEL_INFORMATION`, `MAIN_API_MODEL_ORCHESTRATOR`,
+`MAIN_API_MODEL_JUDGE` e `MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são
+compartilhadas entre os agentes; cada variável pode apontar para o mesmo modelo
+ou para um modelo diferente. A sumarização de sessão e a extração de memória
+reutilizam o modelo do Router. Sem runtime válido, `/health/ready` retorna
+indisponível. Os testes injetam modelos simulados explicitamente por
+`create_app(models=...)`.
 
 ## Agentes
 
@@ -167,10 +167,10 @@ pois o Python não lê `.env` automaticamente:
 no host contra o Compose de testes, o URI usa `directConnection=true` porque o
 replica set anuncia um nome de host interno. O stub de identidade continua
 disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
-desse modo, configure a chave pública Ed25519 do backend em
-`MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
-agente e operações delegadas. O backend deve incluir `farm_ids` no token para
-que a API possa abrir sessões com o escopo autorizado. As decisões para a
+desse modo, as rotas da API exigem o JWT próprio emitido após a troca do
+Firebase ID token em `POST /v1/auth/firebase`. Configure o projeto Firebase, o
+acesso somente leitura ao PostgreSQL e a chave Ed25519 própria do `main_api`; as
+fazendas são carregadas do cadastro em cada chamada. As decisões para a
 integração Firebase, incluindo a associação pelo UID e o tratamento de cadastros
 legados, estão em
 [`docs/autenticacao-firebase-identidade.md`](docs/autenticacao-firebase-identidade.md).

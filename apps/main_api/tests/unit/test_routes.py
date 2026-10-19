@@ -83,7 +83,7 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
 
     with TestClient(
         main_module.create_app(
-            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            Settings(mongo_uri="mongodb://test", app_env="local", auth_mode="stub"),
             checkpointer=runtime_checkpointer,
         )
     ) as models_missing:
@@ -93,7 +93,7 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
 
     with TestClient(
         main_module.create_app(
-            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            Settings(mongo_uri="mongodb://test", app_env="local", auth_mode="stub"),
             models=_fake_models(),
             agent_graph=object(),
         )
@@ -103,7 +103,7 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
     runtime_checkpointer = None
     with TestClient(
         main_module.create_app(
-            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            Settings(mongo_uri="mongodb://test", app_env="local", auth_mode="stub"),
             models=_fake_models(),
         )
     ) as no_runtime:
@@ -115,12 +115,25 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
 def test_planned_routes_are_present() -> None:
     paths = app.openapi()["paths"]
     expected = {
+        ("/v1/auth/firebase", "post"),
         ("/v1/sessions", "post"),
         ("/v1/sessions", "get"),
         ("/v1/sessions/{session_id}/messages", "get"),
         ("/v1/sessions/{session_id}/interactions", "post"),
     }
     assert all(method in paths[path] for path, method in expected)
+    firebase_auth = paths["/v1/auth/firebase"]["post"]
+    assert "requestBody" not in firebase_auth
+    assert any(
+        parameter["name"].casefold() == "authorization" and parameter["in"] == "header"
+        for parameter in firebase_auth["parameters"]
+    )
+    assert firebase_auth["responses"]["200"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/AccessTokenResponse")
+    assert set(app.openapi()["components"]["schemas"]["AccessTokenResponse"]["properties"]) == {
+        "access_token"
+    }
     assert app.openapi()["components"]["schemas"]["InteractionResult"]["properties"]["status"][
         "enum"
     ] == ["completed", "degraded"]

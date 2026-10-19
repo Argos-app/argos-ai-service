@@ -279,6 +279,72 @@
           }
         }
       }
+    },
+    "/v1/auth/firebase": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Authenticate Firebase",
+        "description": "Troca Firebase ID token válido por JWT mínimo do serviço de IA.",
+        "operationId": "authenticate_firebase_v1_auth_firebase_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -789,6 +855,19 @@
         "type": "object",
         "required": ["loc", "msg", "type"],
         "title": "ValidationError"
+      },
+      "AccessTokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Access Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["access_token"],
+        "title": "AccessTokenResponse"
       }
     }
   }

@@ -105,17 +105,43 @@ regra de negócio explícita e validada para acesso global.
 
 ## Compatibilidade da implementação
 
-No runtime atual, `apps/main_api/app/api/v1/dependencies/auth.py` valida um JWT
-EdDSA delegado pelo backend e exige uma claim `operations`; as rotas aplicam uma
-operação individual. A autorização comum descrita acima é a regra alvo do fluxo
-Firebase, após existir validação do cadastro ativo e das fazendas no serviço.
-Remover agora as verificações da claim antiga ampliaria o acesso de tokens
-delegados sem a substituição equivalente e não faz parte desta etapa.
+O `main_api` agora possui um repositório PostgreSQL somente leitura para
+carregar esses campos e as fazendas vigentes. O pool é configurado por
+`MAIN_API_AUTH_DATABASE_URL`, usa timeout de conexão e consulta e verifica no
+startup o modo read-only, o acesso `SELECT` às quatro tabelas e a ausência de
+permissões de escrita efetivas da credencial. O Compose local conecta o serviço
+com o usuário `argos_reader`, já provisionado pelos scripts locais.
 
-A etapa seguinte precisa adicionar ao `main_api` o acesso PostgreSQL somente
-leitura e um adaptador para carregar o cadastro e as fazendas. Só então a rota
-Firebase poderá emitir um JWT mínimo, e as dependências poderão migrar do
-contexto delegado antigo para a identidade autenticada e revalidada no banco.
+O Firebase Admin SDK é inicializado quando `MAIN_API_FIREBASE_PROJECT_ID` está
+configurado. As credenciais vêm de `MAIN_API_FIREBASE_CREDENTIALS_FILE` (arquivo
+de service account montado como secret) ou de Application Default Credentials no
+ambiente. Com Firebase habilitado, `MAIN_API_AUTH_DATABASE_URL` também é
+obrigatório. `FirebaseAdminIdTokenVerifier` valida assinatura, validade e
+projeto do Firebase ID token e solicita ao Admin SDK a verificação de revogação
+e conta desativada. `FirebaseIdentityAuthenticator` extrai UID, e-mail opcional
+e `email_verified`, e busca `app_user.firebase_uid` exclusivamente pelo UID.
+E-mail ausente ou não verificado nunca é usado para localizar ou associar um
+cadastro.
+
+`POST /v1/auth/firebase` recebe o Firebase ID token no header Bearer, sem corpo,
+e devolve somente `{ "access_token": "..." }`. O Firebase autentica a
+identidade; o serviço busca o cadastro pelo UID e autoriza somente usuários
+ativos, não bloqueados, com permissão cadastral ativa e ao menos uma fazenda
+vigente.
+
+O JWT próprio é assinado com Ed25519 e contém somente o UUID Argos no `sub`,
+além de claims técnicos de emissor, audiência, identificador e validade. Cada
+chamada protegida valida essa assinatura e recarrega cadastro e fazendas por
+UUID no PostgreSQL. As três operações atuais da IA são comuns e atribuídas pelo
+serviço; permissões de fazenda vêm do banco, nunca de claims ou campos enviados
+pelo cliente. Mudanças de vínculo ou bloqueios cadastrais têm efeito nas
+chamadas seguintes.
+
+As rotas `/v1/` não aceitam JWTs do backend de identidade. O `AUTH_MODE=stub`
+continua disponível somente para desenvolvimento local; fora dele, Firebase,
+PostgreSQL read-only e a chave privada Ed25519 do emissor são obrigatórios. A
+validade padrão do JWT próprio é 15 minutos; o cliente renova obtendo um
+Firebase ID token atualizado e chamando novamente a rota de troca.
 
 ## Critérios para concluir a confirmação do ambiente
 

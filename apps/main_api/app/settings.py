@@ -85,6 +85,11 @@ class MongoCollectionSettings:
 class Settings:
     app_env: str = "production"
     mongo_uri: str | None = None
+    auth_database_url: str | None = field(default=None, repr=False)
+    auth_database_pool_min_size: int = 1
+    auth_database_pool_max_size: int = 5
+    auth_database_connect_timeout_seconds: float = 3.0
+    auth_database_query_timeout_seconds: float = 3.0
     mongo_database: str = "argos_ai"
     mongo_collections: MongoCollectionSettings = field(default_factory=MongoCollectionSettings)
     mongo_server_selection_timeout_ms: int = 5_000
@@ -99,12 +104,14 @@ class Settings:
     observability_retry_base_delay_ms: int = 50
     observability_shutdown_timeout_ms: int = 2_000
     session_summary_input_max_tokens: int = SESSION_SUMMARY_INPUT_MAX_TOKENS
-    auth_issuer: str = "argos-backend-service"
-    auth_audience: str = "argos-ai-service"
     auth_mode: str = "jwt"
-    auth_trusted_public_keys: tuple[tuple[str, str], ...] = ()
-    auth_token_max_ttl_seconds: int = 300
-    auth_clock_skew_seconds: int = 30
+    firebase_project_id: str | None = None
+    firebase_credentials_file: str | None = field(default=None, repr=False)
+    access_token_issuer: str = "argos-ai-service"
+    access_token_audience: str = "argos-ai-service-api"
+    access_token_key_id: str | None = None
+    access_token_private_key: str | None = field(default=None, repr=False)
+    access_token_ttl_seconds: int = 900
     mcp_data_url: str | None = None
     mcp_data_token: str | None = field(default=None, repr=False)
     mcp_data_report_trusted_signature_keys: tuple[tuple[str, str], ...] = ()
@@ -149,17 +156,6 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        raw_auth_keys = os.getenv("MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS", "{}")
-        try:
-            auth_keys = json.loads(raw_auth_keys)
-        except json.JSONDecodeError as exc:
-            raise ValueError("MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS deve ser JSON") from exc
-        if not isinstance(auth_keys, dict) or not all(
-            isinstance(key, str) and isinstance(value, str) for key, value in auth_keys.items()
-        ):
-            raise ValueError(
-                "MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS deve mapear IDs para chaves públicas Base64"
-            )
         raw_report_keys = os.getenv("MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS", "{}")
         try:
             report_keys = json.loads(raw_report_keys)
@@ -177,6 +173,15 @@ class Settings:
         return cls(
             app_env=os.getenv("APP_ENV", "production").strip().casefold(),
             mongo_uri=os.getenv("MAIN_API_MONGO_URI") or None,
+            auth_database_url=os.getenv("MAIN_API_AUTH_DATABASE_URL") or None,
+            auth_database_pool_min_size=int(os.getenv("MAIN_API_AUTH_DATABASE_POOL_MIN_SIZE", "1")),
+            auth_database_pool_max_size=int(os.getenv("MAIN_API_AUTH_DATABASE_POOL_MAX_SIZE", "5")),
+            auth_database_connect_timeout_seconds=float(
+                os.getenv("MAIN_API_AUTH_DATABASE_CONNECT_TIMEOUT_SECONDS", "3")
+            ),
+            auth_database_query_timeout_seconds=float(
+                os.getenv("MAIN_API_AUTH_DATABASE_QUERY_TIMEOUT_SECONDS", "3")
+            ),
             mongo_database=os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai"),
             mongo_collections=MongoCollectionSettings.from_env(),
             mongo_server_selection_timeout_ms=int(
@@ -210,12 +215,16 @@ class Settings:
                     str(SESSION_SUMMARY_INPUT_MAX_TOKENS),
                 )
             ),
-            auth_issuer=os.getenv("MAIN_API_AUTH_ISSUER", "argos-backend-service"),
-            auth_audience=os.getenv("MAIN_API_AUTH_AUDIENCE", "argos-ai-service"),
             auth_mode=os.getenv("AUTH_MODE", "jwt").strip().casefold(),
-            auth_trusted_public_keys=tuple(auth_keys.items()),
-            auth_token_max_ttl_seconds=int(os.getenv("MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS", "300")),
-            auth_clock_skew_seconds=int(os.getenv("MAIN_API_AUTH_CLOCK_SKEW_SECONDS", "30")),
+            firebase_project_id=os.getenv("MAIN_API_FIREBASE_PROJECT_ID") or None,
+            firebase_credentials_file=os.getenv("MAIN_API_FIREBASE_CREDENTIALS_FILE") or None,
+            access_token_issuer=os.getenv("MAIN_API_ACCESS_TOKEN_ISSUER", "argos-ai-service"),
+            access_token_audience=os.getenv(
+                "MAIN_API_ACCESS_TOKEN_AUDIENCE", "argos-ai-service-api"
+            ),
+            access_token_key_id=os.getenv("MAIN_API_ACCESS_TOKEN_KEY_ID") or None,
+            access_token_private_key=os.getenv("MAIN_API_ACCESS_TOKEN_PRIVATE_KEY") or None,
+            access_token_ttl_seconds=int(os.getenv("MAIN_API_ACCESS_TOKEN_TTL_SECONDS", "900")),
             mcp_data_url=os.getenv("MAIN_API_MCP_DATA_URL") or None,
             mcp_data_token=os.getenv("MAIN_API_MCP_DATA_TOKEN") or None,
             mcp_data_report_trusted_signature_keys=tuple(report_keys.items()),
@@ -266,6 +275,37 @@ class Settings:
     def __post_init__(self) -> None:
         if not self.mongo_database.strip():
             raise ValueError("MAIN_API_MONGO_DATABASE não pode estar vazio")
+        if self.auth_database_url is not None and not self.auth_database_url.strip():
+            raise ValueError("MAIN_API_AUTH_DATABASE_URL não pode estar vazio")
+        if self.firebase_project_id is not None and not self.firebase_project_id.strip():
+            raise ValueError("MAIN_API_FIREBASE_PROJECT_ID não pode estar vazio")
+        if (
+            self.firebase_credentials_file is not None
+            and not self.firebase_credentials_file.strip()
+        ):
+            raise ValueError("MAIN_API_FIREBASE_CREDENTIALS_FILE não pode estar vazio")
+        if self.firebase_credentials_file is not None and self.firebase_project_id is None:
+            raise ValueError(
+                "MAIN_API_FIREBASE_PROJECT_ID é obrigatório com credencial Firebase explícita"
+            )
+        if bool(self.access_token_key_id) != bool(self.access_token_private_key):
+            raise ValueError(
+                "MAIN_API_ACCESS_TOKEN_KEY_ID e MAIN_API_ACCESS_TOKEN_PRIVATE_KEY "
+                "devem ser configurados juntos"
+            )
+        if self.firebase_project_id is not None and not self.access_token_private_key:
+            raise ValueError(
+                "autenticação Firebase exige MAIN_API_ACCESS_TOKEN_KEY_ID e "
+                "MAIN_API_ACCESS_TOKEN_PRIVATE_KEY"
+            )
+        if (
+            self.auth_database_pool_min_size < 1
+            or self.auth_database_pool_max_size < self.auth_database_pool_min_size
+            or self.auth_database_pool_max_size > 20
+            or not 0 < self.auth_database_connect_timeout_seconds <= 30
+            or not 0 < self.auth_database_query_timeout_seconds <= 30
+        ):
+            raise ValueError("limites e timeouts de conexão PostgreSQL são inválidos")
         if self.model_thinking not in {"auto", "enabled", "disabled"}:
             raise ValueError("MAIN_API_MODEL_THINKING deve ser auto, enabled ou disabled")
         if self.observability_collection is not None and self.observability_collection in {
@@ -278,10 +318,9 @@ class Settings:
             or self.session_summary_input_max_tokens < 1
             or self.mcp_timeout_seconds <= 0
             or self.mcp_response_max_bytes < 1
-            or not self.auth_issuer.strip()
-            or not self.auth_audience.strip()
-            or not 1 <= self.auth_token_max_ttl_seconds <= 300
-            or not 0 <= self.auth_clock_skew_seconds <= 60
+            or not self.access_token_issuer.strip()
+            or not self.access_token_audience.strip()
+            or not 60 <= self.access_token_ttl_seconds <= 3600
             or not self.mcp_delegation_issuer.strip()
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
             or not 0 < self.document_a2a_timeout_seconds <= 60

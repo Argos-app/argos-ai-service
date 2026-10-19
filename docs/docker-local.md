@@ -53,16 +53,15 @@ cobrança do provider. O script cria essas duas variáveis vazias, então elas n
 ativam estimativas até serem preenchidas.
 
 Por padrão, o ambiente local usa `AUTH_MODE=stub`, que representa todos os
-requests como um único usuário sintético. Para validar o contrato de identidade
-do backend, configure no `.env` `AUTH_MODE=jwt`, `MAIN_API_AUTH_ISSUER`,
-`MAIN_API_AUTH_AUDIENCE` e `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`, depois recrie a
-API. O último campo é um objeto JSON que mapeia cada `kid` para a chave pública
-Ed25519 raw de 32 bytes, codificada em Base64. Configure somente chaves
-públicas; a chave privada permanece no backend que assina o token. Em modo JWT,
-cada token precisa conter a identidade, operações autorizadas e propriedades no
-contrato validado pela API. O teste local pode usar tokens sintéticos assinados;
-a homologação da integração real exige uma chave pública e um token emitido pelo
-backend de identidade do ambiente.
+requests como um único usuário sintético. Fora desse modo, o serviço aceita
+somente o JWT próprio obtido em `POST /v1/auth/firebase`: a rota valida o
+Firebase ID token e consulta o cadastro PostgreSQL. Configure o projeto
+Firebase, uma credencial Admin SDK (arquivo de service account montado como
+secret ou ADC), o DSN PostgreSQL somente leitura e
+`MAIN_API_ACCESS_TOKEN_KEY_ID` com `MAIN_API_ACCESS_TOKEN_PRIVATE_KEY` (chave
+Ed25519 PKCS#8 DER em Base64). O JWT carrega apenas o UUID interno do usuário;
+as fazendas são recarregadas do banco em cada chamada protegida. Tokens
+assinados pelo backend de identidade não são mais aceitos.
 
 ## Banco PostgreSQL e dados sintéticos
 

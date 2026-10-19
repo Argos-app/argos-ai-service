@@ -119,10 +119,10 @@ válidos em outros checkouts do repositório.
    [MongoExecutionEventRepository](../apps/main_api/app/infrastructure/persistence/mongo.py)
    usa `_id` único e verifica conflitos de conteúdo. Esse padrão é reutilizável,
    mas o repositório atual pertence à persistência conversacional.
-4. **Identidade do backend:**
-   [IdentityTokenVerifier](../apps/main_api/app/api/v1/dependencies/auth.py)
-   valida JWT EdDSA, issuer, audience, validade e operações delegadas. Há
-   autorização por operação nas dependências HTTP.
+4. **Identidade e acesso:**
+   [autenticação Firebase](../apps/main_api/app/api/v1/routes/auth.py) troca
+   Firebase ID tokens por JWT próprio. As dependências HTTP recarregam as
+   fazendas do usuário no PostgreSQL antes de autorizar cada chamada.
 5. **MCP real no principal:**
    [McpToolServerClient](../apps/main_api/app/infrastructure/mcp/client.py) abre
    sessão Streamable HTTP por operação, inicializa o protocolo, aplica

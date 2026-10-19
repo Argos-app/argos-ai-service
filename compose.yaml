@@ -84,17 +84,21 @@ services:
             dockerfile: apps/main_api/Dockerfile
         environment:
             MAIN_API_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MAIN_API_AUTH_DATABASE_URL: "postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}"
             MAIN_API_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
             USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
             MAIN_API_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
             MAIN_API_OBSERVABILITY_COLLECTION: ${MAIN_API_OBSERVABILITY_COLLECTION:-ai_observations}
             APP_ENV: ${APP_ENV:-local}
             AUTH_MODE: ${AUTH_MODE:-stub}
-            MAIN_API_AUTH_ISSUER: ${MAIN_API_AUTH_ISSUER:-argos-backend-service}
-            MAIN_API_AUTH_AUDIENCE: ${MAIN_API_AUTH_AUDIENCE:-argos-ai-service}
-            MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS: ${MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS:-{}}
-            MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS: ${MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS:-300}
-            MAIN_API_AUTH_CLOCK_SKEW_SECONDS: ${MAIN_API_AUTH_CLOCK_SKEW_SECONDS:-30}
+            MAIN_API_FIREBASE_PROJECT_ID: ${MAIN_API_FIREBASE_PROJECT_ID:-}
+            MAIN_API_FIREBASE_CREDENTIALS_FILE: ${MAIN_API_FIREBASE_CREDENTIALS_FILE:-}
+            MAIN_API_ACCESS_TOKEN_ISSUER: ${MAIN_API_ACCESS_TOKEN_ISSUER:-argos-ai-service}
+            MAIN_API_ACCESS_TOKEN_AUDIENCE: ${MAIN_API_ACCESS_TOKEN_AUDIENCE:-argos-ai-service-api}
+            MAIN_API_ACCESS_TOKEN_KEY_ID: ${MAIN_API_ACCESS_TOKEN_KEY_ID:-}
+            MAIN_API_ACCESS_TOKEN_PRIVATE_KEY: ${MAIN_API_ACCESS_TOKEN_PRIVATE_KEY:-}
+            MAIN_API_ACCESS_TOKEN_TTL_SECONDS: ${MAIN_API_ACCESS_TOKEN_TTL_SECONDS:-900}
+            GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
             MAIN_API_MODEL_MODE: ${ARGOS_MODEL_MODE:-simulated}
             MODEL_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_INPUT_COST_PER_MILLION_TOKENS:-}
             MODEL_OUTPUT_COST_PER_MILLION_TOKENS: ${MODEL_OUTPUT_COST_PER_MILLION_TOKENS:-}
@@ -136,6 +140,8 @@ services:
             mongo:
                 condition: service_healthy
             redis:
+                condition: service_healthy
+            postgres:
                 condition: service_healthy
             mcp_data:
                 condition: service_started

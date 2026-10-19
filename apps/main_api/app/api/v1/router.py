@@ -2,8 +2,9 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.routes import interactions, sessions
+from app.api.v1.routes import auth, interactions, sessions
 
 router = APIRouter(prefix="/v1")
 router.include_router(sessions.router)
 router.include_router(interactions.router)
+router.include_router(auth.router)

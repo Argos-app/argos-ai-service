@@ -14,11 +14,16 @@ from app.api.v1.router import router as v1_router
 from app.application.errors import ApplicationError, ApplicationErrorCode
 from app.application.operation_observation import OperationRecorder, active_collector
 from app.infrastructure.a2a import DocumentA2AClient
+from app.infrastructure.access_tokens import MainApiAccessTokenCodec
 from app.infrastructure.agents.model_factory import (
     ModelRuntimeConfigurationError,
     create_configured_models,
 )
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
+from app.infrastructure.firebase_auth import (
+    FirebaseIdentityAuthenticator,
+    create_firebase_id_token_verifier,
+)
 from app.infrastructure.mcp import (
     McpDelegationTokenIssuer,
     bind_observation_collector,
@@ -27,6 +32,10 @@ from app.infrastructure.mcp import (
 from app.infrastructure.observability.langsmith import (
     LangSmithTracing,
     create_langsmith_tracing,
+)
+from app.infrastructure.postgres import (
+    PostgresUserAccessRuntime,
+    create_postgres_user_access_runtime,
 )
 from app.settings import Settings
 from packages.observability import (
@@ -70,9 +79,24 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runtime: ServiceRuntime | None = None
+        postgres_runtime: PostgresUserAccessRuntime | None = None
         langsmith_tracing = create_langsmith_tracing(configured)
         app.state.langsmith_tracing = langsmith_tracing
         try:
+            postgres_runtime = await create_postgres_user_access_runtime(configured)
+            app.state.user_access_repository = (
+                postgres_runtime.user_access_repository if postgres_runtime else None
+            )
+            if configured.firebase_project_id is not None:
+                if postgres_runtime is None:
+                    raise RuntimeError(
+                        "MAIN_API_AUTH_DATABASE_URL é obrigatório para autenticação Firebase"
+                    )
+                verifier = create_firebase_id_token_verifier(configured)
+                app.state.firebase_identity_authenticator = FirebaseIdentityAuthenticator(
+                    verifier,
+                    postgres_runtime.user_access_repository,
+                )
             if configured.mongo_uri:
                 runtime = await create_runtime(configured)
             app.state.persistence = runtime.persistence if runtime else None
@@ -109,11 +133,15 @@ def create_app(
                     await runtime.close()
             finally:
                 try:
-                    if app.state.documental_a2a_client is not None:
-                        await app.state.documental_a2a_client.aclose()
+                    if postgres_runtime is not None:
+                        await postgres_runtime.close()
                 finally:
-                    if isinstance(langsmith_tracing, LangSmithTracing):
-                        langsmith_tracing.close()
+                    try:
+                        if app.state.documental_a2a_client is not None:
+                            await app.state.documental_a2a_client.aclose()
+                    finally:
+                        if isinstance(langsmith_tracing, LangSmithTracing):
+                            langsmith_tracing.close()
 
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
 
@@ -138,6 +166,11 @@ def create_app(
     app.state.session_summary_generator = session_summary_generator
     app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
+    app.state.access_token_codec = (
+        MainApiAccessTokenCodec(configured)
+        if configured.access_token_key_id and configured.access_token_private_key
+        else None
+    )
     app.state.report_source_signature_verifier = (
         TrustedEd25519SignatureVerifier(dict(configured.mcp_data_report_trusted_signature_keys))
         if configured.mcp_data_report_trusted_signature_keys
@@ -145,6 +178,8 @@ def create_app(
     )
     app.state.observability_collector = DisabledObservationCollector()
     app.state.user_usage_counter = None
+    app.state.user_access_repository = None
+    app.state.firebase_identity_authenticator = None
     app.state.langsmith_tracing = None
     app.state.mcp_clients = create_mcp_clients(configured)
     app.state.documental_a2a_client = (
@@ -223,9 +258,9 @@ def create_app(
                 status_code=503,
                 content={"status": "unavailable", "reason": "session_store_not_configured"},
             )
-        if not configured.auth_trusted_public_keys and not (
-            configured.app_env == "local" and configured.auth_mode == "stub"
-        ):
+        if (
+            configured.firebase_project_id is None or app.state.access_token_codec is None
+        ) and not (configured.app_env == "local" and configured.auth_mode == "stub"):
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "identity_not_configured"},
@@ -247,6 +282,11 @@ def create_app(
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "graph_runtime_not_configured"},
+            )
+        if configured.auth_database_url and app.state.user_access_repository is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "auth_database_not_configured"},
             )
         if app.state.agent_graph is None:
             try:
