@@ -1,8 +1,8 @@
 # Integração do MCP de dados
 
-Os testes desta pasta sobem o serviço MCP real e registram treze ferramentas
-pelo SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09 do
-commit remoto `origin/develop` `2f24af7abd25ab4afda7cb1561f02973db0b19d5`, criam
+Os testes desta pasta sobem o serviço MCP real e registram treze ferramentas por
+meio do SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09 dos
+arquivos `infrastructure/docker/postgres/init/01`–`09` deste repositório, criam
 dados sintéticos, inserem documentos de histórico bovino e medicamentos em
 coleções Mongo descartáveis e removem os dois bancos ao final. Os documentos
 Mongo são validados estruturalmente e pelo escopo de propriedades; não precisam
@@ -12,11 +12,9 @@ verifica o contexto atualizado em cada chamada dentro da mesma sessão MCP,
 autenticação de serviço, consultas de medicamentos pelo Doutor e bloqueio de
 escrita pelo leitor SQL sem alterar os registros.
 
-Requisitos: Docker Compose, Python do projeto com as dependências de integração
-e um clone local de `argos-data-engineering` que contenha o commit acima. O
-clone é procurado por padrão como diretório irmão deste repositório; defina
-`ARGOS_DATA_ENGINEERING_REPO` para outro caminho se necessário. Os scripts são
-lidos pelo SHA fixo, sem executar arquivos locais fora dessa revisão remota.
+Requisitos: Docker Compose e Python do projeto com as dependências de
+integração. O harness usa o schema modular versionado neste repositório e não
+depende de um clone local de `argos-data-engineering`.
 
 Na raiz do monorepositório:
 

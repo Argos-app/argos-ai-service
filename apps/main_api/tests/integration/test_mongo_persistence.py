@@ -7,7 +7,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from app.api.v1.dependencies.auth import Principal
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.identity import ActorContext
 from app.application.message_history_service import MessageHistoryService
 from app.domain.memory import SessionSummary, SummaryFact, UserMemory
 from app.domain.sessions import (
@@ -23,7 +24,6 @@ from app.domain.sessions import (
     SessionRecord,
 )
 from app.infrastructure.persistence.mongo import MongoPersistence
-from fastapi import HTTPException
 from motor.motor_asyncio import AsyncIOMotorClient
 
 UTC_NOW = datetime.now(UTC)
@@ -220,12 +220,9 @@ async def test_mongo_persistence_survives_client_restart_and_enforces_scope():
             sessions=reopened.sessions,
             conversations=reopened.conversations,
         )
-        principal = Principal(
+        principal = ActorContext(
             user_id=owner_id,
-            email="owner@example.invalid",
-            name="Titular",
-            permission="USER",
-            farm_ids=[session_record.farm_ids[0]],
+            farm_ids=(session_record.farm_ids[0],),
         )
         page = await history.list_messages(principal, session_id, limit=1, cursor=None)
         assert page.items[0].sequence == 2
@@ -235,20 +232,17 @@ async def test_mongo_persistence_survives_client_restart_and_enforces_scope():
         assert [item.sequence for item in older.items] == [1]
         assert older.items[0].redacted is False
 
-        with pytest.raises(HTTPException) as unauthorized:
+        with pytest.raises(ApplicationError) as unauthorized:
             await history.list_messages(
-                Principal(
+                ActorContext(
                     user_id=other_user_id,
-                    email="other@example.invalid",
-                    name="Outro usuário",
-                    permission="USER",
-                    farm_ids=list(session_record.farm_ids),
+                    farm_ids=tuple(session_record.farm_ids),
                 ),
                 session_id,
                 limit=10,
                 cursor=None,
             )
-        assert unauthorized.value.status_code == 404
+        assert unauthorized.value.code == ApplicationErrorCode.NOT_FOUND
     finally:
         await reopened_client.drop_database(database_name)
         reopened_client.close()

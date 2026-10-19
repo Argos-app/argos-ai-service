@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,6 +20,8 @@ from argos_a2a_agent.adapters.observability.langsmith import create_langsmith_tr
 from argos_a2a_agent.adapters.providers import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleEmbeddingProvider,
+    SimulatedAnswerGenerator,
+    SimulatedEmbeddingProvider,
 )
 from argos_a2a_agent.adapters.storage import LocalDocumentSource, LocalManifestRepository
 from argos_a2a_agent.agents.factory import DocumentAgentFactory
@@ -31,6 +34,7 @@ from argos_a2a_agent.infrastructure import (
     QdrantDocumentReadRepository,
     ReadOnlyQdrantReader,
 )
+from argos_a2a_agent.infrastructure.qdrant_health import check_qdrant_collection
 from argos_a2a_agent.ports.document_answer_generator import DocumentAnswerGenerator
 from argos_a2a_agent.ports.embedding_provider import EmbeddingProvider
 from argos_a2a_agent.server import create_a2a_server
@@ -40,6 +44,7 @@ from packages.observability import (
     DisabledObservationCollector,
     ObservationCollector,
 )
+from packages.observability.redis_user_usage import RedisUserUsageCounter
 from packages.security.delegation import GlobalDocumentDelegationTokenVerifier
 from packages.security.document_access import (
     DocumentAccessPolicy,
@@ -173,6 +178,24 @@ async def create_runtime_dependencies(
         if str(read_only).lower() != "on":
             raise RuntimeError("a conexão de autorização PostgreSQL não está somente leitura")
 
+        permission_directory = PostgresDocumentPermissionDirectory(
+            pool,
+            observation_collector=observation_collector,
+        )
+        if settings.model_mode == "simulated":
+            embeddings = SimulatedEmbeddingProvider(settings.qdrant_vector_size)
+            answer_generator = SimulatedAnswerGenerator()
+            fingerprint_material = f"argos-simulated-embedding-v2:{settings.qdrant_vector_size}"
+            return RuntimeDependencies(
+                embeddings=embeddings,
+                embedding_fingerprint=hashlib.sha256(
+                    fingerprint_material.encode("utf-8")
+                ).hexdigest(),
+                embedding_vector_size=settings.qdrant_vector_size,
+                answer_generator=answer_generator,
+                permission_directory=permission_directory,
+            )
+
         embeddings = OpenAICompatibleEmbeddingProvider(
             settings.embeddings_api_url,
             settings.embeddings_api_key,
@@ -186,14 +209,11 @@ async def create_runtime_dependencies(
             settings.answer_api_key,
             settings.answer_model,
             settings.model_timeout_seconds,
+            max_output_tokens=settings.model_max_output_tokens,
+            thinking=settings.answer_thinking,
             observation_collector=observation_collector,
         )
         provider_resources.append(answer_generator)
-        permission_directory = PostgresDocumentPermissionDirectory(
-            pool,
-            settings.documents_read_role_codes,
-            observation_collector=observation_collector,
-        )
         fingerprint_material = (
             f"openai-compatible:{settings.embeddings_model}:{settings.embeddings_model_revision}"
         )
@@ -218,7 +238,10 @@ async def create_runtime(
     """Valida e conecta segurança, atualização, consulta, agentes e protocolo."""
 
     configured = settings or Settings.from_env()
-    configured.validate_runtime(require_providers=dependencies is None)
+    configured.validate_runtime(
+        require_providers=dependencies is None and configured.model_mode != "simulated",
+        require_permission_sql=dependencies is None,
+    )
     if configured.document_source_root is None or configured.manifest_path is None:
         raise ValueError("fonte local e caminho do manifesto são obrigatórios")
     raw_source = LocalDocumentSource(
@@ -231,6 +254,7 @@ async def create_runtime(
     (
         observation_client,
         observation_writer,
+        user_usage_counter,
         observation_collector,
     ) = await _create_observability_runtime(configured)
     langsmith_tracing = create_langsmith_tracing(configured)
@@ -336,9 +360,18 @@ async def create_runtime(
             answer_generator=dependencies.answer_generator,
             observation_collector=observation_collector,
         )
+
+        async def check_index_ready() -> None:
+            await check_qdrant_collection(
+                reader_client,
+                collection=configured.qdrant_collection,
+                vector_size=configured.qdrant_vector_size,
+                distance=configured.qdrant_distance,
+            )
+
         server = create_a2a_server(
             configured,
-            readiness_check=reader_client.get_collections,
+            readiness_check=check_index_ready,
             delegation_verifier=delegation_verifier,
             agent_registry=agent_registry,
             observation_collector=observation_collector,
@@ -347,6 +380,8 @@ async def create_runtime(
 
         # Os adapters passam à propriedade do runtime depois que a composição tem êxito.
         closers = [observation_client.close] if observation_client is not None else []
+        if user_usage_counter is not None:
+            closers.append(user_usage_counter.close)
         if langsmith_tracing is not None:
             closers.append(langsmith_tracing.close)
         seen: set[int] = set()
@@ -369,6 +404,8 @@ async def create_runtime(
             await observation_writer.close()
         if observation_client is not None:
             resources.append(observation_client)
+        if user_usage_counter is not None:
+            resources.append(user_usage_counter)
         if langsmith_tracing is not None:
             resources.append(langsmith_tracing)
         await _close_resources(resources)
@@ -377,11 +414,17 @@ async def create_runtime(
 
 async def _create_observability_runtime(
     settings: Settings,
-) -> tuple[Any | None, MongoObservationWriter | None, ObservationCollector]:
+) -> tuple[
+    Any | None,
+    MongoObservationWriter | None,
+    RedisUserUsageCounter | None,
+    ObservationCollector,
+]:
     if settings.observability_mongo_uri is None or settings.observability_collection is None:
-        return None, None, DisabledObservationCollector()
+        return None, None, None, DisabledObservationCollector()
     client = None
     writer = None
+    user_usage_counter = None
     try:
         from motor.motor_asyncio import AsyncIOMotorClient
         from pymongo.write_concern import WriteConcern
@@ -398,8 +441,25 @@ async def _create_observability_runtime(
                 wtimeout=settings.observability_mongo_write_timeout_ms,
             ),
         )
+        redis_url = os.getenv("A2A_OBSERVABILITY_REDIS_URL")
+        if redis_url:
+            try:
+                from redis.asyncio import Redis
+
+                user_usage_counter = RedisUserUsageCounter(
+                    Redis.from_url(
+                        redis_url,
+                        decode_responses=False,
+                        socket_connect_timeout=1,
+                        socket_timeout=1,
+                    ),
+                    key_prefix=os.getenv("USER_USAGE_REDIS_KEY_PREFIX", "argos:usage:users:v1"),
+                )
+            except Exception:
+                _LOGGER.warning("A2A Redis user usage counters could not be configured")
         writer = MongoObservationWriter(
             MongoObservationRepository(database[settings.observability_collection]),
+            user_usage_counter=user_usage_counter,
             max_items=settings.observability_queue_max_items,
             max_bytes=settings.observability_queue_max_bytes,
             max_document_bytes=settings.observability_document_max_bytes,
@@ -410,14 +470,16 @@ async def _create_observability_runtime(
             shutdown_timeout_ms=settings.observability_shutdown_timeout_ms,
         )
         await writer.start()
-        return client, writer, BestEffortObservationCollector(writer)
+        return client, writer, user_usage_counter, BestEffortObservationCollector(writer)
     except Exception:
         _LOGGER.warning("A2A observability persistence could not start")
         if writer is not None:
             await writer.close()
         if client is not None:
             client.close()
-        return None, None, DisabledObservationCollector()
+        if user_usage_counter is not None:
+            await user_usage_counter.close()
+        return None, None, None, DisabledObservationCollector()
 
 
 async def run_server(

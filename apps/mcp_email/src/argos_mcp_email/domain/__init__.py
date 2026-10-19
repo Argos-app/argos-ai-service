@@ -16,6 +16,7 @@ from .models import (
     DispatchRecord,
     DispatchState,
     PreparedReportRecord,
+    ReportAttachmentRecord,
     ReportState,
     ResolvedRecipient,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "IdempotencyConflictError",
     "InvalidDispatchTransitionError",
     "PreparedReportRecord",
+    "ReportAttachmentRecord",
     "RecipientDirectoryError",
     "ReportState",
     "ReportAlreadyExistsError",

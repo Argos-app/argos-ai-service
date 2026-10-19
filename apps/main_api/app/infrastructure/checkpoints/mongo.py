@@ -47,8 +47,8 @@ def create_mongo_checkpointer(settings: Settings) -> MongoCheckpointerRuntime:
         saver = MongoDBSaver(
             client,
             db_name=settings.mongo_database,
-            checkpoint_collection_name="ai_langgraph_checkpoints",
-            writes_collection_name="ai_langgraph_checkpoint_writes",
+            checkpoint_collection_name=settings.mongo_collections.langgraph_checkpoints,
+            writes_collection_name=settings.mongo_collections.langgraph_checkpoint_writes,
             ttl=None,
         )
         return MongoCheckpointerRuntime(client=client, saver=saver)

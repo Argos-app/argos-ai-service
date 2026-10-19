@@ -42,6 +42,14 @@ def test_invalid_configuration_is_rejected(configured_settings, overrides):
         replace(configured_settings, **overrides).validate_runtime()
 
 
+@pytest.mark.parametrize(
+    "relation", ["", "public.coverage; drop table", "too many.parts.here", "view name"]
+)
+def test_coverage_relation_identifier_must_be_qualified_identifier(configured_settings, relation):
+    with pytest.raises(ValueError, match="MCP_PREDICTION_COVERAGE_RELATION"):
+        replace(configured_settings, coverage_relation=relation).validate_runtime()
+
+
 def test_secrets_are_not_in_settings_representation(configured_settings):
     assert configured_settings.sql_dsn not in repr(configured_settings)
     assert configured_settings.internal_service_token not in repr(configured_settings)
@@ -55,6 +63,7 @@ def test_configuration_reads_only_prediction_environment(monkeypatch):
     monkeypatch.setenv("MCP_PREDICTION_PORT", "8102")
     monkeypatch.setenv("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("MCP_PREDICTION_DATA_ORIGIN", "synthetic")
+    monkeypatch.setenv("MCP_PREDICTION_COVERAGE_RELATION", "ops.property_data_coverage")
     monkeypatch.setenv("MCP_EMAIL_INTERNAL_SERVICE_TOKEN", "other-token")
     monkeypatch.setenv("MCP_PREDICTION_DELEGATION_ISSUER", "argos-main-service")
     monkeypatch.setenv("MCP_PREDICTION_TRUSTED_DELEGATION_KEYS", '{"test-key": "public-key"}')
@@ -64,6 +73,7 @@ def test_configuration_reads_only_prediction_environment(monkeypatch):
     assert settings.mcp_port == 8102
     assert settings.sql_timeout_seconds == 7
     assert settings.data_origin == DataOrigin.SYNTHETIC
+    assert settings.coverage_relation == "ops.property_data_coverage"
 
 
 def test_invalid_environment_integer_is_rejected(monkeypatch):

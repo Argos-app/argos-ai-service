@@ -1,0 +1,682 @@
+apiVersion: v1
+kind: Service
+metadata: { name: main-api }
+spec:
+    selector: { app: main-api }
+    ports: [{ name: http, port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: main-api }
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector: { matchLabels: { app: main-api } }
+    template:
+        metadata: { labels: { app: main-api } }
+        spec:
+            securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001 }
+            containers:
+                - name: app
+                  image: argos-main-api:local
+                  imagePullPolicy: IfNotPresent
+                  ports: [{ name: http, containerPort: 8000 }]
+                  env:
+                      - { name: APP_ENV, value: local }
+                      - { name: AUTH_MODE, value: stub }
+                      - { name: MAIN_API_MODEL_MODE, value: simulated }
+                      - { name: MAIN_API_MONGO_URI, value: "mongodb://mongo:27017/?replicaSet=rs0" }
+                      - {
+                            name: MAIN_API_MONGO_DATABASE,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MONGO_DATABASE },
+                                },
+                        }
+                      - { name: MAIN_API_OBSERVABILITY_REDIS_URL, value: "redis://redis:6379/0" }
+                      - { name: USER_USAGE_REDIS_KEY_PREFIX, value: "argos:usage:users:v1" }
+                      - { name: MAIN_API_OBSERVABILITY_COLLECTION, value: ai_observations }
+                      - {
+                            name: MAIN_API_MCP_DATA_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_DATA_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_MCP_PREDICTION_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_PREDICTION_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_MCP_EMAIL_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_EMAIL_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_MCP_DELEGATION_ISSUER,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MCP_DELEGATION_ISSUER },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_MCP_DELEGATION_KEY_ID,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MCP_DELEGATION_KEY_ID },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_MCP_DELEGATION_PRIVATE_KEY,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_DELEGATION_PRIVATE_KEY,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: REPORT_SIGNING_PUBLIC_KEYS,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: A2A_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - { name: MAIN_API_MCP_DATA_URL, value: "http://mcp-data:8000/mcp" }
+                      - {
+                            name: MAIN_API_MCP_PREDICTION_URL,
+                            value: "http://mcp-prediction:8000/mcp",
+                        }
+                      - { name: MAIN_API_MCP_EMAIL_URL, value: "http://mcp-email:8000/mcp" }
+                      - { name: MAIN_API_DOCUMENT_A2A_URL, value: "http://a2a-agent:8000/a2a" }
+                  startupProbe:
+                      httpGet: { path: /health/live, port: http }
+                      periodSeconds: 5
+                      failureThreshold: 30
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      httpGet: { path: /health/live, port: http }
+                      periodSeconds: 10
+                      timeoutSeconds: 10
+                  readinessProbe:
+                      exec: { command: [python, /opt/argos/health-probe/health_probe.py, main-api] }
+                      periodSeconds: 5
+                      timeoutSeconds: 15
+                  resources:
+                      requests: { cpu: 100m, memory: 256Mi }
+                      limits: { cpu: 1, memory: 1Gi }
+                  securityContext:
+                      {
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL] },
+                      }
+                  volumeMounts:
+                      - { name: tmp, mountPath: /tmp }
+                      - { name: probes, mountPath: /opt/argos/health-probe, readOnly: true }
+            volumes:
+                - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+                - { name: probes, configMap: { name: argos-health-probes, defaultMode: 0444 } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mcp-data }
+spec:
+    selector: { app: mcp-data }
+    ports: [{ name: http, port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: mcp-data }
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector: { matchLabels: { app: mcp-data } }
+    template:
+        metadata: { labels: { app: mcp-data } }
+        spec:
+            securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001 }
+            containers:
+                - name: app
+                  image: argos-mcp-data:local
+                  imagePullPolicy: IfNotPresent
+                  ports: [{ name: http, containerPort: 8000 }]
+                  env:
+                      - { name: MCP_DATA_HOST, value: "0.0.0.0" }
+                      - { name: MCP_DATA_PORT, value: "8000" }
+                      - { name: MCP_DATA_MONGO_URI, value: "mongodb://mongo:27017/?replicaSet=rs0" }
+                      - {
+                            name: MCP_DATA_MONGO_DATABASE,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MONGO_DATABASE },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_READER_PASSWORD,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: POSTGRES_READER_PASSWORD,
+                                        },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_DB,
+                            valueFrom:
+                                { secretKeyRef: { name: argos-local-secrets, key: POSTGRES_DB } },
+                        }
+                      - {
+                            name: MCP_DATA_SQL_DSN,
+                            value: "postgresql://argos_reader:$(POSTGRES_READER_PASSWORD)@postgres:5432/$(POSTGRES_DB)",
+                        }
+                      - {
+                            name: MCP_DATA_INTERNAL_SERVICE_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_DATA_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - { name: MCP_DATA_MONGO_CATTLE_COLLECTION, value: local_cattle_documents }
+                      - { name: MCP_DATA_MONGO_RELATIONAL_ID_FORMAT, value: string }
+                      - {
+                            name: MCP_DATA_MONGO_MEDICINE_COLLECTION,
+                            value: local_medicine_documents,
+                        }
+                      - { name: MCP_DATA_MONGO_MEDICINE_ID_FORMAT, value: uuid_standard }
+                      - {
+                            name: MCP_DATA_TRUSTED_DELEGATION_KEYS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_DELEGATION_PUBLIC_KEYS,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MCP_DATA_REPORT_SIGNING_KEY_ID,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: REPORT_SIGNING_KEY_ID },
+                                },
+                        }
+                      - {
+                            name: MCP_DATA_REPORT_SIGNING_PRIVATE_KEY,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: REPORT_SIGNING_PRIVATE_KEY,
+                                        },
+                                },
+                        }
+                      - { name: MCP_DATA_RESOURCE_SERVER_URL, value: "http://mcp-data:8000/mcp" }
+                      - { name: MCP_DATA_AUTH_ISSUER_URL, value: "http://main-api:8000" }
+                      - {
+                            name: MCP_DATA_DELEGATION_ISSUER,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MCP_DELEGATION_ISSUER },
+                                },
+                        }
+                  startupProbe:
+                      tcpSocket: { port: http }
+                      periodSeconds: 5
+                      failureThreshold: 30
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      tcpSocket: { port: http }
+                      periodSeconds: 10
+                      timeoutSeconds: 10
+                  readinessProbe:
+                      exec: { command: [python, /opt/argos/health-probe/health_probe.py, mcp-data] }
+                      periodSeconds: 5
+                      timeoutSeconds: 15
+                  resources:
+                      requests: { cpu: 100m, memory: 128Mi }
+                      limits: { cpu: 500m, memory: 512Mi }
+                  securityContext:
+                      {
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL] },
+                      }
+                  volumeMounts:
+                      - { name: tmp, mountPath: /tmp }
+                      - { name: probes, mountPath: /opt/argos/health-probe, readOnly: true }
+            volumes:
+                - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+                - { name: probes, configMap: { name: argos-health-probes, defaultMode: 0444 } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mcp-prediction }
+spec:
+    selector: { app: mcp-prediction }
+    ports: [{ name: http, port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: mcp-prediction }
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector: { matchLabels: { app: mcp-prediction } }
+    template:
+        metadata: { labels: { app: mcp-prediction } }
+        spec:
+            securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001 }
+            containers:
+                - name: app
+                  image: argos-mcp-prediction:local
+                  imagePullPolicy: IfNotPresent
+                  ports: [{ name: http, containerPort: 8000 }]
+                  env:
+                      - { name: MCP_PREDICTION_HOST, value: "0.0.0.0" }
+                      - { name: MCP_PREDICTION_PORT, value: "8000" }
+                      - {
+                            name: POSTGRES_READER_PASSWORD,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: POSTGRES_READER_PASSWORD,
+                                        },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_DB,
+                            valueFrom:
+                                { secretKeyRef: { name: argos-local-secrets, key: POSTGRES_DB } },
+                        }
+                      - {
+                            name: MCP_PREDICTION_SQL_DSN,
+                            value: "postgresql://argos_reader:$(POSTGRES_READER_PASSWORD)@postgres:5432/$(POSTGRES_DB)",
+                        }
+                      - {
+                            name: MCP_PREDICTION_INTERNAL_SERVICE_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_PREDICTION_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MCP_PREDICTION_TRUSTED_DELEGATION_KEYS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_DELEGATION_PUBLIC_KEYS,
+                                        },
+                                },
+                        }
+                      - { name: MCP_PREDICTION_COVERAGE_RELATION, value: local_prediction_coverage }
+                      - { name: MCP_PREDICTION_DATA_ORIGIN, value: synthetic }
+                      - {
+                            name: MCP_PREDICTION_RESOURCE_SERVER_URL,
+                            value: "http://mcp-prediction:8000/mcp",
+                        }
+                      - { name: MCP_PREDICTION_AUTH_ISSUER_URL, value: "http://main-api:8000" }
+                      - {
+                            name: MCP_PREDICTION_DELEGATION_ISSUER,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MCP_DELEGATION_ISSUER },
+                                },
+                        }
+                  startupProbe:
+                      tcpSocket: { port: http }
+                      periodSeconds: 5
+                      failureThreshold: 30
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      tcpSocket: { port: http }
+                      periodSeconds: 10
+                      timeoutSeconds: 10
+                  readinessProbe:
+                      exec:
+                          {
+                              command:
+                                  [python, /opt/argos/health-probe/health_probe.py, mcp-prediction],
+                          }
+                      periodSeconds: 5
+                      timeoutSeconds: 15
+                  resources:
+                      requests: { cpu: 100m, memory: 128Mi }
+                      limits: { cpu: 500m, memory: 512Mi }
+                  securityContext:
+                      {
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL] },
+                      }
+                  volumeMounts:
+                      - { name: tmp, mountPath: /tmp }
+                      - { name: probes, mountPath: /opt/argos/health-probe, readOnly: true }
+            volumes:
+                - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+                - { name: probes, configMap: { name: argos-health-probes, defaultMode: 0444 } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mcp-email }
+spec:
+    selector: { app: mcp-email }
+    ports: [{ name: http, port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: mcp-email }
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector: { matchLabels: { app: mcp-email } }
+    template:
+        metadata: { labels: { app: mcp-email } }
+        spec:
+            securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001 }
+            containers:
+                - name: app
+                  image: argos-mcp-email:local
+                  imagePullPolicy: IfNotPresent
+                  ports: [{ name: http, containerPort: 8000 }]
+                  env:
+                      - { name: MCP_EMAIL_HOST, value: "0.0.0.0" }
+                      - { name: MCP_EMAIL_PORT, value: "8000" }
+                      - {
+                            name: MCP_EMAIL_MONGO_URI,
+                            value: "mongodb://mongo:27017/?replicaSet=rs0",
+                        }
+                      - {
+                            name: MCP_EMAIL_MONGO_DATABASE,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MONGO_DATABASE },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_READER_PASSWORD,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: POSTGRES_READER_PASSWORD,
+                                        },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_DB,
+                            valueFrom:
+                                { secretKeyRef: { name: argos-local-secrets, key: POSTGRES_DB } },
+                        }
+                      - {
+                            name: MCP_EMAIL_SQL_DSN,
+                            value: "postgresql://argos_reader:$(POSTGRES_READER_PASSWORD)@postgres:5432/$(POSTGRES_DB)",
+                        }
+                      - {
+                            name: MCP_EMAIL_INTERNAL_SERVICE_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_EMAIL_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - {
+                            name: MCP_EMAIL_TRUSTED_SIGNATURE_KEYS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: REPORT_SIGNING_PUBLIC_KEYS,
+                                        },
+                                },
+                        }
+                      - { name: MCP_EMAIL_SMTP_HOST, value: mailpit }
+                      - { name: MCP_EMAIL_SMTP_PORT, value: "1025" }
+                      - { name: MCP_EMAIL_SMTP_USE_TLS, value: "false" }
+                      - { name: MCP_EMAIL_RESOURCE_SERVER_URL, value: "http://mcp-email:8000/mcp" }
+                      - { name: MCP_EMAIL_AUTH_ISSUER_URL, value: "http://main-api:8000" }
+                  startupProbe:
+                      tcpSocket: { port: http }
+                      periodSeconds: 5
+                      failureThreshold: 30
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      tcpSocket: { port: http }
+                      periodSeconds: 10
+                      timeoutSeconds: 10
+                  readinessProbe:
+                      exec:
+                          { command: [python, /opt/argos/health-probe/health_probe.py, mcp-email] }
+                      periodSeconds: 5
+                      timeoutSeconds: 15
+                  resources:
+                      requests: { cpu: 100m, memory: 128Mi }
+                      limits: { cpu: 500m, memory: 512Mi }
+                  securityContext:
+                      {
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL] },
+                      }
+                  volumeMounts:
+                      - { name: tmp, mountPath: /tmp }
+                      - { name: probes, mountPath: /opt/argos/health-probe, readOnly: true }
+            volumes:
+                - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+                - { name: probes, configMap: { name: argos-health-probes, defaultMode: 0444 } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: a2a-agent }
+spec:
+    selector: { app: a2a-agent }
+    ports: [{ name: http, port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: a2a-agent }
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector: { matchLabels: { app: a2a-agent } }
+    template:
+        metadata: { labels: { app: a2a-agent } }
+        spec:
+            securityContext:
+                { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001 }
+            initContainers:
+                - name: fix-a2a-state-volume-permissions
+                  image: argos-a2a-agent:local
+                  imagePullPolicy: IfNotPresent
+                  command:
+                      - python
+                      - -c
+                      - "import os; os.chown('/state', 10001, 10001); os.chmod('/state', 0o750)"
+                  securityContext:
+                      {
+                          runAsNonRoot: false,
+                          runAsUser: 0,
+                          runAsGroup: 0,
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL], add: [CHOWN, FOWNER] },
+                      }
+                  volumeMounts:
+                      - { name: state, mountPath: /state }
+            containers:
+                - name: app
+                  image: argos-a2a-agent:local
+                  imagePullPolicy: IfNotPresent
+                  ports: [{ name: http, containerPort: 8000 }]
+                  env:
+                      - { name: A2A_HOST, value: "0.0.0.0" }
+                      - { name: A2A_PORT, value: "8000" }
+                      - { name: A2A_ENDPOINT_URL, value: "http://a2a-agent:8000/a2a" }
+                      - {
+                            name: A2A_OBSERVABILITY_MONGO_URI,
+                            value: "mongodb://mongo:27017/?replicaSet=rs0",
+                        }
+                      - { name: A2A_OBSERVABILITY_REDIS_URL, value: "redis://redis:6379/0" }
+                      - { name: USER_USAGE_REDIS_KEY_PREFIX, value: "argos:usage:users:v1" }
+                      - {
+                            name: A2A_OBSERVABILITY_MONGO_DATABASE,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MONGO_DATABASE },
+                                },
+                        }
+                      - { name: A2A_OBSERVABILITY_COLLECTION, value: ai_a2a_observations }
+                      - { name: A2A_QDRANT_URL, value: "http://qdrant:6333" }
+                      - { name: A2A_QDRANT_READ_API_KEY, value: local-qdrant-read-only }
+                      - { name: A2A_QDRANT_WRITE_API_KEY, value: local-qdrant-index-writer }
+                      - { name: A2A_QDRANT_COLLECTION, value: argos_local_documents }
+                      - { name: A2A_QDRANT_VECTOR_SIZE, value: "64" }
+                      - { name: A2A_MODEL_MODE, value: simulated }
+                      - {
+                            name: A2A_INTERNAL_SERVICE_TOKEN,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: A2A_INTERNAL_SERVICE_TOKEN,
+                                        },
+                                },
+                        }
+                      - { name: A2A_RESOURCE_SERVER_URL, value: "http://a2a-agent:8000/a2a" }
+                      - {
+                            name: A2A_DELEGATION_ISSUER,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-local-secrets, key: MCP_DELEGATION_ISSUER },
+                                },
+                        }
+                      - {
+                            name: A2A_TRUSTED_DELEGATION_KEYS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: MCP_DELEGATION_PUBLIC_KEYS,
+                                        },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_READER_PASSWORD,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: POSTGRES_READER_PASSWORD,
+                                        },
+                                },
+                        }
+                      - {
+                            name: POSTGRES_DB,
+                            valueFrom:
+                                { secretKeyRef: { name: argos-local-secrets, key: POSTGRES_DB } },
+                        }
+                      - {
+                            name: A2A_PERMISSION_SQL_DSN,
+                            value: "postgresql://argos_reader:$(POSTGRES_READER_PASSWORD)@postgres:5432/$(POSTGRES_DB)",
+                        }
+                      - { name: A2A_DOCUMENT_SOURCE_ROOT, value: /var/lib/argos/a2a/documents }
+                      - { name: A2A_MANIFEST_PATH, value: /var/lib/argos/a2a/state/manifest.json }
+                  startupProbe:
+                      httpGet: { path: /health/live, port: http }
+                      periodSeconds: 5
+                      failureThreshold: 30
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      httpGet: { path: /health/live, port: http }
+                      periodSeconds: 10
+                      timeoutSeconds: 10
+                  readinessProbe:
+                      exec:
+                          { command: [python, /opt/argos/health-probe/health_probe.py, a2a-agent] }
+                      periodSeconds: 5
+                      timeoutSeconds: 15
+                  resources:
+                      requests: { cpu: 100m, memory: 256Mi }
+                      limits: { cpu: 1, memory: 1Gi }
+                  securityContext:
+                      {
+                          allowPrivilegeEscalation: false,
+                          readOnlyRootFilesystem: true,
+                          capabilities: { drop: [ALL] },
+                      }
+                  volumeMounts:
+                      - { name: tmp, mountPath: /tmp }
+                      - { name: state, mountPath: /var/lib/argos/a2a/state }
+                      - { name: probes, mountPath: /opt/argos/health-probe, readOnly: true }
+            volumes:
+                - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+                - { name: state, persistentVolumeClaim: { claimName: a2a-state } }
+                - { name: probes, configMap: { name: argos-health-probes, defaultMode: 0444 } }

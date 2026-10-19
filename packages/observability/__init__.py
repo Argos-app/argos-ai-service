@@ -1,6 +1,25 @@
 """Contrato compartilhado para observações técnicas brutas."""
 
+from .billing import (
+    billing_from_usage_payload,
+    billing_with_fallback,
+    configured_rate_billing,
+    langsmith_usage_metadata,
+    provider_billing,
+)
 from .collector import BestEffortObservationCollector, DisabledObservationCollector
+from .context import (
+    bind_correlation,
+    bind_interaction,
+    bind_user_id,
+    correlation_key,
+    current_correlation_id,
+    current_interaction_id,
+    current_parent_observation_id,
+    current_session_id,
+    current_user_id,
+    observation_scope,
+)
 from .models import (
     AttemptReason,
     AttemptVisibility,
@@ -41,6 +60,21 @@ __all__ = [
     "AttemptReason",
     "AttemptVisibility",
     "BestEffortObservationCollector",
+    "provider_billing",
+    "configured_rate_billing",
+    "langsmith_usage_metadata",
+    "billing_with_fallback",
+    "billing_from_usage_payload",
+    "bind_user_id",
+    "bind_interaction",
+    "bind_correlation",
+    "correlation_key",
+    "current_correlation_id",
+    "current_interaction_id",
+    "current_parent_observation_id",
+    "current_session_id",
+    "current_user_id",
+    "observation_scope",
     "Billing",
     "CancellationState",
     "Clock",

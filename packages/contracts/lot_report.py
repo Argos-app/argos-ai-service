@@ -47,6 +47,7 @@ class ApplicationRecord(_Contract):
     """Aplicação coletiva registrada para o lote."""
 
     application_id: UUID
+    application_kind: Literal["COLETIVA", "INDIVIDUAL"] = "COLETIVA"
     application_date: date
     application_time: time | None = None
     medicine_name: str = Field(min_length=1, max_length=80)
@@ -63,7 +64,7 @@ class ApplicationRecord(_Contract):
     ]
     head_count_applied: int = Field(gt=0)
     meat_withdrawal_end: date | None = None
-    status: Literal["Concluida", "Pendente"]
+    active: bool
     goal: str | None = None
     notes: str | None = None
 

@@ -1,0 +1,363 @@
+name: argos-ai-service
+
+services:
+    mongo:
+        image: mongo:7.0
+        command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+        ports:
+            - "127.0.0.1:${MONGO_PUBLISHED_PORT:-27027}:27017"
+        volumes:
+            - mongo-data:/data/db
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - >-
+                    mongosh --quiet --eval
+                    'try { rs.status().ok } catch (_) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}).ok }'
+            interval: 5s
+            timeout: 5s
+            retries: 30
+            start_period: 10s
+
+    redis:
+        image: redis:7.4-alpine
+        command: ["redis-server", "--save", "", "--appendonly", "no"]
+        ports:
+            - "127.0.0.1:${REDIS_PUBLISHED_PORT:-6379}:6379"
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 3s
+            retries: 20
+
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-argos_admin}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argos_admin_local_only}
+            POSTGRES_DB: ${POSTGRES_DB:-argos}
+            POSTGRES_READER_PASSWORD: ${POSTGRES_READER_PASSWORD:-argos_reader_local_only}
+        ports:
+            - "127.0.0.1:${POSTGRES_PUBLISHED_PORT:-54327}:5432"
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+            - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - >-
+                    pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+                    && psql --username "$${POSTGRES_USER}" --dbname "$${POSTGRES_DB}"
+                    --tuples-only --no-align --command
+                    "SELECT ready FROM public.local_environment_ready" | grep -qx t
+            interval: 5s
+            timeout: 5s
+            retries: 20
+
+    qdrant:
+        image: qdrant/qdrant:v1.15.4
+        ports:
+            - "127.0.0.1:${QDRANT_HTTP_PUBLISHED_PORT:-6333}:6333"
+        volumes:
+            - qdrant-data:/qdrant/storage
+        healthcheck:
+            test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+            interval: 5s
+            timeout: 3s
+            retries: 20
+
+    mailpit:
+        image: axllent/mailpit:v1.27.0
+        ports:
+            - "127.0.0.1:${MAILPIT_SMTP_PUBLISHED_PORT:-1025}:1025"
+            - "127.0.0.1:${MAILPIT_UI_PUBLISHED_PORT:-8025}:8025"
+        healthcheck:
+            test: ["CMD", "/mailpit", "readyz"]
+            interval: 5s
+            timeout: 3s
+            retries: 20
+
+    main_api:
+        profiles: ["apps"]
+        build:
+            context: .
+            dockerfile: apps/main_api/Dockerfile
+        environment:
+            MAIN_API_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MAIN_API_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
+            USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
+            MAIN_API_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            MAIN_API_OBSERVABILITY_COLLECTION: ${MAIN_API_OBSERVABILITY_COLLECTION:-ai_observations}
+            APP_ENV: ${APP_ENV:-local}
+            AUTH_MODE: ${AUTH_MODE:-stub}
+            MAIN_API_AUTH_ISSUER: ${MAIN_API_AUTH_ISSUER:-argos-backend-service}
+            MAIN_API_AUTH_AUDIENCE: ${MAIN_API_AUTH_AUDIENCE:-argos-ai-service}
+            MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS: ${MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS:-{}}
+            MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS: ${MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS:-300}
+            MAIN_API_AUTH_CLOCK_SKEW_SECONDS: ${MAIN_API_AUTH_CLOCK_SKEW_SECONDS:-30}
+            MAIN_API_MODEL_MODE: ${ARGOS_MODEL_MODE:-simulated}
+            MODEL_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_INPUT_COST_PER_MILLION_TOKENS:-}
+            MODEL_OUTPUT_COST_PER_MILLION_TOKENS: ${MODEL_OUTPUT_COST_PER_MILLION_TOKENS:-}
+            MAIN_API_MODEL_API_BASE_URL: ${MAIN_API_MODEL_API_BASE_URL:-}
+            MAIN_API_MODEL_API_KEY: ${MAIN_API_MODEL_API_KEY:-}
+            MAIN_API_MODEL_TIMEOUT_SECONDS: ${MAIN_API_MODEL_TIMEOUT_SECONDS:-60}
+            MAIN_API_MODEL_MAX_RETRIES: ${MAIN_API_MODEL_MAX_RETRIES:-2}
+            MAIN_API_MODEL_MAX_OUTPUT_TOKENS: ${MAIN_API_MODEL_MAX_OUTPUT_TOKENS:-4096}
+            MAIN_API_MODEL_THINKING: ${MAIN_API_MODEL_THINKING:-auto}
+            MAIN_API_EXECUTION_TIMEOUT_SECONDS: ${MAIN_API_EXECUTION_TIMEOUT_SECONDS:-300}
+            MAIN_API_MODEL_ROUTER: ${MAIN_API_MODEL_ROUTER:-}
+            MAIN_API_MODEL_FARM: ${MAIN_API_MODEL_FARM:-}
+            MAIN_API_MODEL_DOCTOR: ${MAIN_API_MODEL_DOCTOR:-}
+            MAIN_API_MODEL_ANALYST: ${MAIN_API_MODEL_ANALYST:-}
+            MAIN_API_MODEL_SECRETARY: ${MAIN_API_MODEL_SECRETARY:-}
+            MAIN_API_MODEL_INFORMATION: ${MAIN_API_MODEL_INFORMATION:-}
+            MAIN_API_MODEL_ORCHESTRATOR: ${MAIN_API_MODEL_ORCHESTRATOR:-}
+            MAIN_API_MODEL_JUDGE: ${MAIN_API_MODEL_JUDGE:-}
+            MAIN_API_MODEL_QUESTION_FORMATTER: ${MAIN_API_MODEL_QUESTION_FORMATTER:-}
+            MAIN_API_LANGSMITH_API_KEY: ${MAIN_API_LANGSMITH_API_KEY:-}
+            MAIN_API_LANGSMITH_PROJECT: ${MAIN_API_LANGSMITH_PROJECT:-argos-ai-service}
+            MAIN_API_LANGSMITH_ENDPOINT: ${MAIN_API_LANGSMITH_ENDPOINT:-}
+            MAIN_API_LANGSMITH_WORKSPACE_ID: ${MAIN_API_LANGSMITH_WORKSPACE_ID:-}
+            MAIN_API_LANGSMITH_CAPTURE_CONTENT: ${MAIN_API_LANGSMITH_CAPTURE_CONTENT:-false}
+            MAIN_API_MCP_DATA_TOKEN: ${MCP_DATA_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MAIN_API_MCP_PREDICTION_TOKEN: ${MCP_PREDICTION_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MAIN_API_MCP_EMAIL_TOKEN: ${MCP_EMAIL_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MAIN_API_MCP_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
+            MAIN_API_MCP_DELEGATION_KEY_ID: ${MCP_DELEGATION_KEY_ID:-local-dev-key}
+            MAIN_API_MCP_DELEGATION_PRIVATE_KEY: ${MCP_DELEGATION_PRIVATE_KEY:?run scripts/docker/create-local-env.py first}
+            MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS: ${REPORT_SIGNING_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
+            MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN: ${A2A_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MAIN_API_MCP_DATA_URL: http://mcp_data:8000/mcp
+            MAIN_API_MCP_PREDICTION_URL: http://mcp_prediction:8000/mcp
+            MAIN_API_MCP_EMAIL_URL: http://mcp_email:8000/mcp
+            MAIN_API_DOCUMENT_A2A_URL: http://a2a_agent:8000/a2a
+            MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS: ${MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS:-45}
+        depends_on:
+            mongo:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+            mcp_data:
+                condition: service_started
+            mcp_prediction:
+                condition: service_started
+            mcp_email:
+                condition: service_started
+            a2a_agent:
+                condition: service_started
+        ports:
+            - "127.0.0.1:${MAIN_API_PUBLISHED_PORT:-8080}:8000"
+        read_only: true
+        tmpfs: ["/tmp:mode=1777,size=16m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        mem_limit: 1g
+        cpus: 1.0
+        healthcheck:
+            test:
+                - CMD
+                - python
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+            interval: 15s
+            timeout: 3s
+            retries: 3
+            start_period: 20s
+
+    mcp_data:
+        profiles: ["apps"]
+        build:
+            context: .
+            dockerfile: apps/mcp_data/Dockerfile
+        environment:
+            MCP_DATA_HOST: 0.0.0.0
+            MCP_DATA_PORT: 8000
+            MCP_DATA_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MCP_DATA_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            MCP_DATA_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
+            MCP_DATA_INTERNAL_SERVICE_TOKEN: ${MCP_DATA_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MCP_DATA_MONGO_CATTLE_COLLECTION: local_cattle_documents
+            MCP_DATA_MONGO_RELATIONAL_ID_FORMAT: string
+            MCP_DATA_MONGO_MEDICINE_COLLECTION: local_medicine_documents
+            MCP_DATA_MONGO_MEDICINE_ID_FORMAT: uuid_standard
+            MCP_DATA_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
+            MCP_DATA_REPORT_SIGNING_KEY_ID: ${REPORT_SIGNING_KEY_ID:-local-report-key}
+            MCP_DATA_REPORT_SIGNING_PRIVATE_KEY: ${REPORT_SIGNING_PRIVATE_KEY:?run scripts/docker/create-local-env.py first}
+            MCP_DATA_RESOURCE_SERVER_URL: http://mcp_data:8000/mcp
+            MCP_DATA_AUTH_ISSUER_URL: http://main_api:8000
+            MCP_DATA_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
+        depends_on:
+            mongo_seed:
+                condition: service_completed_successfully
+            mongo:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
+        read_only: true
+        tmpfs: ["/tmp:mode=1777,size=16m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        mem_limit: 512m
+        cpus: 0.5
+
+    mongo_seed:
+        profiles: ["apps"]
+        build:
+            context: .
+            dockerfile: apps/mcp_data/Dockerfile
+        command: ["python", "/tmp/seed-local-mongo.py"]
+        volumes:
+            - ./scripts/docker/seed-local-mongo.py:/tmp/seed-local-mongo.py:ro
+        environment:
+            ARGOS_LOCAL_MONGO_SEED_ENABLED: "true"
+            MCP_DATA_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MCP_DATA_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            MCP_DATA_MONGO_CATTLE_COLLECTION: local_cattle_documents
+            MCP_DATA_MONGO_MEDICINE_COLLECTION: local_medicine_documents
+            MCP_DATA_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
+        depends_on:
+            mongo:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
+        restart: "no"
+
+    mcp_prediction:
+        profiles: ["apps"]
+        build:
+            context: .
+            dockerfile: apps/mcp_prediction/Dockerfile
+        environment:
+            MCP_PREDICTION_HOST: 0.0.0.0
+            MCP_PREDICTION_PORT: 8000
+            MCP_PREDICTION_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
+            MCP_PREDICTION_INTERNAL_SERVICE_TOKEN: ${MCP_PREDICTION_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MCP_PREDICTION_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
+            MCP_PREDICTION_COVERAGE_RELATION: local_prediction_coverage
+            MCP_PREDICTION_DATA_ORIGIN: synthetic
+            MCP_PREDICTION_RESOURCE_SERVER_URL: http://mcp_prediction:8000/mcp
+            MCP_PREDICTION_AUTH_ISSUER_URL: http://main_api:8000
+            MCP_PREDICTION_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
+        depends_on:
+            postgres:
+                condition: service_healthy
+        read_only: true
+        tmpfs: ["/tmp:mode=1777,size=16m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        mem_limit: 512m
+        cpus: 0.5
+
+    mcp_email:
+        profiles: ["apps"]
+        build:
+            context: .
+            dockerfile: apps/mcp_email/Dockerfile
+        environment:
+            MCP_EMAIL_HOST: 0.0.0.0
+            MCP_EMAIL_PORT: 8000
+            MCP_EMAIL_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MCP_EMAIL_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            MCP_EMAIL_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
+            MCP_EMAIL_INTERNAL_SERVICE_TOKEN: ${MCP_EMAIL_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            MCP_EMAIL_TRUSTED_SIGNATURE_KEYS: ${REPORT_SIGNING_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
+            MCP_EMAIL_SMTP_HOST: ${MCP_EMAIL_SMTP_HOST:-mailpit}
+            MCP_EMAIL_SMTP_PORT: ${MCP_EMAIL_SMTP_PORT:-1025}
+            MCP_EMAIL_SMTP_USERNAME: ${MCP_EMAIL_SMTP_USERNAME:-}
+            MCP_EMAIL_SMTP_PASSWORD: ${MCP_EMAIL_SMTP_PASSWORD:-}
+            MCP_EMAIL_SMTP_USE_TLS: "${MCP_EMAIL_SMTP_USE_TLS:-false}"
+            MCP_EMAIL_NO_REPLY_ADDRESS: ${MCP_EMAIL_NO_REPLY_ADDRESS:-no-reply@argos.local}
+            MCP_EMAIL_RESOURCE_SERVER_URL: http://mcp_email:8000/mcp
+            MCP_EMAIL_AUTH_ISSUER_URL: http://main_api:8000
+        depends_on:
+            mongo:
+                condition: service_healthy
+            postgres:
+                condition: service_healthy
+            mailpit:
+                condition: service_healthy
+        read_only: true
+        tmpfs: ["/tmp:mode=1777,size=16m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        mem_limit: 512m
+        cpus: 0.5
+
+    a2a_agent:
+        profiles: ["apps"]
+        build:
+            context: .
+            dockerfile: apps/a2a_agent/Dockerfile
+        environment:
+            A2A_HOST: 0.0.0.0
+            A2A_PORT: 8000
+            A2A_ENDPOINT_URL: http://a2a_agent:8000/a2a
+            A2A_OBSERVABILITY_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            A2A_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
+            USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
+            A2A_OBSERVABILITY_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
+            A2A_OBSERVABILITY_COLLECTION: ${A2A_OBSERVABILITY_COLLECTION:-ai_a2a_observations}
+            A2A_QDRANT_URL: http://qdrant:6333
+            A2A_QDRANT_READ_API_KEY: local-qdrant-read-only
+            A2A_QDRANT_WRITE_API_KEY: local-qdrant-index-writer
+            A2A_QDRANT_COLLECTION: argos_local_documents
+            A2A_QDRANT_VECTOR_SIZE: ${A2A_QDRANT_VECTOR_SIZE:-64}
+            A2A_MODEL_MODE: ${ARGOS_MODEL_MODE:-simulated}
+            MODEL_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_INPUT_COST_PER_MILLION_TOKENS:-}
+            MODEL_OUTPUT_COST_PER_MILLION_TOKENS: ${MODEL_OUTPUT_COST_PER_MILLION_TOKENS:-}
+            A2A_EMBEDDINGS_API_URL: ${A2A_EMBEDDINGS_API_URL:-}
+            A2A_EMBEDDINGS_API_KEY: ${A2A_EMBEDDINGS_API_KEY:-}
+            A2A_EMBEDDINGS_MODEL: ${A2A_EMBEDDINGS_MODEL:-}
+            A2A_EMBEDDINGS_MODEL_REVISION: ${A2A_EMBEDDINGS_MODEL_REVISION:-}
+            A2A_ANSWER_API_URL: ${A2A_ANSWER_API_URL:-}
+            A2A_ANSWER_API_KEY: ${A2A_ANSWER_API_KEY:-}
+            A2A_ANSWER_MODEL: ${A2A_ANSWER_MODEL:-}
+            A2A_ANSWER_THINKING: ${A2A_ANSWER_THINKING:-auto}
+            A2A_MODEL_TIMEOUT_SECONDS: ${A2A_MODEL_TIMEOUT_SECONDS:-40}
+            A2A_MODEL_MAX_OUTPUT_TOKENS: ${A2A_MODEL_MAX_OUTPUT_TOKENS:-4096}
+            A2A_LANGSMITH_API_KEY: ${A2A_LANGSMITH_API_KEY:-}
+            A2A_LANGSMITH_PROJECT: ${A2A_LANGSMITH_PROJECT:-argos-ai-service}
+            A2A_LANGSMITH_ENDPOINT: ${A2A_LANGSMITH_ENDPOINT:-}
+            A2A_LANGSMITH_WORKSPACE_ID: ${A2A_LANGSMITH_WORKSPACE_ID:-}
+            A2A_LANGSMITH_CAPTURE_CONTENT: "${A2A_LANGSMITH_CAPTURE_CONTENT:-false}"
+            A2A_INTERNAL_SERVICE_TOKEN: ${A2A_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
+            A2A_RESOURCE_SERVER_URL: http://a2a_agent:8000/a2a
+            A2A_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
+            A2A_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
+            A2A_PERMISSION_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
+            A2A_DOCUMENT_SOURCE_ROOT: /var/lib/argos/a2a/documents
+            A2A_MANIFEST_PATH: /var/lib/argos/a2a/state/manifest.json
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+            qdrant:
+                condition: service_healthy
+        ports:
+            - "127.0.0.1:${A2A_PUBLISHED_PORT:-8001}:8000"
+        volumes:
+            - ./apps/a2a_agent/data/documents:/var/lib/argos/a2a/documents:ro
+            - a2a-state:/var/lib/argos/a2a/state
+        read_only: true
+        tmpfs: ["/tmp:mode=1777,size=16m"]
+        cap_drop: ["ALL"]
+        security_opt: ["no-new-privileges:true"]
+        mem_limit: 1g
+        cpus: 1.0
+        healthcheck:
+            test:
+                - CMD
+                - python
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+            interval: 15s
+            timeout: 3s
+            retries: 3
+            start_period: 20s
+
+volumes:
+    mongo-data:
+    postgres-data:
+    qdrant-data:
+    a2a-state:

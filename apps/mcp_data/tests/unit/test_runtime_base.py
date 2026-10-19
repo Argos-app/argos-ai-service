@@ -1,5 +1,7 @@
 """Verificações da fundação do runtime MCP de dados."""
 
+import base64
+
 import pytest
 from argos_mcp_data.application import CattleQueryService
 from argos_mcp_data.server import (
@@ -8,9 +10,17 @@ from argos_mcp_data.server import (
     register_cattle_tools,
 )
 from argos_mcp_data.settings import Settings
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 def complete_settings(**overrides: object) -> Settings:
+    signing_key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+    signing_key_der = signing_key.private_bytes(
+        serialization.Encoding.DER,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
     values: dict[str, object] = {
         "sql_dsn": "postgresql://readonly@localhost/argos",
         "mongo_uri": "mongodb://readonly@localhost:27017",
@@ -24,6 +34,8 @@ def complete_settings(**overrides: object) -> Settings:
         "mcp_resource_server_url": "https://data.example.test/mcp",
         "delegation_issuer": "argos-main-service",
         "trusted_delegation_keys": (("test-key", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),),
+        "report_signing_key_id": "report-test-key",
+        "report_signing_private_key": base64.b64encode(signing_key_der).decode("ascii"),
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
@@ -50,6 +62,7 @@ def test_cattle_tools_are_registered_with_typed_payload_schemas() -> None:
         "list_properties",
         "list_herds",
         "list_lots",
+        "get_lot_report_source",
         "list_exception_animals",
         "list_applications",
         "list_application_animals",

@@ -152,7 +152,7 @@ def test_forecast_can_include_february_29_and_year_boundary():
 
 
 @pytest.mark.parametrize("state", [CoverageState.UNKNOWN, CoverageState.INCOMPLETE])
-def test_unconfirmed_coverage_does_not_block_estimate_and_fills_missing_months(state):
+def test_unconfirmed_coverage_blocks_estimate_and_does_not_fill_missing_months(state):
     selected = group()
     windows = build_prediction_windows(date(2024, 12, 31), today=TODAY)
     evidence = CoverageRecord(selected.property_id, state, reason="Cobertura não comprovada")
@@ -162,17 +162,17 @@ def test_unconfirmed_coverage_does_not_block_estimate_and_fills_missing_months(s
         coverage=evidence,
         windows=windows,
     )
-    assert result.estimate.state == ConsumptionState.ESTIMATED
-    assert result.estimate.quantity == 28
-    assert result.estimate.application_events == 28
-    assert result.estimate.head_administrations == 28
-    assert len(result.monthly_history) == 12
+    assert result.estimate.state == ConsumptionState.INSUFFICIENT_DATA
+    assert result.estimate.quantity is None
+    assert len(result.monthly_history) == 1
+    assert result.monthly_history[0].month == 1
+    assert result.monthly_history[0].quantity == 31
 
 
 @pytest.mark.parametrize(
     "change", ["missing", "no_source", "no_window", "short_start", "short_end"]
 )
-def test_unusable_coverage_does_not_block_estimation(change):
+def test_unusable_coverage_blocks_estimation(change):
     selected = group()
     windows = build_prediction_windows(date(2024, 12, 31), today=TODAY)
     evidence = confirmed(selected, windows)
@@ -189,9 +189,9 @@ def test_unusable_coverage_does_not_block_estimation(change):
     result = calculate_consumption(
         selected, (record(selected, 1, "31"),), coverage=evidence, windows=windows
     )
-    assert result.estimate.state == ConsumptionState.ESTIMATED
-    assert result.estimate.quantity == 28
-    assert len(result.monthly_history) == 12
+    assert result.estimate.state == ConsumptionState.INSUFFICIENT_DATA
+    assert result.estimate.quantity is None
+    assert len(result.monthly_history) == 1
 
 
 def test_no_product_history_is_not_zero_even_with_confirmed_coverage():
@@ -206,7 +206,7 @@ def test_no_product_history_is_not_zero_even_with_confirmed_coverage():
     assert "sem histórico" in result.estimate.reason
 
 
-def test_zero_for_a_missing_month_does_not_require_coverage_confirmation():
+def test_zero_for_a_missing_month_requires_coverage_confirmation():
     selected = group()
     windows = build_prediction_windows(date(2024, 12, 31), today=TODAY)
     records = (record(selected, 2, "29"),)
@@ -217,8 +217,9 @@ def test_zero_for_a_missing_month_does_not_require_coverage_confirmation():
     assert result.estimate.quantity == 0  # Missing January is assumed to have no consumption.
     assert len(result.monthly_history) == 12
     unknown = calculate_consumption(selected, records, coverage=None, windows=windows)
-    assert unknown.estimate.quantity == 0
-    assert len(unknown.monthly_history) == 12
+    assert unknown.estimate.quantity is None
+    assert unknown.estimate.state == ConsumptionState.INSUFFICIENT_DATA
+    assert len(unknown.monthly_history) == 1
 
 
 def test_decimal_calculation_is_independent_of_ambient_precision_and_traps():

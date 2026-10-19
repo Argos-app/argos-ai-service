@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from argos_a2a_agent.adapters.observability.langsmith import attach_provider_billing
 from argos_a2a_agent.adapters.observability.recording import OperationRecorder
 from packages.observability import (
     ErrorOrigin,
@@ -13,6 +14,7 @@ from packages.observability import (
     Usage,
     UsageAvailability,
     UsageSource,
+    billing_with_fallback,
 )
 
 
@@ -63,11 +65,33 @@ class OpenAICompatibleHTTP:
                 ) from exc
             raise
         if recorder is not None:
+            usage = _provider_usage(result.get("usage"))
+            is_embedding = operation_route.rstrip("/").endswith("embeddings")
+            billing = billing_with_fallback(
+                result,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                embedding=is_embedding,
+            )
             recorder.finish(
                 http=_http_metadata(operation_route, status_code),
                 model_returned=_safe_identifier(result.get("model")),
-                usage=_provider_usage(result.get("usage")),
+                usage=usage,
+                billing=billing,
             )
+        else:
+            usage = _provider_usage(result.get("usage"))
+            billing = billing_with_fallback(
+                result,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                embedding=operation_route.rstrip("/").endswith("embeddings"),
+            )
+        attach_provider_billing(
+            billing,
+            usage.model_dump(mode="json", exclude_none=True),
+            embedding=is_embedding,
+        )
         return result
 
     async def aclose(self) -> None:
@@ -97,8 +121,12 @@ def _provider_usage(value: Any) -> Usage:
     completion_details = value.get("completion_tokens_details")
     prompt_details = prompt_details if isinstance(prompt_details, dict) else {}
     completion_details = completion_details if isinstance(completion_details, dict) else {}
-    input_tokens = _count(value.get("prompt_tokens"))
-    output_tokens = _count(value.get("completion_tokens"))
+    input_tokens = _count(value.get("input_tokens"))
+    if input_tokens is None:
+        input_tokens = _count(value.get("prompt_tokens"))
+    output_tokens = _count(value.get("output_tokens"))
+    if output_tokens is None:
+        output_tokens = _count(value.get("completion_tokens"))
     total_tokens = _count(value.get("total_tokens"))
     cache_read = _count(prompt_details.get("cached_tokens"))
     cache_write = _count(prompt_details.get("cache_creation_tokens"))
@@ -107,6 +135,8 @@ def _provider_usage(value: Any) -> Usage:
     canonical = {
         "prompt_tokens",
         "completion_tokens",
+        "input_tokens",
+        "output_tokens",
         "total_tokens",
         "cached_tokens",
         "cache_creation_tokens",

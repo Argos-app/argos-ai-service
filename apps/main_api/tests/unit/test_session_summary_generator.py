@@ -13,6 +13,7 @@ from app.infrastructure.agents.session_summary_generator import (
     LangChainSessionSummaryGenerator,
     SummaryGenerationError,
 )
+from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.session_config import SESSION_SUMMARY_MAX_TOKENS
 
 
@@ -96,6 +97,36 @@ async def test_generator_publishes_structured_summary_with_measured_token_count(
     assert summary.session_id == session_id
     assert summary.through_user_message_number == 15
     assert summary.important_facts[0].source_references == ("farm://15",)
+    assert summary.token_count == model.get_num_tokens(summary.summary_text)
+
+
+def test_simulated_model_counts_tokens_deterministically_without_provider():
+    model = SimulatedChatModel()
+
+    assert model.get_num_tokens("") == 0
+    assert model.get_num_tokens("ab cde") == 2
+    assert model.get_num_tokens("ab cde") == model.get_num_tokens("ab cde")
+
+
+@pytest.mark.asyncio
+async def test_simulated_model_generates_a_valid_session_summary():
+    model = SimulatedChatModel()
+    generator = LangChainSessionSummaryGenerator(model, input_token_limit=8_000)
+    session_id = uuid4()
+
+    summary = await generator.generate(
+        session_id=session_id,
+        previous=None,
+        messages=(_message("Marcador sintético para validar o resumo da sessão."),),
+        events=(),
+        through_user_message_number=15,
+        max_tokens=SESSION_SUMMARY_MAX_TOKENS,
+    )
+
+    assert summary.session_id == session_id
+    assert summary.through_user_message_number == 15
+    assert "Marcador sintético" in summary.activity
+    assert any("modo simulado" in item for item in summary.limitations)
     assert summary.token_count == model.get_num_tokens(summary.summary_text)
 
 

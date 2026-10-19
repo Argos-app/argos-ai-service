@@ -11,11 +11,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.settings import Settings
+from packages.observability import current_correlation_id, current_parent_observation_id
 
 _AGENT_OPERATIONS = {
     "data": {
         "fazenda": frozenset({"cattle.read", "medicine.read", "report.read"}),
         "doutor": frozenset({"medicine.read"}),
+        "analista": frozenset({"cattle.read"}),
     },
     "prediction": {"analista": frozenset({"prediction.read"})},
 }
@@ -112,6 +114,12 @@ class McpDelegationTokenIssuer:
             "agent": agent,
             "operations": [operation],
             "request_id": request_identifier,
+            "correlation_id": str(current_correlation_id() or request_identifier),
+            "parent_observation_id": (
+                str(current_parent_observation_id())
+                if current_parent_observation_id() is not None
+                else None
+            ),
             "jti": str(uuid4()),
             "iat": issued_at,
             "nbf": issued_at,

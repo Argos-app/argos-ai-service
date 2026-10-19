@@ -22,10 +22,11 @@ from argos_mcp_data.domain.errors import AccessContextError
 _ACCESS_CONTEXT_KEY = "argos_mcp_data_access_context"
 _TOKEN_PART = re.compile(r"^[A-Za-z0-9_-]+$")
 _OPERATION = re.compile(r"^[a-z][a-z0-9_.:-]{0,63}$")
-_AGENTS = {"fazenda", "doutor"}
+_AGENTS = {"fazenda", "doutor", "analista"}
 _AGENT_OPERATIONS = {
     "fazenda": {"cattle.read", "medicine.read", "report.read"},
     "doutor": {"medicine.read"},
+    "analista": {"cattle.read"},
 }
 _MAX_TOKEN_BYTES = 16_384
 
@@ -182,7 +183,22 @@ class DelegationTokenVerifier:
             expires_at=datetime.fromtimestamp(expires_at, UTC),
             token_id=token_id,
             request_id=request_id,
+            correlation_id=self._optional_uuid_claim(claims, "correlation_id"),
+            parent_observation_id=self._optional_uuid_claim(claims, "parent_observation_id"),
         )
+
+    @staticmethod
+    def _optional_uuid_claim(claims: dict[str, Any], name: str) -> UUID | None:
+        value = claims.get(name)
+        if value is None:
+            return None
+        try:
+            parsed = UUID(value) if isinstance(value, str) else None
+        except ValueError as exc:
+            raise AccessContextError("contexto delegado inválido") from exc
+        if parsed is None or str(parsed) != value.lower():
+            raise AccessContextError("contexto delegado inválido")
+        return parsed
 
     @staticmethod
     def _valid_identifier(value: Any) -> bool:

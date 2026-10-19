@@ -16,6 +16,10 @@ class EmailSendAuthorizationConflictError(RuntimeError):
 
 
 class EmailPreparationRepository(Protocol):
+    async def list_prepared_for_session(
+        self, *, principal_user_id: UUID, session_id: UUID, limit: int = 20
+    ) -> tuple[EmailPreparation, ...]: ...
+
     async def find_matching(
         self,
         *,

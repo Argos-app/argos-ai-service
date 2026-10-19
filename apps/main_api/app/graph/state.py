@@ -1,6 +1,6 @@
 from app.agent_schemas.inputs import QuestionFormattingRequest, SessionContext
 from app.agent_schemas.results import JudgeResult, RoutePlan, RouteTask, SourceReference
-from app.agent_schemas.synthesis import OrchestratorResult, TaskOutcome
+from app.agent_schemas.synthesis import EmailDispatchEvidence, OrchestratorResult, TaskOutcome
 from langgraph.graph import MessagesState
 
 
@@ -19,6 +19,8 @@ class AgentState(MessagesState):
     send_intent_requested: bool
     send_intent_source_interaction_id: str | None
     email_action_summary: str | None
+    email_dispatch_evidence: EmailDispatchEvidence | None
+    email_preparation_confirmed: bool
 
     route: list[str]
     route_plan: RoutePlan | None

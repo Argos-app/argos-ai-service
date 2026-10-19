@@ -52,3 +52,24 @@ async def test_returns_ambiguous_for_multiple_active_users_with_same_name() -> N
     )
 
     assert result[0].status == RecipientResolutionStatus.AMBIGUOUS
+
+
+@pytest.mark.asyncio
+async def test_normalizes_unicode_apostrophe_for_exact_name_lookup() -> None:
+    executor = FakeSqlExecutor(
+        [
+            {
+                "id": UUID("00000000-0000-4000-8000-000000000013"),
+                "name": "Vinicius D'Oliveira",
+                "email": "vinicius.doliveira@example.com",
+            }
+        ]
+    )
+
+    result = await RelationalRecipientDirectory(executor).resolve(
+        (RecipientSelector(kind="name", value="Vinicius D’Oliveira"),)
+    )
+
+    assert result[0].status == RecipientResolutionStatus.RESOLVED
+    assert result[0].matches[0].name == "Vinicius D'Oliveira"
+    assert executor.calls[0][1] == ("Vinicius D'Oliveira", "name")

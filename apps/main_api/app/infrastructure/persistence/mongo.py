@@ -27,6 +27,7 @@ from app.domain.sessions import (
 from app.infrastructure.persistence.email_preparations import MongoEmailPreparationRepository
 from app.infrastructure.persistence.errors import PersistenceConflictError
 from app.infrastructure.persistence.report_artifacts import MongoReportArtifactRepository
+from app.settings import MongoCollectionSettings
 
 
 def _is_duplicate(exc: Exception) -> bool:
@@ -811,28 +812,29 @@ def _current_lease_filter(
 class MongoPersistence:
     """Conjunto injetável dos repositórios e coleções Mongo do serviço."""
 
-    def __init__(self, database: Any) -> None:
-        sessions = database["ai_sessions"]
+    def __init__(self, database: Any, collections: MongoCollectionSettings | None = None) -> None:
+        names = collections or MongoCollectionSettings()
+        sessions = database[names.sessions]
         self.sessions = MongoSessionRepository(sessions)
-        self.interactions = MongoInteractionRepository(database["ai_interactions"])
-        self.conversations = MongoConversationRepository(database["ai_messages"], sessions)
+        self.interactions = MongoInteractionRepository(database[names.interactions])
+        self.conversations = MongoConversationRepository(database[names.messages], sessions)
         self.execution_events = MongoExecutionEventRepository(
-            database["ai_execution_events"], sessions
+            database[names.execution_events], sessions
         )
-        self.session_summaries = MongoSessionSummaryRepository(database["ai_session_summaries"])
-        self.user_memory = MongoUserMemoryRepository(database["ai_user_memory"])
-        self.report_artifacts = MongoReportArtifactRepository(database["ai_report_artifacts"])
+        self.session_summaries = MongoSessionSummaryRepository(database[names.session_summaries])
+        self.user_memory = MongoUserMemoryRepository(database[names.user_memory])
+        self.report_artifacts = MongoReportArtifactRepository(database[names.report_artifacts])
         self.email_preparations = MongoEmailPreparationRepository(
-            database["ai_email_preparations"],
-            database["ai_pending_recipient_resolutions"],
-            database["ai_email_send_authorizations"],
-            database["ai_email_operation_references"],
+            database[names.email_preparations],
+            database[names.pending_recipient_resolutions],
+            database[names.email_send_authorizations],
+            database[names.email_operation_references],
         )
         self.session_work = MongoSessionWorkRepository(
             database,
             sessions,
-            database["ai_interactions"],
-            database["ai_messages"],
+            database[names.interactions],
+            database[names.messages],
         )
 
     async def ensure_indexes(self) -> None:

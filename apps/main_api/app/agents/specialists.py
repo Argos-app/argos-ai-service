@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from app.agent_schemas.results import (
@@ -22,6 +22,7 @@ from app.infrastructure.agents.langchain_factory import (
     LangChainAgentFactory,
     validate_agent_configuration,
 )
+from app.infrastructure.agents.model_factory import validate_model_capabilities
 from app.infrastructure.mcp.client import McpClients
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.infrastructure.mcp.langchain_tools import build_mcp_tool_bindings
@@ -41,8 +42,10 @@ from app.prompts.specialists import (
     SECRETARY_SYSTEM_PROMPT,
 )
 from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from langchain_core.tools import BaseTool
 
+from packages.contracts.a2a import DocumentSkill
 from packages.observability import ObservationCollector
 
 AgentToolBindings = Mapping[AgentId, Mapping[str, Sequence[BaseTool]]]
@@ -117,9 +120,11 @@ def build_agent_factory(
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
     observation_collector: ObservationCollector | None = None,
+    report_signature_checker: Callable[[bytes, str, str], bool] | None = None,
     documental_a2a_client: DocumentA2AClient | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
+    validate_model_capabilities(models, registry=registry)
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
     if mcp_clients is not None:
         overrides.update(
@@ -129,11 +134,13 @@ def build_agent_factory(
                 report_artifacts=report_artifacts,
                 email_preparations=email_preparations,
                 observation_collector=observation_collector,
+                report_signature_checker=report_signature_checker,
             )
         )
     if documental_a2a_client is not None:
         overrides.setdefault(AgentId.INFORMATION, {})["documental_a2a"] = (
             build_document_a2a_tool(documental_a2a_client),
+            build_document_a2a_tool(documental_a2a_client, skill=DocumentSkill.LEGAL),
         )
     for agent_id, slots in (tool_bindings or {}).items():
         overrides.setdefault(agent_id, {}).update(
@@ -183,56 +190,80 @@ def build_agent_factory(
         model=models[ModelPolicyId.ROUTER],
         tools=[],
         system_prompt=ROUTER_SYSTEM_PROMPT,
-        response_format=RoutePlan,
+        # The configured NVIDIA OpenAI-compatible endpoint returns HTTP 500
+        # for RoutePlan's native JSON Schema response, while function calling
+        # accepts the same schema and validates the resulting object.
+        response_format=ToolStrategy(RoutePlan, handle_errors=False),
     )
 
     farm_app = create_agent(
         model=models[ModelPolicyId.FARM],
         tools=tools_for(AgentId.FARM),
         system_prompt=FARM_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     doctor_app = create_agent(
         model=models[ModelPolicyId.DOCTOR],
         tools=tools_for(AgentId.DOCTOR),
         system_prompt=DOCTOR_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     analyst_app = create_agent(
         model=models[ModelPolicyId.ANALYST],
         tools=tools_for(AgentId.ANALYST),
         system_prompt=ANALYST_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     secretary_app = create_agent(
         model=models[ModelPolicyId.SECRETARY],
         tools=tools_for(AgentId.SECRETARY),
         system_prompt=SECRETARY_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
     information_app = create_agent(
         model=models[ModelPolicyId.INFORMATION],
         tools=tools_for(AgentId.INFORMATION),
         system_prompt=INFORMATION_SYSTEM_PROMPT,
-        response_format=SpecialistResult,
+        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
+    )
+
+    simulated_runtime = (
+        getattr(models[ModelPolicyId.ORCHESTRATOR], "_llm_type", None) == "argos_simulated"
+    )
+    orchestrator_options = (
+        {"response_format": ToolStrategy(OrchestratorResult, handle_errors=False)}
+        if simulated_runtime
+        else {}
+    )
+    judge_options = (
+        {"response_format": ToolStrategy(JudgeResult, handle_errors=False)}
+        if simulated_runtime
+        else {}
     )
 
     orchestrator_app = create_agent(
         model=models[ModelPolicyId.ORCHESTRATOR],
         tools=[],
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-        response_format=OrchestratorResult,
+        # The Orchestrator has no tools. Keep its final text/JSON response raw
+        # and validate it in LangChainAgentFactory; ToolStrategy made compatible
+        # providers retry plain answers as synthetic tool calls and consume the
+        # full execution deadline.
+        **orchestrator_options,
     )
 
     judge_app = create_agent(
         model=models[ModelPolicyId.JUDGE],
         tools=[],
         system_prompt=JUDGE_SYSTEM_PROMPT,
-        response_format=JudgeResult,
+        # Validate JSON or an explicit verdict in LangChainAgentFactory. Asking
+        # the compatible endpoint for native structured output made the judge
+        # fail before the application could validate the same contract.
+        **judge_options,
     )
 
     question_formatter_app = create_agent(

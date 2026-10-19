@@ -5,6 +5,10 @@ from dataclasses import dataclass
 
 EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
 CPF_PATTERN = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
+CNPJ_PATTERN = re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b")
+PHONE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:\+?55[\s.-]?)?\(?[1-9]\d\)?[\s.-]?9?\d{4}[\s.-]?\d{4}(?![A-Za-z0-9_-])"
+)
 SECRET_VALUE_PATTERN = re.compile(
     r"(?i)(\b(?:bearer|password|passwd|secret|api[_-]?key|access[_-]?token|token)\b\s*[:= ]\s*)"
     r"([^\s,;]+)"
@@ -12,14 +16,26 @@ SECRET_VALUE_PATTERN = re.compile(
 _SEND_VERB_PATTERN = re.compile(
     r"\b(?:envie|enviar|mande|mandar|encaminhe|encaminhar)\b", re.IGNORECASE
 )
-_QUOTED_NAME_PATTERN = re.compile(
-    r"\bpara\s+(?:o\s+contato\s+)?[\"“](?P<name>[^\"”]{2,100})[\"”]",
+_EMAIL_WORKFLOW_CONTEXT_PATTERN = re.compile(
+    r"\b(?:e-?mail|relat[óo]rio|destinat[áa]rio|envie|enviar|mande|mandar|"
+    r"encaminhe|encaminhar|prepare|preparar|gerar|gerado)\b",
     re.IGNORECASE,
 )
+_QUOTED_NAME_PATTERN = re.compile(
+    r"\bpara\s+(?:(?:o|a|os|as)\s+)?"
+    r"(?:(?:seguinte|seguintes|usuári[oa]s?|contatos?|destinatári[oa]s?)\s+){0,2}"
+    r"[\"“](?P<name>[^\"”]{2,100})[\"”]",
+    re.IGNORECASE,
+)
+_NAME_TOKEN = r"[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ÿ'’-]*"
+_NAME_ITEM = rf"{_NAME_TOKEN}(?:\s+(?:(?:da|das|de|do|dos)\s+)?{_NAME_TOKEN}){{0,3}}"
+_NAME_ITEM_PATTERN = re.compile(_NAME_ITEM)
 _UNQUOTED_NAME_PATTERN = re.compile(
-    r"\bpara\s+(?P<name>[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ÿ'’-]*"
-    r"(?:\s+(?:da|das|de|do|dos|e\s+)?[A-ZÁÉÍÓÚÂÊÔÃÕÇ][\wÀ-ÿ'’-]*){0,3})"
-    r"(?=\s*(?:[,.;!?]|$|\b(?:por\s+e-?mail|no\s+e-?mail|com\s+o\s+endereço)\b))"
+    r"\bpara\s+(?:(?:o|a|os|as)\s+)?"
+    r"(?:(?:seguinte|seguintes|usuári[oa]s?|contatos?|destinatári[oa]s?)\s+){0,2}"
+    rf"(?P<names>{_NAME_ITEM}(?:\s*(?:[,;]\s*|\s+e\s+){_NAME_ITEM})*)"
+    r"(?=\s*(?:[,.;!?]|$|\b(?:e\s+)?para\b|"
+    r"\b(?:por\s+e-?mail|no\s+e-?mail|com\s+o\s+endereço)\b))"
 )
 
 
@@ -64,9 +80,13 @@ def merge_recipient_selectors(
 
 
 def protect_user_input(text: str) -> ProtectedInput:
-    """Substitui destinatários explícitos por referências e remove outra PII."""
+    """Extrai e-mails como seletores sem ocultá-los; minimiza outras PII."""
     candidates: list[tuple[int, int, str, str]] = []
+    send_requested = _has_positive_send_intent(text)
     for match in EMAIL_PATTERN.finditer(text):
+        # Endereços são capturados como seletores independentemente da formulação
+        # ao redor. A Secretaria ainda resolve cada seletor no diretório; capturar
+        # um endereço nunca autoriza preparação ou envio.
         prefix_start = max(0, match.start() - 32)
         prefix = text[prefix_start : match.start()]
         destination = re.search(
@@ -75,15 +95,40 @@ def protect_user_input(text: str) -> ProtectedInput:
             re.IGNORECASE,
         )
         if destination:
-            start = prefix_start + destination.start("label")
-            end = match.end() + int(text[match.end() : match.end() + 1] == ">")
-            candidates.append((start, end, "email", match.group()))
+            recipient_name = destination.group("label").strip()
+            if recipient_name and _NAME_ITEM_PATTERN.fullmatch(recipient_name):
+                name_start = prefix_start + destination.start("label")
+                candidates.append(
+                    (
+                        name_start,
+                        name_start + len(recipient_name),
+                        "masked_name",
+                        recipient_name,
+                    )
+                )
+        end = match.end() + int(text[match.end() : match.end() + 1] == ">")
+        candidates.append((match.start(), end, "email", match.group()))
 
-    for pattern in (_QUOTED_NAME_PATTERN, _UNQUOTED_NAME_PATTERN):
+    name_patterns = []
+    # Nomes, com ou sem aspas, só são seletores no contexto de uma
+    # operação de e-mail. Assim, "para Ivervet Teste" numa consulta de catálogo
+    # permanece texto de negócio, não vira um destinatário.
+    if _EMAIL_WORKFLOW_CONTEXT_PATTERN.search(text):
+        name_patterns.extend((_QUOTED_NAME_PATTERN, _UNQUOTED_NAME_PATTERN))
+    for pattern in name_patterns:
         for match in pattern.finditer(text):
-            name = match.group("name").strip()
-            if name:
-                candidates.append((match.start("name"), match.end("name"), "name", name))
+            if pattern is _UNQUOTED_NAME_PATTERN:
+                names = match.group("names")
+                for name_match in _NAME_ITEM_PATTERN.finditer(names):
+                    name = name_match.group().strip()
+                    if name:
+                        start = match.start("names") + name_match.start()
+                        end = match.start("names") + name_match.end()
+                        candidates.append((start, end, "name", name))
+            else:
+                name = match.group("name").strip()
+                if name:
+                    candidates.append((match.start("name"), match.end("name"), "name", name))
 
     candidates.sort(key=lambda item: (item[0], item[1]))
     selected: list[tuple[int, int, str, str]] = []
@@ -94,6 +139,8 @@ def protect_user_input(text: str) -> ProtectedInput:
     selectors: dict[str, dict[str, str]] = {}
     ref_by_selector: dict[tuple[str, str], str] = {}
     for _, _, kind, value in selected:
+        if kind == "masked_name":
+            continue
         key = (kind, value.strip().casefold())
         reference = ref_by_selector.get(key)
         if reference is None:
@@ -103,11 +150,15 @@ def protect_user_input(text: str) -> ProtectedInput:
 
     sanitized = text
     for start, end, kind, value in reversed(selected):
+        if kind == "email":
+            continue
+        if kind == "masked_name":
+            sanitized = sanitized[:start] + "[NOME]" + sanitized[end:]
+            continue
         reference = ref_by_selector[(kind, value.strip().casefold())]
         sanitized = sanitized[:start] + reference + sanitized[end:]
 
     sanitized = minimize_sensitive_memory_input(sanitized)
-    send_requested = _has_positive_send_intent(text)
     return ProtectedInput(sanitized, selectors, send_requested)
 
 
@@ -121,12 +172,13 @@ def _has_positive_send_intent(text: str) -> bool:
 
 
 def minimize_pii(text: str) -> str:
-    """Remove os identificadores pessoais cobertos pelo guardrail atual."""
-    return CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
+    """Remove CPF, CNPJ e telefone; e-mails permanecem sem anonimização."""
+    return PHONE_PATTERN.sub(
+        "[TELEFONE]",
+        CNPJ_PATTERN.sub("[CNPJ]", CPF_PATTERN.sub("[CPF]", text)),
+    )
 
 
 def minimize_sensitive_memory_input(text: str) -> str:
-    """Remove PII e valores com aparência de credencial antes de extrair perfil."""
-    return SECRET_VALUE_PATTERN.sub(
-        r"\1[REDACTED]", CPF_PATTERN.sub("[CPF]", EMAIL_PATTERN.sub("[EMAIL]", text))
-    )
+    """Remove CPF, CNPJ, telefone e credenciais antes de extrair perfil."""
+    return SECRET_VALUE_PATTERN.sub(r"\1[REDACTED]", minimize_pii(text))

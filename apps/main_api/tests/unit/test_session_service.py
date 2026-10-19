@@ -7,17 +7,18 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.agent_schemas.inputs import QuestionFormattingRequest
-from app.api.v1.dependencies.auth import Principal
-from app.api.v1.models.interactions import (
-    AnswerChoice,
-    AnswerInteraction,
-    AnswerText,
-    InteractionResult,
-    MessageInteraction,
-    QuestionOption,
-    QuestionResponse,
+from app.application.contracts.interactions import (
+    AnswerCommand,
+    ChoiceAnswer,
+    InteractionOutcome,
+    MessageCommand,
+    QuestionOptionResult,
+    QuestionResult,
+    TextAnswer,
 )
-from app.application.session_service import MongoSessionService
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.identity import ActorContext
+from app.application.session_service import SessionApplicationService, _response_from_state
 from app.domain.email_preparations import PendingRecipientOption, PendingRecipientResolution
 from app.domain.memory import (
     MemoryFieldAction,
@@ -33,13 +34,56 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
-from fastapi import HTTPException
 
 from packages.contracts import RecipientSelector
+from packages.observability import correlation_key
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def test_response_marks_tool_or_agent_failures_as_degraded():
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={"final_answer": "A consulta falhou.", "errors": ["farm_failed"]},
+        now=_utcnow(),
+    )
+
+    assert outcome.status == "degraded"
+    assert outcome.degradation_reasons == ("farm_failed",)
+
+
+def test_response_marks_successful_graph_results_as_completed():
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={"final_answer": "Consulta concluída.", "errors": []},
+        now=_utcnow(),
+    )
+
+    assert outcome.status == "completed"
+
+
+def test_response_hides_executor_report_artifact_reference():
+    reference = str(uuid4())
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={
+            "final_answer": f"O relatório foi preparado. Referência: {reference}",
+            "report_artifact_refs": {"farm-task": (reference,)},
+        },
+        now=_utcnow(),
+    )
+
+    assert outcome.response.kind == "answer"
+    assert reference not in outcome.response.text
+    assert "[referência interna]" in outcome.response.text
 
 
 class FakeSessionRepository:
@@ -273,14 +317,8 @@ class FakePendingRecipientRepository:
         return current if matches else None
 
 
-def _principal() -> Principal:
-    return Principal(
-        user_id=uuid4(),
-        email="user@example.invalid",
-        name="Test User",
-        permission="USER",
-        farm_ids=[uuid4()],
-    )
+def _principal() -> ActorContext:
+    return ActorContext(user_id=uuid4(), farm_ids=(uuid4(),))
 
 
 def _service(graph=None, **options):
@@ -288,7 +326,7 @@ def _service(graph=None, **options):
     interactions = FakeInteractionRepository()
     conversations = FakeConversationRepository()
     work = FakeSessionWorkRepository(sessions, interactions, conversations)
-    service = MongoSessionService(
+    service = SessionApplicationService(
         sessions=sessions,
         interactions=interactions,
         conversations=conversations,
@@ -321,7 +359,7 @@ async def test_message_is_sanitized_and_replay_counts_once():
     service, sessions, _, conversations = _service(graph)
     principal = _principal()
     session = await service.create_session(principal)
-    request = MessageInteraction(
+    request = MessageCommand(
         kind="message",
         client_message_id=uuid4(),
         message="Preciso consultar usuario@example.invalid",
@@ -336,8 +374,97 @@ async def test_message_is_sanitized_and_replay_counts_once():
     assert record.next_message_sequence == 3
     assert graph.calls == 1
     assert len(conversations.messages) == 2
-    assert conversations.messages[0].sanitized_content.endswith("[EMAIL]")
+    assert conversations.messages[0].sanitized_content.endswith("usuario@example.invalid")
     assert all(message.sequence == index for index, message in enumerate(conversations.messages, 1))
+
+
+@pytest.mark.asyncio
+async def test_langsmith_trace_metadata_contains_interaction_correlation_ids():
+    graph = FakeGraph()
+    callback = object()
+    service, _, _, _ = _service(graph, langsmith_callback=callback)
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte os dados da fazenda.",
+    )
+
+    outcome = await service.create_interaction(principal, session.session_id, request)
+    trace_config = graph.invocations[0][1]
+
+    assert trace_config["metadata"] == {
+        "argos_operation": "session.interaction",
+        "argos_correlation_id": str(outcome.public_request_id),
+        "argos_correlation_key": correlation_key(outcome.public_request_id),
+        "argos_session_id": str(outcome.session_id),
+        "argos_interaction_id": str(outcome.interaction_id),
+    }
+    assert trace_config["callbacks"] == [callback]
+
+
+@pytest.mark.asyncio
+async def test_degraded_result_is_persisted_as_terminal_degraded_status():
+    class DegradedGraph(FakeGraph):
+        async def ainvoke(self, state, *, config):
+            del state, config
+            return {"final_answer": "A consulta foi degradada.", "errors": ["farm_failed"]}
+
+    service, _, interactions, _ = _service(DegradedGraph())
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte os dados da fazenda.",
+    )
+
+    outcome = await service.create_interaction(principal, session.session_id, request)
+    stored = interactions.records[outcome.interaction_id]
+
+    assert outcome.status == "degraded"
+    assert outcome.degradation_reasons == ("farm_failed",)
+    assert stored.status == InteractionStatus.DEGRADED
+    assert stored.result_json is not None
+
+
+@pytest.mark.asyncio
+async def test_degraded_interaction_with_pending_question_can_be_resumed():
+    class DegradedQuestionGraph(FakeGraph):
+        async def ainvoke(self, state, *, config):
+            if state.get("input_kind") == "answer":
+                self.calls += 1
+                self.invocations.append((state, config))
+                return {"final_answer": "Período recebido."}
+            result = await super().ainvoke(state, config=config)
+            result["errors"] = ["router_invalid_output"]
+            return result
+
+    graph = DegradedQuestionGraph()
+    service, _, _, _ = _service(graph)
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message", client_message_id=uuid4(), message="Consulte as aplicações."
+    )
+
+    question = await service.create_interaction(principal, session.session_id, request)
+    assert question.status == "degraded"
+    assert question.response.kind == "question"
+
+    answer = AnswerCommand(
+        kind="answer",
+        interaction_id=question.interaction_id,
+        question_id=question.response.question_id,
+        answer=TextAnswer(kind="text", text="Últimos 30 dias"),
+    )
+    result = await service.create_interaction(principal, session.session_id, answer)
+
+    assert result.status == "completed"
+    assert result.response.kind == "answer"
+    assert result.response.text == "Período recebido."
+    assert graph.calls == 2
 
 
 @pytest.mark.asyncio
@@ -346,15 +473,15 @@ async def test_answer_is_counted_once_and_conflicting_replay_is_rejected():
     service, sessions, _, conversations = _service(graph)
     principal = _principal()
     session = await service.create_session(principal)
-    message = MessageInteraction(
+    message = MessageCommand(
         kind="message", client_message_id=uuid4(), message="Consulte o relatório"
     )
     question = await service.create_interaction(principal, session.session_id, message)
-    answer = AnswerInteraction(
+    answer = AnswerCommand(
         kind="answer",
         interaction_id=question.interaction_id,
         question_id=UUID(graph.question_id),
-        answer=AnswerText(kind="text", text="Últimos 30 dias"),
+        answer=TextAnswer(kind="text", text="Últimos 30 dias"),
     )
 
     result = await service.create_interaction(principal, session.session_id, answer)
@@ -364,13 +491,14 @@ async def test_answer_is_counted_once_and_conflicting_replay_is_rejected():
     assert sessions.records[session.session_id].user_message_count == 2
     assert sessions.records[session.session_id].next_message_sequence == 5
     assert len(conversations.messages) == 4
-    checkpoint_ns = f"interaction-{question.interaction_id}"
-    assert graph.state_configs[0]["configurable"]["checkpoint_ns"] == checkpoint_ns
-    assert graph.invocations[1][1]["configurable"]["checkpoint_ns"] == checkpoint_ns
-    conflicting = answer.model_copy(update={"answer": AnswerText(kind="text", text="Setembro")})
-    with pytest.raises(HTTPException) as error:
+    assert graph.state_configs[0]["configurable"] == {"thread_id": str(session.session_id)}
+    answer_configurable = graph.invocations[1][1]["configurable"]
+    assert answer_configurable["thread_id"] == str(session.session_id)
+    assert "checkpoint_ns" not in answer_configurable
+    conflicting = answer.model_copy(update={"answer": TextAnswer(kind="text", text="Setembro")})
+    with pytest.raises(ApplicationError) as error:
         await service.create_interaction(principal, session.session_id, conflicting)
-    assert error.value.status_code == 409
+    assert error.value.code == ApplicationErrorCode.CONFLICT
     assert graph.calls == 2
 
 
@@ -412,14 +540,14 @@ async def test_ambiguous_recipient_choice_resolves_to_protected_email_selector()
         expires_at=now.replace(year=now.year + 1),
     )
     repository.resolution = pending
-    question = QuestionResponse(
+    question = QuestionResult(
         kind="question",
         question_id=question_id,
         input_type="single_choice",
         prompt="Qual Alex?",
         reason_code="RECIPIENT_AMBIGUOUS",
         options=[
-            QuestionOption(
+            QuestionOptionResult(
                 option_id=selected_option_id,
                 label="Alex Silva (a***@example.com)",
             )
@@ -437,18 +565,18 @@ async def test_ambiguous_recipient_choice_resolves_to_protected_email_selector()
         status=InteractionStatus.COMPLETED,
         created_at=now,
         updated_at=now,
-        result_json=InteractionResult(
+        result_json=InteractionOutcome(
             session_id=session.session_id,
             interaction_id=question_interaction_id,
             public_request_id=uuid4(),
             response=question,
         ).model_dump_json(),
     )
-    answer = AnswerInteraction(
+    answer = AnswerCommand(
         kind="answer",
         interaction_id=question_interaction_id,
         question_id=question_id,
-        answer=AnswerChoice(kind="choice", option_id=selected_option_id),
+        answer=ChoiceAnswer(kind="choice", option_id=selected_option_id),
     )
 
     result = await service._validate_answer(
@@ -567,7 +695,7 @@ async def test_service_summarizes_only_after_the_fifteenth_completed_user_entry(
         await service.create_interaction(
             principal,
             session.session_id,
-            MessageInteraction(
+            MessageCommand(
                 kind="message",
                 client_message_id=uuid4(),
                 message="Quero continuar a consulta.",
@@ -596,7 +724,7 @@ async def test_declared_memory_is_saved_and_used_in_the_same_interaction_context
     await service.create_interaction(
         principal,
         session.session_id,
-        MessageInteraction(
+        MessageCommand(
             kind="message",
             client_message_id=uuid4(),
             message="Prefiro linguagem simples.",

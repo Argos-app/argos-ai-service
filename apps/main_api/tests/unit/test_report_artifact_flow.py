@@ -15,6 +15,7 @@ from app.domain.report_artifacts import (
     ReportArtifactNotFoundError,
 )
 from app.graph.workflow import no_especialista
+from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
 from app.ports.data_client import ReportLotCandidate, ReportLotResolution
 
@@ -181,7 +182,7 @@ async def test_farm_tool_stores_envelope_and_returns_only_its_opaque_reference()
             return envelope
 
     repository = _FakeArtifactRepository()
-    tool = build_farm_report_tool(FakeDataClient(), repository)
+    tool = build_farm_report_tool(FakeDataClient(), repository, signature_checker=lambda *_: True)
     config["configurable"].update(
         {
             "session_id": str(session_id),
@@ -228,13 +229,16 @@ async def test_secretary_receives_only_validated_artifact_reference():
         status="partial",
         answer="Origem consultada.",
     )
-    farm_update = await no_especialista(
-        state,
-        factory=_FakeFactory(farm=_FakeAgent(farm_result)),
-        agent_id=AgentId.FARM,
-        report_artifacts=repository,
-        config=config,
-    )
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "get_lot_report_source", '{"report_source_ready": true}')
+    with execution_limits_scope(limits):
+        farm_update = await no_especialista(
+            state,
+            factory=_FakeFactory(farm=_FakeAgent(farm_result)),
+            agent_id=AgentId.FARM,
+            report_artifacts=repository,
+            config=config,
+        )
     resumed_state = {**state, **farm_update}
     resumed_state["current_task_index"] = 1
     secretary_agent = _FakeAgent(
@@ -279,7 +283,9 @@ async def test_secretary_is_blocked_when_farm_dependency_has_no_artifact():
     )
 
     assert not secretary_agent.calls
-    assert update["task_outcomes"][-1].result.status == "abstain"
+    assert update["task_outcomes"][-1].result.status == "unavailable"
+    assert "fonte assinada exigida" in update["task_outcomes"][-1].result.answer
+    assert update["task_outcomes"][-1].result.error == "required_signed_report_source_missing"
     assert "invalid_or_missing_report_artifact" in update["errors"]
     assert update["task_outcomes"][-1].task == secretary_task
 
@@ -332,7 +338,7 @@ async def test_secretary_blocks_artifact_bound_to_another_session():
     )
 
     assert not secretary_agent.calls
-    assert update["task_outcomes"][-1].result.status == "abstain"
+    assert update["task_outcomes"][-1].result.status == "unavailable"
     assert "invalid_or_missing_report_artifact" in update["errors"]
 
 
@@ -393,3 +399,4 @@ async def test_expired_report_source_routes_back_to_farm_once():
     assert update["task_outcomes"] == ()
     assert update["report_artifact_refs"] == {}
     assert update["report_source_renewal_count"] == 1
+    assert "expired_report_source_renewed_by_farm" not in update.get("errors", ())

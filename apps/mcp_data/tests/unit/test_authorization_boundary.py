@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from argos_mcp_data.application import AccessPolicy, CattleQueryService
 from argos_mcp_data.domain import AccessContext
-from argos_mcp_data.domain.cattle import ListPropertiesRequest
+from argos_mcp_data.domain.cattle import ListPropertiesRequest, Page, PropertyRecord
 from argos_mcp_data.domain.errors import AccessDeniedError
 
 
@@ -27,10 +27,15 @@ class _Repository:
         raise AssertionError("repositório não deveria ser consultado")
 
 
-def _context(*, agent_id="fazenda", operations=frozenset({"cattle.read"})):
+def _context(
+    *,
+    agent_id="fazenda",
+    operations=frozenset({"cattle.read"}),
+    authorized_property_ids=None,
+):
     return AccessContext(
         user_id=uuid4(),
-        authorized_property_ids=(uuid4(),),
+        authorized_property_ids=authorized_property_ids or (uuid4(),),
         operations=operations,
         agent_id=agent_id,
         issued_at=datetime.now(UTC),
@@ -61,3 +66,33 @@ async def test_denied_cattle_query_never_calls_repository(
         await service.list_properties(context, ListPropertiesRequest())
 
     assert repository.calls == 0
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_analyst_can_resolve_properties_only_inside_delegated_scope():
+    authorized_id = uuid4()
+
+    class AuthorizedRepository:
+        def __init__(self):
+            self.scope = None
+            self.calls = 0
+
+        async def list_properties(self, scope, request):
+            self.scope = scope
+            self.calls += 1
+            return Page[PropertyRecord](
+                items=(),
+                page_size=request.page_size,
+                next_offset=None,
+                has_more=False,
+            )
+
+    context = _context(agent_id="analista", authorized_property_ids=(authorized_id,))
+    repository = AuthorizedRepository()
+    service = CattleQueryService(AccessPolicy(_Directory({authorized_id})), repository, object())
+
+    await service.list_properties(context, ListPropertiesRequest())
+
+    assert repository.calls == 1
+    assert repository.scope is not None
+    assert repository.scope.property_ids == (authorized_id,)

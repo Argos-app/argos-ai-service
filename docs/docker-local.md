@@ -1,0 +1,225 @@
+# Execução local integrada com Docker
+
+### Thinking e prazo de execução
+
+`MAIN_API_MODEL_THINKING=auto` e `A2A_ANSWER_THINKING=auto` desativam thinking
+nos modelos NVIDIA Nemotron 3 Super e 3.5 Super VL quando o endpoint é
+`integrate.api.nvidia.com`. Outros modelos e endpoints não recebem esse
+parâmetro. `enabled` e `disabled` são opções explícitas somente para esses
+modelos suportados; uma combinação não suportada falha na configuração, sem
+enviar parâmetros indevidos. A opção é compartilhada pelos agentes do Principal;
+embeddings não usam thinking.
+
+`MAIN_API_EXECUTION_TIMEOUT_SECONDS=300` define o prazo total de uma interação.
+O timeout de cada chamada, o orçamento de chamadas e a validade das preparações
+continuam sendo limites independentes. Aumentar o prazo não transforma uma falha
+em sucesso: o retorno permanece degradado quando a interpretação falha, mas
+preserva resultados externos verificados. Nenhuma ação de e-mail é repetida para
+reparar a saída do modelo.
+
+O Compose da raiz reúne MongoDB, PostgreSQL, Qdrant, Mailpit e os cinco serviços
+Argos. O perfil `apps` ativa os processos de aplicação. O setup usa dados
+fictícios, credenciais descartáveis e modelos simulados; não configure chaves de
+produção neste ambiente.
+
+## Pré-requisitos e preparação
+
+Tenha Docker Desktop com o engine Linux em execução. Na raiz do repositório,
+gere as chaves internas aleatórias usadas somente entre os containers:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/docker/create-local-env.py
+```
+
+Se não houver ambiente virtual, instale `cryptography` em um Python local e rode
+`python scripts/docker/create-local-env.py`. O script cria `.env`, que é
+ignorado pelo Git. Ele contém senhas aleatórias para PostgreSQL e chaves Ed25519
+para delegações MCP e assinatura de relatórios, além das opções centralizadas
+para modelos, SMTP e LangSmith. Configure todo o Compose integrado nesse único
+arquivo. As variáveis são encaminhadas apenas aos containers que as utilizam.
+Para recriá-lo, especifique `--force`; isso invalida as credenciais de uma pilha
+já iniciada. O arquivo `.env.example` da raiz serve como referência; prefira o
+script para gerar o `.env` com as credenciais internas.
+
+Para estimar custos quando o provider não retorna preço, configure
+`MODEL_INPUT_COST_PER_MILLION_TOKENS` e `MODEL_OUTPUT_COST_PER_MILLION_TOKENS`
+como valores decimais em USD por milhão de tokens. As mesmas tarifas são
+aplicadas a todos os modelos e serviços. O custo explícito do provider tem
+precedência; sem uso completo ou tarifa necessária, o custo permanece ausente.
+Embeddings usam somente a tarifa de entrada. O campo `billing.cost_source`
+distingue `provider` de `configured_rate`; o formato das observações Mongo e dos
+metadados LangSmith não muda. A estimativa é indicativa e não substitui a
+cobrança do provider. O script cria essas duas variáveis vazias, então elas não
+ativam estimativas até serem preenchidas.
+
+Por padrão, o ambiente local usa `AUTH_MODE=stub`, que representa todos os
+requests como um único usuário sintético. Para validar o contrato de identidade
+do backend, configure no `.env` `AUTH_MODE=jwt`, `MAIN_API_AUTH_ISSUER`,
+`MAIN_API_AUTH_AUDIENCE` e `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`, depois recrie a
+API. O último campo é um objeto JSON que mapeia cada `kid` para a chave pública
+Ed25519 raw de 32 bytes, codificada em Base64. Configure somente chaves
+públicas; a chave privada permanece no backend que assina o token. Em modo JWT,
+cada token precisa conter a identidade, operações autorizadas e propriedades no
+contrato validado pela API. O teste local pode usar tokens sintéticos assinados;
+a homologação da integração real exige uma chave pública e um token emitido pelo
+backend de identidade do ambiente.
+
+## Banco PostgreSQL e dados sintéticos
+
+Em um volume PostgreSQL novo, a imagem executa, em ordem, os módulos
+`01_configuracao.sql` até `09_data_mart.sql`, o `10_dataload_completo.sql` e o
+`11_prediction_coverage.sql`, `12_local_stub_access.sql`,
+`13_local_prediction_coverage_fixture.sql` e
+`14_local_email_recipient_fixtures.sql` localizados em
+`infrastructure/docker/postgres/init/`. Os nove primeiros módulos vêm dos SQL
+separados de `argos-data-engineering`; o arquivo monolítico histórico
+`criacao_banco_completo.sql` não é usado. O módulo 10 carrega registros
+fictícios em todas as tabelas do schema. O módulo 11 expõe uma view de cobertura
+para testar a predição com essa base sintética. O módulo 13 preenche o histórico
+sintético exigido por essa cobertura; o módulo 14 cria os cinco contatos de
+teste do fluxo de e-mail, sem criar credenciais ou vínculos de acesso. O script
+99 cria o usuário `argos_reader` somente depois de schema, carga e view,
+concedendo leitura aos serviços.
+
+A carga destina-se a volume vazio. Ela não é executada de novo em um volume
+existente. Para apagar a base local e recriá-la do zero, pare a pilha e remova
+os volumes Docker; esta ação apaga os dados locais:
+
+```powershell
+docker compose --profile apps down --volumes
+```
+
+Os UUIDs do primeiro usuário e das duas propriedades fictícias são fixos para
+coincidir com o stub de identidade local; o módulo 12 cria o vínculo vigente
+entre esse usuário e a segunda propriedade para consultas integradas. Os demais
+identificadores gerados não são estáveis entre cargas. Nenhum dos dados é
+apropriado para validação de negócio, previsão real ou produção.
+
+## Documentos sintéticos no MongoDB
+
+Ao iniciar o perfil `apps`, o serviço de carga `mongo_seed` espera MongoDB e
+PostgreSQL saudáveis e preenche `local_cattle_documents` e
+`local_medicine_documents` no banco `argos_ai`. A carga lê do PostgreSQL os dois
+imóveis fixos do stub local, seus rebanhos/lotes e o catálogo de medicamentos;
+assim, os UUIDs relacionais dos documentos Mongo correspondem à massa SQL da
+mesma execução. Os campos não representam histórico real de produção.
+
+O script `scripts/docker/seed-local-mongo.py` pode ser executado novamente: ele
+substitui somente documentos marcados por essa carga e preserva os demais dados
+das collections. Para recarregar após recriar/repopular o PostgreSQL:
+
+```powershell
+docker compose --profile apps run --rm mongo_seed
+```
+
+O MCP de dados só inicia depois do sucesso da carga. Os testes de integração do
+MCP continuam usando databases Mongo e PostgreSQL descartáveis próprios; essa
+carga é para as jornadas locais integradas.
+
+## Subir e validar a pilha
+
+```powershell
+docker compose config --quiet
+docker compose --profile apps config --quiet
+docker compose --profile apps up --build -d
+docker compose --profile apps ps
+```
+
+Os serviços se conectam por nomes DNS internos. As portas publicadas escutam
+somente em `127.0.0.1`: API principal em `8080`, A2A em `8001`, PostgreSQL em
+`54327`, Qdrant em `6333`, SMTP de captura em `1025` e Mailpit UI em `8025`.
+Mongo replica set `rs0` usa a porta `27027`. A API exige o Mongo replica set
+para transações e checkpoints. O perfil integrado inicia dependências saudáveis
+antes dos processos que as usam.
+
+Verifique o estado e os health checks:
+
+```powershell
+docker compose --profile apps ps
+Invoke-WebRequest http://localhost:8080/health/live
+Invoke-WebRequest http://localhost:8080/health/ready
+```
+
+`live` confirma que o processo da API está ativo. `ready` exige persistência,
+configuração das integrações e runtime de agentes. Para consultar contagens do
+schema e verificar o dataload:
+
+```powershell
+docker compose exec postgres psql -U argos_admin -d argos -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name;"
+docker compose exec postgres psql -U argos_admin -d argos -c "SELECT COUNT(*) FROM property; SELECT COUNT(*) FROM app_user;"
+```
+
+Para acompanhar falhas de inicialização, use
+`docker compose --profile apps logs <serviço>`.
+
+## Modelos simulados
+
+O modo dos dois serviços é selecionado por `ARGOS_MODEL_MODE` em `.env`, gerado
+pelo script de preparação. O padrão é `simulated`; para usar providers, altere
+essa variável para `provider`. O Compose injeta o mesmo modo na API principal e
+no A2A. Assim, no modo `simulated`, nenhum serviço precisa de API key de modelo,
+endpoint externo ou credencial LangSmith. O modelo principal produz planos e
+respostas estruturados de forma determinística e ainda chama as ferramentas MCP
+reais, que consultam a carga sintética. As respostas estruturadas do
+Orquestrador e do Juiz também são simuladas, para que a resposta final passe
+pelos mesmos contratos do fluxo sem depender de um provider. No A2A, embeddings
+simulados usam hashing lexical determinístico: termos compartilhados ajudam a
+recuperar trechos relacionados, mas não há compreensão semântica. A resposta
+mostra os trechos encontrados e suas citações, sem inventar uma síntese; o modo
+continua voltado a testar contratos e integração, não a qualidade de modelos.
+
+No modo `provider`, preencha os endpoints, nomes e chaves correspondentes em
+`.env`, usando `.env.example` da raiz como referência. Informe
+`A2A_QDRANT_VECTOR_SIZE` com a dimensão do modelo de embeddings escolhido; ela
+precisa corresponder ao índice Qdrant. Recrie o índice se trocar a dimensão ou
+revisão do embedding. Se as credenciais ou os modelos estiverem
+ausentes/inválidos, a prontidão ou as chamadas de modelo falharão. Para execução
+fora do Compose, o padrão de cada aplicação continua sendo `provider`.
+
+Depois de mudar `.env`, valide e recrie os serviços:
+
+```powershell
+docker compose --profile apps config --quiet
+docker compose --profile apps up --build -d
+```
+
+O SMTP também pode ser configurado no mesmo `.env`. Se `MCP_EMAIL_SMTP_HOST`
+ficar vazio, o Compose usa Mailpit, que captura mensagens localmente e não as
+entrega. Para envio real, preencha host, porta, usuário, senha e
+`MCP_EMAIL_SMTP_USE_TLS`. LangSmith é opcional e usa as variáveis
+`MAIN_API_LANGSMITH_*` e `A2A_LANGSMITH_*` no mesmo arquivo. Para chaves de
+escopo organizacional, configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` e
+`A2A_LANGSMITH_WORKSPACE_ID` com o ID do workspace; o ID da organização não
+substitui o workspace.
+
+Os `.env.example` dentro de cada aplicação continuam disponíveis somente como
+referência para execução individual fora do Compose. O Compose da raiz não lê
+esses arquivos.
+
+## Execução individual
+
+As imagens independentes usam contexto de build na raiz para incluir os pacotes
+compartilhados:
+
+```powershell
+docker build -f apps/main_api/Dockerfile -t argos-main-api:local .
+docker build -f apps/mcp_data/Dockerfile -t argos-mcp-data:local .
+docker build -f apps/mcp_email/Dockerfile -t argos-mcp-email:local .
+docker build -f apps/mcp_prediction/Dockerfile -t argos-mcp-prediction:local .
+docker build -f apps/a2a_agent/Dockerfile -t argos-a2a-agent:local .
+```
+
+Para executar um container isoladamente, prepare as dependências necessárias ou
+use os serviços de infraestrutura pelo Compose. A URL dentro de um container
+deve usar o DNS do serviço; `localhost` sempre aponta para o próprio container.
+O Compose específico em `apps/a2a_agent/compose.yaml` continua disponível para o
+ciclo individual do A2A e tem configuração própria.
+
+## Parar e limpar
+
+```powershell
+docker compose --profile apps down
+```
+
+Este comando mantém os volumes. Para remover definitivamente os dados locais,
+use `down --volumes` conforme a seção de PostgreSQL.

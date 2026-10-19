@@ -93,6 +93,21 @@ class PreparedReportStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class ReportAttachment(_EmailContract):
+    """Metadados verificáveis do documento anexado ao relatório preparado."""
+
+    filename: str = Field(min_length=1, max_length=200)
+    content_type: str = Field(min_length=1, max_length=120)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(gt=0, le=8_000_000)
+
+    @model_validator(mode="after")
+    def validate_filename(self) -> ReportAttachment:
+        if "/" in self.filename or "\\" in self.filename or "\x00" in self.filename:
+            raise ValueError("filename deve ser um nome simples de arquivo")
+        return self
+
+
 class PreparedReport(_EmailContract):
     """Relatório renderizado e pronto para uma solicitação de envio."""
 
@@ -102,6 +117,7 @@ class PreparedReport(_EmailContract):
     recipients: tuple[RecipientRef, ...] = ()
     subject: str | None = None
     body: str | None = None
+    attachments: tuple[ReportAttachment, ...] = ()
     created_at: datetime
     expires_at: datetime
     unresolved: tuple[RecipientResolution, ...] = ()

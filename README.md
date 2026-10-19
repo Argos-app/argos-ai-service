@@ -13,10 +13,15 @@ preferências limitadas do usuário. A API valida identidade JWT EdDSA do backen
 e vincula ferramentas LangChain aos MCPs configurados, com delegação por
 usuário, propriedade, agente e operação. O backend ainda não inclui `farm_ids`,
 então a criação de sessão permanece bloqueada até delegar o escopo autorizado. O
-MCP de dados oferece consultas somente leitura; a projeção assinada para
-relatórios e o fluxo completo principal → dados → e-mail ainda não estão
-implementados. O MCP de e-mail permite preparar relatórios e consultar estado
-pelo Secretário; o envio não está exposto ao LLM.
+runtime principal configura um modelo por agente (`MAIN_API_MODEL_ROUTER`,
+`MAIN_API_MODEL_FARM`, `MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`,
+`MAIN_API_MODEL_SECRETARY`, `MAIN_API_MODEL_INFORMATION`,
+`MAIN_API_MODEL_ORCHESTRATOR`, `MAIN_API_MODEL_JUDGE` e
+`MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são compartilhadas entre os
+agentes; cada variável pode apontar para o mesmo modelo ou para um modelo
+diferente. A sumarização de sessão e a extração de memória reutilizam o modelo
+do Router. Sem runtime válido, `/health/ready` retorna indisponível. Os testes
+injetam modelos simulados explicitamente por `create_app(models=...)`.
 
 ## Agentes
 
@@ -48,11 +53,31 @@ uma aplicação separada e valida o acesso aos dados solicitados.
 
 | MCP                         | Função                                                                                                                                                                                                                                                       |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Dados — implementado        | Expõe consultas de propriedades, rebanhos, lotes, aplicações, exceções, ocorrências, documentos e catálogo de medicamentos. As tools Fazenda e Doutor usam delegações curtas por chamada. A projeção assinada `LotReportEnvelope` segue pendente.            |
-| E-mail — integração parcial | O Secretário pode preparar relatórios e consultar estado com identidade do usuário vinculada pelo principal. `send_report` permanece fora do conjunto de tools do LLM até haver autorização determinística de envio.                                         |
+| Dados — implementado        | Expõe consultas de propriedades, rebanhos, lotes, aplicações, exceções, ocorrências, documentos, catálogo e `get_lot_report_source`. A origem `LotReportEnvelope` é filtrada pelo escopo vigente e assinada por Ed25519.                                     |
+| E-mail — integração parcial | O Secretário prepara relatórios com a origem assinada, pode solicitar envio após autorização determinística explícita e consulta o estado. A entrega ainda depende de SMTP e chaves internas confiáveis.                                                     |
 | Predição — integrado        | Estima consumo de medicamentos por propriedade e unidade, repetindo a média diária mensal de um histórico anual por até 28 dias. A tool Analista envia delegação curta com `prediction.read`; não usa modelo treinado nem prevê produção, doenças ou mortes. |
 
 ## Sessões e memória do principal
+
+O MCP de predição só confirma cobertura quando a variável
+MCP_PREDICTION_COVERAGE_RELATION aponta para uma view PostgreSQL administrada
+pelo pipeline de dados e com as colunas property_id, coverage_start,
+coverage_end e evidence_source. As janelas precisam formar uma sequência sem
+lacunas. Sem view configurada ou evidência completa, a tool informa cobertura
+desconhecida/incompleta e não apresenta estimativa; primeiro e último evento não
+são usados como prova.
+
+O contexto enviado aos agentes é limitado a 12.000 caracteres, até 20 mensagens
+recentes e uma leitura de no máximo 200 mensagens, mesmo se o sumarizador
+falhar. Por interação, o principal limita a 12 chamadas de modelo, 12 chamadas
+de ferramenta, 48.000 caracteres totais de saídas de ferramentas, 1.200 tokens
+de saída por chamada e 90 segundos de execução. Isso restringe o consumo, mas
+não define um teto monetário exato, pois preço e uso reportado variam por
+provider e modelo. A telemetria de uso existente permanece de melhor esforço;
+não foi criado um ledger durável de custo. Fazenda, Doutor, Analista e
+Informações não podem retornar respostas de sucesso sem ao menos uma chamada
+externa bem-sucedida; referências geradas pelo modelo são substituídas por
+referências opacas das chamadas observadas.
 
 O `main_api` grava sessões e interações no Mongo, sem armazenar as mensagens
 originais em paralelo. O conteúdo persistido é sanitizado. A cada 15 entradas
@@ -60,18 +85,56 @@ originais em paralelo. O conteúdo persistido é sanitizado. A cada 15 entradas
 tokens; o perfil entre sessões é restrito ao tom de comunicação e ao objetivo
 geral declarado. Sessões e preferências não expiram automaticamente.
 
+O contexto enviado aos agentes é limitado a 12.000 caracteres, no máximo 20
+mensagens recentes e uma leitura de até 200 mensagens para montar a janela;
+essas restrições também valem quando o sumarizador está indisponível. Por
+interação, o principal limita a 12 chamadas de modelo, 12 chamadas de
+ferramenta, 48.000 caracteres totais de respostas de ferramentas, 1.200 tokens
+de saída por chamada e 90 segundos de execução. Esses limites restringem
+consumo, mas não definem valor monetário exato: preços e uso reportado variam
+por provider/modelo. A telemetria de uso existente continua de melhor esforço;
+não foi criado um ledger durável de custo.
+
+Respostas de Fazenda, Doutor, Analista e Informações ficam indisponíveis se não
+houver chamada externa bem-sucedida. Citações geradas pelo modelo são
+substituídas por referências opacas da chamada, sem persistir seu conteúdo.
+
 O tracing LangSmith do `main_api` é opcional e só é ativado quando
 `MAIN_API_LANGSMITH_API_KEY` está configurada. Por padrão, traces de agentes,
 chamadas a modelos e ferramentas ocultam entradas e saídas; habilite
 `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true` somente após aprovar o envio de
 prompts, respostas e argumentos de ferramentas ao projeto LangSmith configurado.
-A chave deve ficar no gerenciador de secrets do ambiente.
-`MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e `MAIN_API_LANGSMITH_ENDPOINT`
-permite apontar para uma instância aprovada. O Mongo continua armazenando apenas
-os eventos brutos sanitizados existentes; conteúdo de trace é armazenado
-separadamente pelo LangSmith. Avaliações e feedback podem ser feitos sobre os
-traces na plataforma; esta integração não define critérios automáticos de
-qualidade.
+E-mails não são anonimizados no código: podem seguir aos modelos e permanecer no
+histórico/checkpoint; com captura de conteúdo ativa, também podem ser enviados
+ao LangSmith. Essa decisão permite preservar endereços usados pelo fluxo de
+destinatários, mas amplia a exposição de PII. Avalie acesso, retenção e política
+do provider antes de usar dados pessoais reais. A chave deve ficar no
+gerenciador de secrets do ambiente. Para chaves de escopo organizacional,
+configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` com o ID do workspace
+LangSmith. `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e
+`MAIN_API_LANGSMITH_ENDPOINT` permite apontar para uma instância aprovada. O
+Mongo continua armazenando apenas os eventos brutos sanitizados existentes;
+conteúdo de trace é armazenado separadamente pelo LangSmith. A coleta local no
+Mongo independe do LangSmith e inclui `X-Argos-Correlation-ID` na resposta,
+`correlation_id` nos spans, `parent_observation_id` para relacionar chamadas
+aninhadas e `session_id`/`interaction_id` nos spans do grafo. Esses IDs seguem
+assinados até as observações A2A para junção direta com as conversas no Mongo. O
+correlation ID é enviado às chamadas MCP e segue assinado para Data, Prediction
+e A2A; os MCPs não persistem observações próprias no momento. Filas limitadas
+podem perder observações, então ausência não significa zero uso. Quando há
+contagens de tokens, o custo pode vir do provider ou ser estimado pelas tarifas
+globais opcionais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_OUTPUT_COST_PER_MILLION_TOKENS`; `billing.cost_source` distingue as
+origens. Os valores estimados são persistidos nas observações Mongo e propagados
+ao LangSmith, mas são indicativos e não substituem a fatura do provider. Sem
+contagens ou tarifas suficientes, custo permanece desconhecido. Operação,
+ranking de chamadas e tokens por usuário e limites estão em
+[`docs/operacao-observabilidade.md`](docs/operacao-observabilidade.md); a
+extração e o dicionário BI estão em
+[`docs/observabilidade-extracao-mongo.md`](docs/observabilidade-extracao-mongo.md)
+e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações e
+feedback podem ser feitos sobre traces na plataforma; esta integração não define
+critérios automáticos de qualidade.
 
 As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
 `POST /v1/sessions/{session_id}/interactions` e
@@ -80,11 +143,29 @@ LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
 (padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
 público.
 
-O serviço precisa de Mongo em replica set para transações e checkpointer. As
-configurações principais são `MAIN_API_MONGO_URI` e `MAIN_API_MONGO_DATABASE`;
-veja [`apps/main_api/.env.example`](apps/main_api/.env.example). Em testes
-locais executados no host contra o Compose, use o URI de conexão direta
-documentado no README dos testes de integração. O stub de identidade continua
+O contrato OpenAPI e exemplos de autenticação, erros e correlação estão em
+[`docs/api-main-api.md`](docs/api-main-api.md) e
+[`docs/openapi-main-api.json`](docs/openapi-main-api.json).
+
+O serviço precisa de Mongo em replica set para transações e checkpointer. Os
+serviços com persistência própria compartilham o banco `argos_ai` e separam os
+dados por collections. A configuração por sistema, variáveis, URIs para host e
+Compose, precedência e migração das collections antigas de e-mail estão em
+[`docs/configuracao-mongodb.md`](docs/configuracao-mongodb.md). O Compose local
+usa um único `.env` gerado por `scripts/docker/create-local-env.py`; os
+`.env.example` de cada aplicação serve para execução individual. Crie o arquivo
+local de um serviço copiando o exemplo correspondente, por exemplo
+`Copy-Item apps/main_api/.env.example apps/main_api/.env`; esses `.env` locais
+são ignorados pelo Git. O Compose individual do A2A carrega seu arquivo. Nas
+execuções diretas dos outros serviços, exporte as variáveis para o processo,
+pois o Python não lê `.env` automaticamente:
+[`apps/main_api/.env.example`](apps/main_api/.env.example),
+[`apps/mcp_data/.env.example`](apps/mcp_data/.env.example) e
+[`apps/mcp_email/.env.example`](apps/mcp_email/.env.example),
+[`apps/mcp_prediction/.env.example`](apps/mcp_prediction/.env.example) e
+[`apps/a2a_agent/.env.example`](apps/a2a_agent/.env.example). Em execução local
+no host contra o Compose de testes, o URI usa `directConnection=true` porque o
+replica set anuncia um nome de host interno. O stub de identidade continua
 disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
 desse modo, configure a chave pública Ed25519 do backend em
 `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
@@ -95,11 +176,15 @@ O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
 aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
 registrados separadamente. Sem `MAIN_API_LANGSMITH_API_KEY`, nada é enviado.
 Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
-habilita prompts, respostas e argumentos de ferramentas após aprovação. Com a
-captura ativa, e-mails, UUIDs, CPFs e tokens Bearer são anonimizados. O projeto
-é selecionado por `MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
-`MAIN_API_LANGSMITH_ENDPOINT`. O serviço A2A possui configuração própria; os
-traces dos dois processos não recebem um vínculo distribuído entre serviços.
+habilita prompts, respostas e argumentos de ferramentas após aprovação. E-mails
+permanecem sem anonimização; UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
+anonimizados antes do envio. O projeto é selecionado por
+`MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
+`MAIN_API_LANGSMITH_ENDPOINT`. Para chaves de escopo organizacional, configure
+`MAIN_API_LANGSMITH_WORKSPACE_ID`. O serviço A2A possui configuração própria;
+IDs assinados de correlação e pai permitem relacionar a observação de chamada do
+principal às observações A2A quando ambas as persistências estiverem
+habilitadas.
 
 Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
 persistência e retomada com Mongo replica set descartável: siga
@@ -135,6 +220,21 @@ transporte. Recuperações reusam o mesmo `report_id` e chave de idempotência.
 deve ser reenviada automaticamente, pois outros destinatários podem já ter
 recebido o e-mail.
 
+O transporte SMTP usa STARTTLS com validação de cadeia de certificados e nome do
+servidor pelo trust store padrão do sistema. `MCP_EMAIL_SMTP_USE_TLS=false` é
+reservado a serviços locais de captura, como Mailpit; não use em ambientes com
+entrega real. Uma conexão com certificado inválido falha antes do envio.
+
+Se o processo cair depois de reservar uma operação, ela permanece `pending`; se
+a conexão cair após o provedor possivelmente aceitar a mensagem, o MCP marca
+`unknown`. Repetir a mesma chave de idempotência devolve o estado existente e
+nunca chama o SMTP de novo. A operação deve ser reconciliada por uma pessoa
+operadora usando o `operation_id`/`provider_message_id` e os registros do
+provedor. Não libere nem repita automaticamente uma operação ambígua: só após
+confirmar no provedor que nenhum destinatário recebeu a mensagem, uma nova
+solicitação explícita pode gerar outra operação. `accepted` significa aceite do
+provedor, não entrega ou leitura.
+
 ## A2A
 
 A2A é o protocolo de comunicação com o serviço dos especialistas Documental e
@@ -147,7 +247,7 @@ informam a data do documento e sua última atualização conhecida. PDFs de test
 ficam no repositório.
 
 O serviço tem build independente em `apps/a2a_agent/Dockerfile` e Compose
-operacional documentado em
+individual documentado em
 [`apps/a2a_agent/README.md`](apps/a2a_agent/README.md). O runtime implementa
 adapters HTTP OpenAI-compatible para embeddings e geração, além de uma consulta
 PostgreSQL somente leitura para autorização documental. Endpoints, modelos,
@@ -174,14 +274,18 @@ argos-ai-service/
 ├── config/               # Modelos e fallbacks fixos por agente
 ├── infrastructure/       # Configuração dos serviços locais
 ├── docs/                 # Planejamento e documentação
-├── compose.yaml          # Execução integrada — planejado
+├── compose.yaml          # Dependências locais e perfil integrado de serviços
 └── .github/workflows/    # CI no GitHub Actions
 ```
 
 Cada aplicação terá configuração, dependências e execução próprias, com deploy
 independente. Os contratos compartilhados precisam acompanhar o artefato de cada
 serviço que os consome; o processo não depende do código de outro serviço
-montado em runtime. O Compose integrado da raiz ainda é planejado.
+montado em runtime. O perfil Docker integrado, o schema e os dados sintéticos
+PostgreSQL, e os providers de modelo simulados estão documentados em
+[`docs/docker-local.md`](docs/docker-local.md). O modo simulado permite
+exercitar o fluxo sem chaves externas e identifica suas respostas como
+ilustrativas.
 
 No principal, a organização separa API, domínio, orquestração, agentes e
 infraestrutura. **Protocol + Factory + Registry** padroniza a criação dos
@@ -236,3 +340,8 @@ deve preceder a chamada ao MCP. A resposta a uma pergunta retoma a sessão após
 nova validação de acesso; falhas não são apresentadas como dados ou operações
 bem-sucedidas. Ao atingir um limite, o controle determinístico encerra a
 execução com conteúdo já validado ou uma mensagem segura.
+
+Para subir a integração em um cluster Kubernetes local, consulte
+[docs/kubernetes-local.md](docs/kubernetes-local.md). O estado e os resultados
+de homologação integrada estão em
+[docs/resultado-homologacao-local.md](docs/resultado-homologacao-local.md).

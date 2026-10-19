@@ -126,6 +126,7 @@ async def test_question_or_unverifiable_excerpt_does_not_create_profile_memory()
 
     assert result is None
     assert repository.saved == []
+    assert extractor.calls == []
 
 
 @pytest.mark.asyncio
@@ -159,6 +160,7 @@ async def test_explicit_forget_removes_only_requested_field_and_leaves_tombstone
     assert memory.general_goal == current.general_goal
     assert memory.goal_source_interaction_id == source_interaction_id
     assert memory.revision == 2
+    assert extractor.calls == []
 
 
 @pytest.mark.asyncio

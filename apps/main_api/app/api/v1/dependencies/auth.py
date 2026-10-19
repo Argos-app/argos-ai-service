@@ -2,10 +2,10 @@
 
 import base64
 import json
-import os
+import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -14,10 +14,13 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.application.identity import ActorContext
 from app.settings import Settings
+from packages.observability import bind_user_id
 
 _TOKEN_PART = re.compile(r"^[A-Za-z0-9_-]+$")
 _MAX_TOKEN_BYTES = 16_384
+_LOGGER = logging.getLogger(__name__)
 _ALLOWED_OPERATIONS = frozenset(
     {
         "ai.sessions.create",
@@ -47,6 +50,11 @@ class Principal(BaseModel):
     farm_ids: tuple[UUID, ...] = ()
     operations: frozenset[str] = frozenset()
     request_id: UUID | None = None
+
+
+def to_actor_context(principal: Principal) -> ActorContext:
+    """Adapta a identidade HTTP ao contexto mínimo exigido pelos casos de uso."""
+    return ActorContext(user_id=principal.user_id, farm_ids=principal.farm_ids)
 
 
 def _decode_segment(value: str) -> bytes:
@@ -231,7 +239,7 @@ def _local_stub_principal() -> Principal:
     )
 
 
-def get_principal(request: Request) -> Principal:
+def _verify_principal(request: Request) -> Principal:
     authorization = request.headers.get("Authorization", "")
     scheme, separator, token = authorization.partition(" ")
     if scheme.casefold() != "bearer" or not separator or not token.strip():
@@ -241,13 +249,14 @@ def get_principal(request: Request) -> Principal:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if os.getenv("APP_ENV", "") == "local" and os.getenv("AUTH_MODE", "") == "stub":
+    settings = request.app.state.settings
+    if settings.app_env == "local" and settings.auth_mode == "stub":
         return _local_stub_principal()
 
     verifier = getattr(request.app.state, "identity_token_verifier", None)
     if verifier is None:
         try:
-            verifier = IdentityTokenVerifier(request.app.state.settings)
+            verifier = IdentityTokenVerifier(settings)
         except IdentityTokenConfigurationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -265,12 +274,26 @@ def get_principal(request: Request) -> Principal:
         ) from exc
 
 
+async def get_principal(request: Request) -> AsyncIterator[Principal]:
+    principal = _verify_principal(request)
+    counter = getattr(request.app.state, "user_usage_counter", None)
+    if counter is not None:
+        try:
+            await counter.increment_call(principal.user_id)
+        except Exception:
+            _LOGGER.warning("Redis user call counter increment failed")
+    with bind_user_id(principal.user_id):
+        yield principal
+
+
 def principal_with_operation(operation: str) -> Callable[..., Principal]:
     """Cria uma dependência que exige operação delegada pelo backend."""
     if operation not in _ALLOWED_OPERATIONS:
         raise ValueError(f"operação desconhecida: {operation}")
 
-    def require_operation(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
+    async def require_operation(
+        principal: Annotated[Principal, Depends(get_principal)],
+    ) -> Principal:
         if operation not in principal.operations:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

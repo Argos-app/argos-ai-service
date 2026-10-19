@@ -1,6 +1,7 @@
 """Allowlist de PDFs locais e persistência do manifesto técnico."""
 
 import json
+import unicodedata
 from datetime import UTC, date, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -80,10 +81,12 @@ def test_bundled_demo_pdfs_are_extractable_and_disclaim_real_legal_authority() -
         for item in documents
     ]
     text = "\n".join(page.text for document in extracted for page in document.pages)
+    normalized_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    normalized_text = normalized_text.upper()
 
-    assert "SINTETICO" in text
-    assert "NAO E LEGISLACAO REAL" in text
-    assert "NAO E CONTRATO REAL" in text
+    assert "SINTETICO" in normalized_text
+    assert "NAO E LEGISLACAO REAL" in normalized_text
+    assert "NAO E CONTRATO REAL" in normalized_text
 
 
 @pytest.mark.parametrize(

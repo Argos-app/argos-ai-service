@@ -11,6 +11,7 @@ from argos_mcp_data.adapters.delegation import (
 from argos_mcp_data.application.cattle_queries import CattleQueryService
 from argos_mcp_data.application.medicine_queries import MedicineQueryService
 from argos_mcp_data.domain.cattle import (
+    GetLotReportSourceRequest,
     ListAnimalLotHistoryRequest,
     ListApplicationAnimalsRequest,
     ListApplicationsRequest,
@@ -98,6 +99,12 @@ def register_cattle_tools(server: Any, service: CattleQueryService) -> None:
     async def list_lots(payload: ListLotsRequest) -> dict[str, Any]:
         """Lista lotes com categoria, datas, situação e faixa de quantidade de animais."""
         result = await service.list_lots(get_access_context(), payload)
+        return result.model_dump(mode="json")
+
+    @server.tool()
+    async def get_lot_report_source(payload: GetLotReportSourceRequest) -> dict[str, Any]:
+        """Produz relatório completo de lote em envelope assinado e de curta validade."""
+        result = await service.get_lot_report_source(get_access_context(), payload)
         return result.model_dump(mode="json")
 
     @server.tool()

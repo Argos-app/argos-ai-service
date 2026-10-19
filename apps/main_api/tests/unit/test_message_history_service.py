@@ -5,7 +5,8 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
-from app.api.v1.dependencies.auth import Principal
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.identity import ActorContext
 from app.application.message_history_service import MessageHistoryService
 from app.domain.sessions import (
     ConversationMessage,
@@ -13,7 +14,6 @@ from app.domain.sessions import (
     MessageRole,
     SessionRecord,
 )
-from fastapi import HTTPException
 
 USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 FARM_ID = UUID("00000000-0000-4000-8000-000000000101")
@@ -47,13 +47,10 @@ class FakeConversations:
         return tuple(sorted(messages, key=lambda item: item.sequence, reverse=True)[:limit])
 
 
-def _principal(*, user_id: UUID = USER_ID, farm_ids: list[UUID] | None = None) -> Principal:
-    return Principal(
+def _principal(*, user_id: UUID = USER_ID, farm_ids: list[UUID] | None = None) -> ActorContext:
+    return ActorContext(
         user_id=user_id,
-        email="test@example.com",
-        name="Teste",
-        permission="USER",
-        farm_ids=farm_ids if farm_ids is not None else [FARM_ID],
+        farm_ids=tuple(farm_ids if farm_ids is not None else [FARM_ID]),
     )
 
 
@@ -114,18 +111,18 @@ async def test_history_rejects_other_owner_and_cursor_from_another_user():
     service = MessageHistoryService(
         sessions=FakeSessions(session), conversations=FakeConversations([])
     )
-    with pytest.raises(HTTPException) as missing:
+    with pytest.raises(ApplicationError) as missing:
         await service.list_messages(
             _principal(user_id=uuid4()), session.session_id, limit=50, cursor=None
         )
-    assert missing.value.status_code == 404
+    assert missing.value.code == ApplicationErrorCode.NOT_FOUND
 
     foreign_cursor = service_cursor(session.session_id, uuid4(), 2)
-    with pytest.raises(HTTPException) as invalid:
+    with pytest.raises(ApplicationError) as invalid:
         await service.list_messages(
             _principal(), session.session_id, limit=50, cursor=foreign_cursor
         )
-    assert invalid.value.status_code == 400
+    assert invalid.value.code == ApplicationErrorCode.BAD_REQUEST
 
 
 @pytest.mark.asyncio

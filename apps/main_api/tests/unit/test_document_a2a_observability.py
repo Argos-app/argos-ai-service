@@ -5,14 +5,19 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from a2a.types import a2a_pb2
 from app.infrastructure.a2a.client import DocumentA2AClient
 from app.settings import Settings
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from packages.contracts.a2a import CorpusRefreshStatus, DocumentAnswerResponse
-from packages.observability import ObservationStatus
+from packages.contracts.a2a import (
+    CorpusRefreshStatus,
+    DocumentAnswerResponse,
+    DocumentSkill,
+)
+from packages.observability import ObservationStatus, bind_correlation
 from packages.security.delegation import GlobalDocumentDelegationTokenVerifier
 
 
@@ -35,7 +40,17 @@ def run_immediate(coroutine):
             raise AssertionError("fake A2A SDK não deveria suspender a corrotina")
 
 
-def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate() -> None:
+@pytest.mark.parametrize(
+    ("skill", "jurisdiction"),
+    [
+        (DocumentSkill.DOCUMENTAL, None),
+        (DocumentSkill.LEGAL, "BR"),
+    ],
+)
+def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
+    skill: DocumentSkill,
+    jurisdiction: str | None,
+) -> None:
     private_key = Ed25519PrivateKey.generate()
     private_der = private_key.private_bytes(
         encoding=serialization.Encoding.DER,
@@ -60,6 +75,9 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     collector = Collector()
     client = DocumentA2AClient(settings, observation_collector=collector)
     user_id = uuid4()
+    correlation_id = uuid4()
+    session_id = uuid4()
+    interaction_id = uuid4()
 
     class FakeClient:
         def __init__(self) -> None:
@@ -98,10 +116,25 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     client._factory = SimpleNamespace(create=lambda _card: fake)
     question = "question containing private user text"
 
-    result = json.loads(run_immediate(client.ask(question, user_id=user_id)))
+    from packages.observability import bind_interaction
+
+    with bind_correlation(correlation_id), bind_interaction(session_id, interaction_id):
+        result = json.loads(
+            run_immediate(
+                client.ask(
+                    question,
+                    user_id=user_id,
+                    skill=skill,
+                    jurisdiction=jurisdiction,
+                )
+            )
+        )
 
     assert result["status"] == "unavailable"
     assert fake.request.message.parts[0].media_type == "application/json"
+    payload = json.loads(fake.request.message.parts[0].text)
+    assert payload["skill"] == skill.value
+    assert payload["jurisdiction"] == jurisdiction
     token = fake.context.service_parameters["X-Argos-Delegation"]
     delegated = GlobalDocumentDelegationTokenVerifier(
         {"main-key": public_key_b64},
@@ -110,13 +143,19 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     ).verify(token)
     assert delegated.user_id == user_id
     assert delegated.operations == frozenset({"documents.read"})
+    assert delegated.correlation_id == correlation_id
+    assert delegated.session_id == session_id
+    assert delegated.interaction_id == interaction_id
+    assert str(delegated.parent_observation_id) == collector.observations[0].id
     assert not hasattr(delegated, "authorized_property_ids")
 
     terminal = collector.observations[-1]
     assert terminal.status == ObservationStatus.SUCCEEDED
     assert terminal.protocol.task_state == "completed"
-    assert terminal.protocol.skill == "documental"
+    assert terminal.protocol.skill == skill.value
     assert terminal.result.code == "unavailable"
+    assert terminal.session_id == session_id
+    assert terminal.interaction_id == interaction_id
     assert terminal.duration_ms is not None
     serialized_observation = repr(terminal.model_dump())
     assert question not in serialized_observation
@@ -137,3 +176,22 @@ def test_document_a2a_configuration_requires_endpoint_token_and_delegation_key()
         assert "delegação A2A exige" in str(exc)
     else:
         raise AssertionError("configuração A2A sem chave de delegação deveria ser rejeitada")
+
+
+def test_local_document_a2a_configuration_accepts_kubernetes_service_dns() -> None:
+    private_key = Ed25519PrivateKey.generate()
+    private_der = private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+    settings = Settings(
+        app_env="local",
+        mcp_delegation_key_id="main-key",
+        mcp_delegation_private_key=base64.b64encode(private_der).decode("ascii"),
+        document_a2a_url="http://a2a-agent:8000/a2a",
+        document_a2a_service_token="service-secret",
+    )
+
+    assert settings.document_a2a_url == "http://a2a-agent:8000/a2a"

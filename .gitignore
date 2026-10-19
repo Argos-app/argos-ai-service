@@ -87,5 +87,16 @@ Thumbs.db
 # ─────────────────────────────────────────────
 *.md
 !README.md
+!apps/mcp_data/MCP.md
 !docs/agent-integration-handoff.md
 !docs/plano-persistencia-sessoes-memoria.md
+!docs/configuracao-mongodb.md
+!docs/docker-local.md
+!docs/kubernetes-local.md
+!docs/api-main-api.md
+!docs/dicionario-mongodb-bi.md
+!docs/observabilidade-extracao-mongo.md
+!docs/operacao-observabilidade.md
+!docs/plano-observabilidade-dados-brutos.md
+!docs/resultado-homologacao-local.md
+k8s/local/secret.env

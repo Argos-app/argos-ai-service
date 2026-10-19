@@ -5,6 +5,8 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from langsmith import traceable
+
 from argos_a2a_agent.adapters.observability.recording import (
     OperationRecorder,
     active_collector,
@@ -38,6 +40,7 @@ class OpenAICompatibleEmbeddingProvider:
         self._max_batch_size = max_batch_size
         self._observation_collector = active_collector(observation_collector)
 
+    @traceable(name="a2a.model.embedding", run_type="embedding")
     async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
         if not texts or len(texts) > self._max_batch_size:
             raise EmbeddingProviderError("lote de embeddings vazio ou acima do limite")

@@ -12,6 +12,11 @@ from app.ports.interaction_repository import InteractionRepository
 from app.ports.session_summary_repository import SessionSummaryRepository
 from app.ports.user_memory_repository import UserMemoryRepository
 
+MAX_CONTEXT_CHARS = 12_000
+MAX_CONTEXT_MESSAGES = 20
+MAX_CONTEXT_SCAN_MESSAGES = 200
+MAX_CONTEXT_MESSAGE_CHARS = 4_000
+
 
 async def build_session_context(
     *,
@@ -37,7 +42,8 @@ async def build_session_context(
     after_sequence = summary.through_sequence if summary else 0
     through_sequence = before_sequence - 1
     collected: list[ConversationMessage] = []
-    cursor = after_sequence
+    # Do not scan an unbounded transcript when no summary exists or it is stale.
+    cursor = max(after_sequence, through_sequence - MAX_CONTEXT_SCAN_MESSAGES)
     while cursor < through_sequence:
         page = await conversations.list_after_sequence(
             session_id,
@@ -65,7 +71,8 @@ async def build_session_context(
         for record in interaction_records
         if record is not None
         and record.session_id == session_id
-        and record.status in {InteractionStatus.COMPLETED, InteractionStatus.FAILED}
+        and record.status
+        in {InteractionStatus.COMPLETED, InteractionStatus.DEGRADED, InteractionStatus.FAILED}
     }
     visible = sorted(
         (
@@ -78,11 +85,28 @@ async def build_session_context(
         key=lambda message: message.sequence,
     )
 
+    summary_text = summary.summary_text if summary else None
+    user_tone = memory.tone if memory else None
+    user_goal = memory.general_goal if memory else None
+    fixed_chars = sum(len(value or "") for value in (summary_text, user_tone, user_goal))
+    if fixed_chars > MAX_CONTEXT_CHARS:
+        summary_text = None
+        fixed_chars = len(user_tone or "") + len(user_goal or "")
+
+    remaining = max(0, MAX_CONTEXT_CHARS - fixed_chars)
+    selected: list[ContextMessage] = []
+    for message in reversed(visible[-MAX_CONTEXT_MESSAGES:]):
+        content = message.sanitized_content.strip()
+        if len(content) > MAX_CONTEXT_MESSAGE_CHARS or len(content) > remaining:
+            continue
+        selected.append(_context_message(message))
+        remaining -= len(content)
+
     return SessionContext(
-        session_summary=summary.summary_text if summary else None,
-        recent_messages=tuple(_context_message(message) for message in visible),
-        user_tone=memory.tone if memory else None,
-        user_general_goal=memory.general_goal if memory else None,
+        session_summary=summary_text,
+        recent_messages=tuple(reversed(selected)),
+        user_tone=user_tone,
+        user_general_goal=user_goal,
     )
 
 

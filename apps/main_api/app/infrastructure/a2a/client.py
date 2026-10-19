@@ -7,8 +7,9 @@ import base64
 import json
 import time
 from contextlib import nullcontext
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -36,6 +37,10 @@ from packages.observability import (
     OperationPhase,
     ProtocolMetadata,
     ResultMetadata,
+    current_correlation_id,
+    current_interaction_id,
+    current_parent_observation_id,
+    current_session_id,
 )
 
 _TASK_STATES = {
@@ -109,7 +114,29 @@ class DocumentA2AClient:
     def bind_observation_collector(self, collector: ObservationCollector) -> None:
         self.observation_collector = collector
 
-    async def ask(self, question: str, *, user_id: str | UUID) -> str:
+    async def check_ready(self) -> None:
+        """Confirma que o serviço A2A e seus próprios pré-requisitos estão prontos."""
+        endpoint = urlsplit(self._endpoint)
+        health_url = urlunsplit((endpoint.scheme, endpoint.netloc, "/health/ready", "", ""))
+        response = await self._http.get(health_url, timeout=httpx.Timeout(2.0))
+        if response.status_code != 200:
+            raise DocumentA2ACallError("serviço documental não está pronto")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise DocumentA2ACallError("healthcheck documental inválido") from exc
+        if not isinstance(payload, dict) or payload.get("status") != "ready":
+            raise DocumentA2ACallError("serviço documental não está pronto")
+
+    async def ask(
+        self,
+        question: str,
+        *,
+        user_id: str | UUID,
+        skill: DocumentSkill = DocumentSkill.DOCUMENTAL,
+        jurisdiction: str | None = None,
+        reference_date: date | None = None,
+    ) -> str:
         observe_context = (
             observe_operation(
                 self.observation_collector,
@@ -117,13 +144,13 @@ class DocumentA2AClient:
                 operation_name="a2a.documental.message.send",
                 operation_phase=OperationPhase.EXECUTION,
                 observation_level=ObservationLevel.TRANSPORT_ATTEMPT,
-                agent="documental",
+                agent=skill.value,
                 timeout_ms=self._timeout_seconds * 1000,
                 error_origin=ErrorOrigin.TRANSPORT,
                 protocol=ProtocolMetadata(
                     name="a2a",
                     operation="message.send",
-                    skill=DocumentSkill.DOCUMENTAL.value,
+                    skill=skill.value,
                     task_state="working",
                 ),
             )
@@ -135,7 +162,9 @@ class DocumentA2AClient:
             request = DocumentQuestionRequest(
                 request_id=request_id,
                 question=question,
-                skill=DocumentSkill.DOCUMENTAL,
+                skill=skill,
+                jurisdiction=jurisdiction,
+                reference_date=reference_date,
                 deadline_at=datetime.now(UTC) + timedelta(seconds=self._timeout_seconds),
             )
             delegation = self._delegation_token(
@@ -178,7 +207,7 @@ class DocumentA2AClient:
                 protocol = ProtocolMetadata(
                     name="a2a",
                     operation="message.send",
-                    skill=DocumentSkill.DOCUMENTAL.value,
+                    skill=skill.value,
                     task_state=task_state,
                 )
                 if task_state == "rejected":
@@ -256,6 +285,16 @@ class DocumentA2AClient:
             "agent": "informacoes",
             "operations": ["documents.read"],
             "request_id": request_id,
+            "correlation_id": str(current_correlation_id() or request_id),
+            "parent_observation_id": (
+                str(current_parent_observation_id())
+                if current_parent_observation_id() is not None
+                else None
+            ),
+            "session_id": str(current_session_id()) if current_session_id() is not None else None,
+            "interaction_id": (
+                str(current_interaction_id()) if current_interaction_id() is not None else None
+            ),
             "jti": str(uuid4()),
             "iat": issued_at,
             "nbf": issued_at,

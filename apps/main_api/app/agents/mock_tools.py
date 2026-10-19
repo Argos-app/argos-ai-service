@@ -69,11 +69,24 @@ def mock_consultar_documental(pergunta: str) -> str:
     )
 
 
+@tool(description="Simula indisponibilidade da busca de leis; não consulta PDFs.")
+def mock_consultar_legal(
+    question: str,
+    jurisdiction: str | None = None,
+    reference_date: str | None = None,
+) -> str:
+    del jurisdiction, reference_date
+    return (
+        f"MOCK: pergunta recebida: '{question}'. Serviço de consulta legal indisponível neste "
+        "teste. Nenhuma lei foi consultada; não há conteúdo ou fonte para responder."
+    )
+
+
 MOCK_FARM_TOOLS = [mock_consultar_fazenda]
 MOCK_DOCTOR_TOOLS = [mock_consultar_medicamento]
 MOCK_ANALYST_TOOLS = [mock_calcular_previsao]
 MOCK_SECRETARY_TOOLS = [mock_preparar_relatorio]
-MOCK_INFORMATION_TOOLS = [mock_consultar_documental]
+MOCK_INFORMATION_TOOLS = [mock_consultar_documental, mock_consultar_legal]
 
 MOCK_AGENT_TOOL_BINDINGS = {
     AgentId.FARM: {"farm_data": tuple(MOCK_FARM_TOOLS)},

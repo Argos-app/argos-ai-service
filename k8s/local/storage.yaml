@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+    name: argos-local-mongo
+spec:
+    capacity: { storage: 2Gi }
+    volumeMode: Filesystem
+    accessModes: [ReadWriteOnce]
+    persistentVolumeReclaimPolicy: Retain
+    storageClassName: argos-local-static
+    hostPath:
+        path: /var/local/argos/mongo
+        type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+    name: argos-local-postgres
+spec:
+    capacity: { storage: 4Gi }
+    volumeMode: Filesystem
+    accessModes: [ReadWriteOnce]
+    persistentVolumeReclaimPolicy: Retain
+    storageClassName: argos-local-static
+    hostPath:
+        path: /var/local/argos/postgres
+        type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+    name: argos-local-qdrant
+spec:
+    capacity: { storage: 4Gi }
+    volumeMode: Filesystem
+    accessModes: [ReadWriteOnce]
+    persistentVolumeReclaimPolicy: Retain
+    storageClassName: argos-local-static
+    hostPath:
+        path: /var/local/argos/qdrant
+        type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+    name: argos-local-a2a-state
+spec:
+    capacity: { storage: 1Gi }
+    volumeMode: Filesystem
+    accessModes: [ReadWriteOnce]
+    persistentVolumeReclaimPolicy: Retain
+    storageClassName: argos-local-static
+    hostPath:
+        path: /var/local/argos/a2a-state
+        type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+    name: mongo-data
+spec:
+    storageClassName: argos-local-static
+    volumeName: argos-local-mongo
+    accessModes: [ReadWriteOnce]
+    resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+    name: postgres-data
+spec:
+    storageClassName: argos-local-static
+    volumeName: argos-local-postgres
+    accessModes: [ReadWriteOnce]
+    resources: { requests: { storage: 4Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+    name: qdrant-data
+spec:
+    storageClassName: argos-local-static
+    volumeName: argos-local-qdrant
+    accessModes: [ReadWriteOnce]
+    resources: { requests: { storage: 4Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+    name: a2a-state
+spec:
+    storageClassName: argos-local-static
+    volumeName: argos-local-a2a-state
+    accessModes: [ReadWriteOnce]
+    resources: { requests: { storage: 1Gi } }

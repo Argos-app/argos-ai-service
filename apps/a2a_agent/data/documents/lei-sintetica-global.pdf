@@ -1,33 +1,71 @@
-%PDF-1.4
-% synthetic fixture
+%PDF-1.3
+%“Œ‹ž ReportLab Generated PDF document (opensource)
 1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
+<<
+/F1 2 0 R
+>>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+<<
+/Contents 7 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 6 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
 endobj
 4 0 obj
-<< /Length 94 >>
-stream
-BT /F1 12 Tf 72 720 Td (SINTETICO - NAO E LEGISLACAO REAL - Lei global de demonstracao.) Tj ET
-endstream
+<<
+/PageMode /UseNone /Pages 6 0 R /Type /Catalog
+>>
 endobj
 5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+<<
+/Author (anonymous) /CreationDate (D:20261016182627+00'00') /Creator (anonymous) /Keywords () /ModDate (D:20261016182627+00'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (Lei sintetica global de demonstracao) /Trapped /False
+>>
+endobj
+6 0 obj
+<<
+/Count 1 /Kids [ 3 0 R ] /Type /Pages
+>>
+endobj
+7 0 obj
+<<
+/Length 1003
+>>
+stream
+1 0 0 1 0 0 cm  BT /F1 12 Tf 14.4 TL ET
+BT 1 0 0 1 48 787.8898 Tm /F1 11 Tf 13.2 TL (Lei sintetica global de demonstracao) Tj T* 0 -8 Td  T* 0 -8 Td (DOCUMENTO SINTETICO PARA TESTES LOCAIS. Nao e legislacao real, norma vigente ou) Tj T* (orientacao juridica.) Tj T* 0 -8 Td (Artigo 1. Nesta demonstracao, um registro de aplicacao informa data, propriedade, lote,) Tj T* (medicamento, quantidade aplicada e responsavel.) Tj T* 0 -8 Td (Artigo 2. Cada alteracao do registro conserva a origem e o horario da modificacao para) Tj T* (permitir auditoria.) Tj T* 0 -8 Td (Artigo 3. A carencia de um medicamento nao pode ser inferida por este documento. Use) Tj T* (somente o rotulo e o cadastro confirmado do produto.) Tj T* 0 -8 Td (Artigo 4. Campo sem dado confirmado deve permanecer desconhecido; nao deve ser) Tj T* (convertido em zero.) Tj T* 0 -8 Td (Artigo 5. Estas clausulas servem exclusivamente para exercitar busca, citacao de fonte e) Tj T* (abstencao quando faltar evidencia.) Tj T* 0 -8 Td ET
+ 
+endstream
 endobj
 xref
-0 6
+0 8
 0000000000 65535 f 
-0000000029 00000 n 
-0000000078 00000 n 
-0000000135 00000 n 
-0000000261 00000 n 
-0000000405 00000 n 
+0000000061 00000 n 
+0000000092 00000 n 
+0000000199 00000 n 
+0000000402 00000 n 
+0000000470 00000 n 
+0000000759 00000 n 
+0000000818 00000 n 
 trailer
-<< /Size 6 /Root 1 0 R >>
+<<
+/ID 
+[<6aa62e79ffe825550fa3ff6c1097ee69><6aa62e79ffe825550fa3ff6c1097ee69>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 5 0 R
+/Root 4 0 R
+/Size 8
+>>
 startxref
-475
+1872
 %%EOF

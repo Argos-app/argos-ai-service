@@ -17,6 +17,8 @@ class AccessContext:
     expires_at: datetime
     token_id: str
     request_id: str
+    correlation_id: UUID | None = None
+    parent_observation_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +32,10 @@ class DocumentAccessContext:
     expires_at: datetime
     token_id: str
     request_id: str
+    correlation_id: UUID | None = None
+    parent_observation_id: UUID | None = None
+    session_id: UUID | None = None
+    interaction_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

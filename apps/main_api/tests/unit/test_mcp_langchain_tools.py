@@ -102,6 +102,166 @@ async def test_doctor_tools_use_doctor_identity_and_medicine_operation():
 
 
 @pytest.mark.asyncio
+async def test_lot_tool_exposes_and_sends_the_exact_mcp_contract():
+    data_client = _FakeClient("data")
+    property_id = uuid4()
+    config = {
+        "configurable": {
+            "argos_user_id": str(uuid4()),
+            "argos_authorized_property_ids": (str(property_id),),
+            "argos_request_id": str(uuid4()),
+        }
+    }
+    tool = _tool(
+        build_mcp_tool_bindings(McpClients(data=data_client), _FakeIssuer())[AgentId.FARM][
+            "farm_data"
+        ],
+        "list_lots",
+    )
+
+    await tool.ainvoke(
+        {"payload": {"lot_code": "HC-LOTE-031", "property_ids": [str(property_id)]}},
+        config=config,
+    )
+
+    assert data_client.calls[0]["arguments"]["payload"]["lot_code"] == "HC-LOTE-031"
+    assert data_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
+    assert "code" not in data_client.calls[0]["arguments"]["payload"]
+
+    await tool.ainvoke(
+        {"payload": {"code": "HC-LOTE-031", "property_id": str(property_id)}},
+        config=config,
+    )
+    alias_payload = data_client.calls[1]["arguments"]["payload"]
+    assert alias_payload["lot_code"] == "HC-LOTE-031"
+    assert alias_payload["property_ids"] == [str(property_id)]
+    assert "code" not in alias_payload and "property_id" not in alias_payload
+
+
+@pytest.mark.asyncio
+async def test_medicine_tools_forward_search_and_use_contract_filters():
+    data_client = _FakeClient("data")
+    property_id = uuid4()
+    config = {
+        "configurable": {
+            "argos_user_id": str(uuid4()),
+            "argos_authorized_property_ids": (str(property_id),),
+            "argos_request_id": str(uuid4()),
+        }
+    }
+    tools = build_mcp_tool_bindings(McpClients(data=data_client), _FakeIssuer())[AgentId.DOCTOR][
+        "medicine_reference"
+    ]
+    tool = _tool(tools, "list_medicines")
+
+    await tool.ainvoke({"payload": {"search": "Ivervet Teste"}}, config=config)
+    await tool.ainvoke({"payload": {"brand_name": "Ivervet Teste"}}, config=config)
+
+    assert data_client.calls[0]["arguments"]["payload"]["search"] == "Ivervet Teste"
+    assert data_client.calls[1]["arguments"]["payload"]["brand_name"] == "Ivervet Teste"
+    assert "search" not in data_client.calls[1]["arguments"]["payload"]
+
+
+@pytest.mark.asyncio
+async def test_tool_argument_aliases_are_normalized_before_mcp_call():
+    data_client = _FakeClient("data")
+    prediction_client = _FakeClient("prediction")
+    property_id = uuid4()
+    config = {
+        "configurable": {
+            "argos_user_id": str(uuid4()),
+            "argos_authorized_property_ids": (str(property_id),),
+            "argos_request_id": str(uuid4()),
+        }
+    }
+    bindings = build_mcp_tool_bindings(
+        McpClients(data=data_client, prediction=prediction_client), _FakeIssuer()
+    )
+
+    await _tool(bindings[AgentId.FARM]["farm_data"], "list_applications").ainvoke(
+        {
+            "payload": {
+                "medication_name": "Ivervet Teste",
+                "property_id": str(property_id),
+            }
+        },
+        config=config,
+    )
+    await _tool(bindings[AgentId.ANALYST]["prediction"], "estimate_medicine_consumption").ainvoke(
+        {
+            "payload": {
+                "medicine_name": "Ivervet Teste",
+                "property_id": str(property_id),
+                "horizon_days": 14,
+            }
+        },
+        config=config,
+    )
+
+    assert data_client.calls[0]["arguments"]["payload"]["medicine_name"] == "Ivervet Teste"
+    assert data_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
+    assert prediction_client.calls[0]["arguments"]["payload"]["medicine_names"] == ["Ivervet Teste"]
+    assert prediction_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
+
+
+@pytest.mark.asyncio
+async def test_prediction_tool_uses_contract_names_and_defaults_a_closed_date():
+    prediction_client = _FakeClient("prediction")
+    property_id = uuid4()
+    config = {
+        "configurable": {
+            "argos_user_id": str(uuid4()),
+            "argos_authorized_property_ids": (str(property_id),),
+            "argos_request_id": str(uuid4()),
+        }
+    }
+    tool = _tool(
+        build_mcp_tool_bindings(McpClients(prediction=prediction_client), _FakeIssuer())[
+            AgentId.ANALYST
+        ]["prediction"],
+        "estimate_medicine_consumption",
+    )
+
+    await tool.ainvoke(
+        {"payload": {"medicine_names": ["Ivervet Teste"], "horizon_days": 14}},
+        config=config,
+    )
+
+    payload = prediction_client.calls[0]["arguments"]["payload"]
+    assert payload["medicine_names"] == ["Ivervet Teste"]
+    assert payload["horizon_days"] == 14
+    assert payload["as_of"] < __import__("datetime").date.today().isoformat()
+    assert "medicine_name" not in payload
+    assert "property_id" not in payload
+
+
+@pytest.mark.asyncio
+async def test_analyst_can_resolve_a_named_property_before_prediction():
+    data_client = _FakeClient("data")
+    issuer = _FakeIssuer()
+    tools = build_mcp_tool_bindings(
+        McpClients(data=data_client, prediction=_FakeClient("prediction")),
+        issuer,
+    )[AgentId.ANALYST]["prediction"]
+    config = {
+        "configurable": {
+            "argos_user_id": str(uuid4()),
+            "argos_authorized_property_ids": (str(uuid4()),),
+            "argos_request_id": str(uuid4()),
+        }
+    }
+
+    await _tool(tools, "list_properties").ainvoke(
+        {"payload": {"name": "Fazenda Sol Nascente"}}, config=config
+    )
+
+    assert data_client.calls[0]["arguments"]["payload"]["name"] == "Fazenda Sol Nascente"
+    assert issuer.calls[0]["service"] == "data"
+    assert issuer.calls[0]["agent"] == "analista"
+    assert issuer.calls[0]["operation"] == "cattle.read"
+
+
+@pytest.mark.asyncio
 async def test_secretary_email_binding_exposes_only_local_report_workflow_tools():
     email_client = _FakeClient("email")
     bindings = build_mcp_tool_bindings(McpClients(email=email_client), None)
@@ -184,7 +344,8 @@ def test_configured_mcp_tools_are_bound_to_expected_agents():
         "list_medicine_documents",
     }
     assert {tool.name for tool in bindings[AgentId.ANALYST]["prediction"]} == {
-        "estimate_medicine_consumption"
+        "list_properties",
+        "estimate_medicine_consumption",
     }
     secretary_tools = {tool.name for tool in bindings[AgentId.SECRETARY]["report_delivery"]}
     assert secretary_tools == {"prepare_report", "send_report", "get_report_status"}

@@ -15,7 +15,13 @@ from packages.contracts.a2a import (
     DocumentAnswerStatus,
     DocumentSkill,
 )
-from packages.observability import ObservationStatus, OperationKind, UsageAvailability
+from packages.observability import (
+    ObservationStatus,
+    OperationKind,
+    UsageAvailability,
+    billing_with_fallback,
+    provider_billing,
+)
 from packages.security.access import DocumentAccessContext
 
 
@@ -85,9 +91,38 @@ def test_provider_usage_preserves_only_returned_numeric_categories() -> None:
     assert usage.details == {"custom_tokens": 4}
 
 
+def test_provider_billing_requires_explicit_currency_or_usd_field() -> None:
+    billing = provider_billing({"usage": {"total_cost_usd": "0.0000000000125"}})
+    assert billing is not None
+    assert str(billing.reported_cost) == "1.25E-11"
+    assert billing.currency == "USD"
+    assert billing.cost_source == "provider"
+
+    assert provider_billing({"usage": {"prompt_tokens": 12, "total_tokens": 12}}) is None
+    assert provider_billing({"usage": {"cost": "0.00125"}}) is None
+
+
+def test_a2a_provider_usage_aliases_are_used_for_configured_rate_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    usage = _provider_usage({"input_tokens": 200, "output_tokens": 50})
+
+    billing = billing_with_fallback(
+        {}, input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
+    )
+
+    assert billing is not None
+    assert str(billing.reported_cost) == "0.0010"
+    assert billing.cost_source == "configured_rate"
+
+
 def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> None:
     collector = Collector()
     request_id = uuid4()
+    correlation_id = uuid4()
+    parent_observation_id = uuid4()
+    session_id = uuid4()
+    interaction_id = uuid4()
     request = {
         "request_id": str(request_id),
         "question": "Pergunta de teste",
@@ -102,6 +137,10 @@ def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> No
         expires_at=datetime.now(UTC) + timedelta(minutes=1),
         token_id="token-test",
         request_id="request-test",
+        correlation_id=correlation_id,
+        parent_observation_id=parent_observation_id,
+        session_id=session_id,
+        interaction_id=interaction_id,
     )
 
     class FakeUpdater:
@@ -150,3 +189,7 @@ def test_completed_a2a_task_keeps_unavailable_result_distinct(monkeypatch) -> No
     assert terminal.status == ObservationStatus.SUCCEEDED
     assert terminal.protocol.task_state == "completed"
     assert terminal.result.code == DocumentAnswerStatus.UNAVAILABLE.value
+    assert terminal.correlation_id == correlation_id
+    assert terminal.parent_observation_id == parent_observation_id
+    assert terminal.session_id == session_id
+    assert terminal.interaction_id == interaction_id

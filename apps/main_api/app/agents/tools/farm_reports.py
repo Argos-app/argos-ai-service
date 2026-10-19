@@ -1,7 +1,7 @@
 """Ferramenta de Fazenda para resolver lote antes de solicitar sua origem."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -25,6 +25,7 @@ class ReportLotInput(BaseModel):
 def build_farm_report_tool(
     data_client: DataClient,
     artifact_repository: ReportArtifactRepository | None = None,
+    signature_checker: Callable[[bytes, str, str], bool] | None = None,
 ) -> StructuredTool:
     async def resolve_report_source(
         lot_code: str,
@@ -83,8 +84,10 @@ def build_farm_report_tool(
         try:
             envelope = await data_client.get_lot_report_source(
                 lot_id=candidate.lot_id,
+                property_id=candidate.property_id,
                 principal_user_id=principal_user_id,
                 authorized_property_ids=authorized_property_ids,
+                request_id=request_id,
             )
         except DataReportSourceUnavailable:
             return json.dumps(
@@ -97,11 +100,14 @@ def build_farm_report_tool(
                 },
                 ensure_ascii=False,
             )
+        if signature_checker is None:
+            raise ValueError("verificador da assinatura da origem de relatório não configurado")
         validate_report_source(
             envelope,
             principal_user_id=principal_user_id,
             lot_id=candidate.lot_id,
             authorized_property_ids=authorized_property_ids,
+            signature_checker=signature_checker,
         )
         if artifact_repository is None:
             return json.dumps(
