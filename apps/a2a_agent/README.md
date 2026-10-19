@@ -140,8 +140,12 @@ não podem ser retomadas após reinício.
   não repete tasks automaticamente. A persistência de tasks não faz parte do
   contrato atual.
 - `GET /health/live` verifica o processo; `GET /health/ready` exige Bearer de
-  serviço, runtime de agentes configurado e disponibilidade do Qdrant. A
-  prontidão não executa uma inferência de teste no provider.
+  serviço, runtime de agentes configurado e disponibilidade do Qdrant. Em um
+  ambiente limpo, a ausência inicial do alias é aceita porque a primeira
+  consulta documental autorizada sincroniza e publica o corpus; se o alias já
+  existir, sua dimensão e métrica precisam corresponder à configuração. Falhas
+  de conexão ou incompatibilidades mantêm a readiness indisponível. A prontidão
+  não executa uma inferência de teste no provider.
 - Preserve o volume `a2a-state` em reinícios. O manifesto é estado técnico da
   sincronização; não edite seu conteúdo manualmente.
 - Fonte local (`data/documents` por padrão) é montada somente para leitura. A

@@ -5,9 +5,18 @@ from argos_a2a_agent.infrastructure.qdrant_health import check_qdrant_collection
 
 
 class _Client:
-    def __init__(self, vectors):
+    def __init__(self, vectors=None, *, exists=True, error=None):
         self.vectors = vectors
+        self.exists = exists
+        self.error = error
         self.collection_name = None
+        self.exists_collection_name = None
+
+    async def collection_exists(self, *, collection_name):
+        self.exists_collection_name = collection_name
+        if self.error is not None:
+            raise self.error
+        return self.exists
 
     async def get_collection(self, *, collection_name):
         self.collection_name = collection_name
@@ -26,6 +35,34 @@ async def test_readiness_checks_the_configured_alias_and_vector_shape():
     )
 
     assert client.collection_name == "argos_documents"
+
+
+@pytest.mark.asyncio
+async def test_readiness_allows_a_clean_qdrant_before_the_first_authorized_sync():
+    client = _Client(exists=False)
+
+    await check_qdrant_collection(
+        client,
+        collection="argos_documents",
+        vector_size=2048,
+        distance="Cosine",
+    )
+
+    assert client.exists_collection_name == "argos_documents"
+    assert client.collection_name is None
+
+
+@pytest.mark.asyncio
+async def test_readiness_still_fails_when_qdrant_is_unavailable():
+    client = _Client(exists=False, error=ConnectionError("qdrant unavailable"))
+
+    with pytest.raises(ConnectionError, match="qdrant unavailable"):
+        await check_qdrant_collection(
+            client,
+            collection="argos_documents",
+            vector_size=2048,
+            distance="Cosine",
+        )
 
 
 @pytest.mark.asyncio
