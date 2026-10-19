@@ -343,14 +343,15 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             assert agent_factory._agents[AgentId.SECRETARY].result is not None, agent_factory.calls
             secretary_answer = agent_factory._agents[AgentId.SECRETARY].result.answer
             if expected_dispatch:
-                assert "MCP confirmou" in secretary_answer, secretary_answer
+                assert "O provedor aceitou o despacho" in secretary_answer, secretary_answer
+                assert "não confirma a entrega" in secretary_answer, secretary_answer
             assert public_result["response"]["kind"] == "answer"
             public_text = public_result["response"]["text"]
             if expected_dispatch:
-                assert "MCP confirmou o recebimento" in public_text
+                assert "O provedor aceitou o despacho" in public_text
                 assert "não confirma a entrega" in public_text
             else:
-                assert "MCP confirmou o recebimento" not in public_text
+                assert "O provedor aceitou o despacho" not in public_text
             assert "matheus@example.test" not in public_text
             assert harness.title not in public_text
             stored_report = await harness.database.prepared_reports.find_one({})

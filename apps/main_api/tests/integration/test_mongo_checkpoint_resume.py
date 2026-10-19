@@ -13,6 +13,7 @@ from app.agent_schemas.results import (
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import OrchestratorResult
+from app.application.execution_limits import ExecutionLimits, execution_limits_scope
 from app.graph.workflow import build_graph, executar_fluxo, executar_resposta
 from app.infrastructure.checkpoints.mongo import create_mongo_checkpointer
 from app.ports.agent import AgentId
@@ -20,13 +21,21 @@ from app.settings import Settings
 
 
 class FakeAgent:
-    def __init__(self, *responses: Any) -> None:
+    def __init__(self, *responses: Any, evidence: tuple[str, str, str] | None = None) -> None:
         self.responses = list(responses)
         self.calls = 0
+        self.inputs: list[Any] = []
+        self.evidence = evidence
 
     async def run(self, input: Any, *, context=None) -> Any:
-        del input, context
         self.calls += 1
+        self.inputs.append(input)
+        if self.evidence is not None:
+            limits = (context or {}).get("argos_execution_limits")
+            if limits is None:
+                raise AssertionError("a consulta simulada exige o orçamento de execução")
+            agent, tool_name, excerpt = self.evidence
+            limits.record_tool_success(agent, tool_name, excerpt)
         return self.responses.pop(0)
 
 
@@ -77,7 +86,10 @@ async def test_pending_question_resumes_after_recreating_mongo_saver():
         checkpointer_runtime.close()
 
     checkpointer_runtime = create_mongo_checkpointer(settings)
-    farm = FakeAgent(SpecialistResult(agent="farm", status="success", answer="Dados de janeiro"))
+    farm = FakeAgent(
+        SpecialistResult(agent="farm", status="success", answer="Dados de janeiro"),
+        evidence=("farm", "list_lots", '{"lot_code":"L-1","month":"janeiro"}'),
+    )
     try:
         task = RouteTask(
             task_id="t1",
@@ -89,15 +101,17 @@ async def test_pending_question_resumes_after_recreating_mongo_saver():
             _factory(FakeAgent(RoutePlan(intent="relatório", tasks=(task,))), farm),
             checkpointer=checkpointer_runtime.saver,
         )
-        result = await executar_resposta(
-            resumed_graph,
-            "janeiro",
-            question_id=str(first["question_id"]),
-            session_id=session_id,
-            interaction_id=str(uuid4()),
-        )
+        with execution_limits_scope(ExecutionLimits(4, 4)):
+            result = await executar_resposta(
+                resumed_graph,
+                "janeiro",
+                question_id=str(first["question_id"]),
+                session_id=session_id,
+                interaction_id=str(uuid4()),
+            )
     finally:
         checkpointer_runtime.close()
 
     assert result["final_answer"] == "Consulta retomada"
     assert farm.calls == 1
+    assert "janeiro" in farm.inputs[0].brief_sanitized
