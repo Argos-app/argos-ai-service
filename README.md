@@ -170,7 +170,10 @@ disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. For
 desse modo, configure a chave pública Ed25519 do backend em
 `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
 agente e operações delegadas. O backend deve incluir `farm_ids` no token para
-que a API possa abrir sessões com o escopo autorizado.
+que a API possa abrir sessões com o escopo autorizado. As decisões para a
+integração Firebase, incluindo a associação pelo UID e o tratamento de cadastros
+legados, estão em
+[`docs/autenticacao-firebase-identidade.md`](docs/autenticacao-firebase-identidade.md).
 
 O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
 aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são

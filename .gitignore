@@ -99,4 +99,5 @@ Thumbs.db
 !docs/operacao-observabilidade.md
 !docs/plano-observabilidade-dados-brutos.md
 !docs/resultado-homologacao-local.md
+!docs/autenticacao-firebase-identidade.md
 k8s/local/secret.env
