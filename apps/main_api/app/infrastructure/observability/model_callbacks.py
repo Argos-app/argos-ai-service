@@ -11,6 +11,7 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler
 
 from packages.observability import (
+    Billing,
     CancellationState,
     ErrorOrigin,
     ObservationCollector,
@@ -21,6 +22,7 @@ from packages.observability import (
     Usage,
     UsageAvailability,
     UsageSource,
+    billing_with_fallback,
 )
 
 from .recording import OperationRecorder
@@ -206,6 +208,18 @@ def _usage_from_message(message: Any, llm_output: Any) -> Usage:
     )
 
 
+def _billing_from_message(message: Any, llm_output: Any, usage: Usage) -> Billing | None:
+    return billing_with_fallback(
+        {
+            "llm_output": llm_output,
+            "usage_metadata": getattr(message, "usage_metadata", None),
+            "response_metadata": getattr(message, "response_metadata", None),
+        },
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
+
+
 def _returned_model(response: Any, message: Any) -> str | None:
     metadata = _mapping(getattr(message, "response_metadata", None)) or {}
     llm_output = _mapping(getattr(response, "llm_output", None)) or {}
@@ -260,9 +274,13 @@ class ModelUsageCallback(AsyncCallbackHandler):
             return
         message = self._first_message(response)
         try:
+            usage = _usage_from_message(message, getattr(response, "llm_output", None))
             recorder.finish(
                 model_returned=_returned_model(response, message),
-                usage=_usage_from_message(message, getattr(response, "llm_output", None)),
+                usage=usage,
+                billing=_billing_from_message(
+                    message, getattr(response, "llm_output", None), usage
+                ),
             )
         except Exception:
             recorder.finish(usage=Usage(availability=UsageAvailability.ABSENT))

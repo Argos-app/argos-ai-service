@@ -296,4 +296,6 @@ class GlobalDocumentDelegationTokenVerifier(DelegationTokenVerifier):
             request_id=request_id,
             correlation_id=self._optional_uuid_claim(claims, "correlation_id"),
             parent_observation_id=self._optional_uuid_claim(claims, "parent_observation_id"),
+            session_id=self._optional_uuid_claim(claims, "session_id"),
+            interaction_id=self._optional_uuid_claim(claims, "interaction_id"),
         )

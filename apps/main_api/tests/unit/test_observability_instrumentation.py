@@ -115,8 +115,12 @@ def test_operation_recorder_inherits_correlation_and_parent_observation():
     collector, writer = _collector()
     correlation_id = uuid4()
     parent_observation_id = uuid4()
+    session_id = uuid4()
+    interaction_id = uuid4()
 
-    with bind_correlation(correlation_id):
+    from packages.observability import bind_interaction
+
+    with bind_correlation(correlation_id), bind_interaction(session_id, interaction_id):
         from packages.observability import observation_scope
 
         with observation_scope(parent_observation_id):
@@ -129,6 +133,8 @@ def test_operation_recorder_inherits_correlation_and_parent_observation():
 
     assert writer.observations[0].correlation_id == correlation_id
     assert writer.observations[0].parent_observation_id == parent_observation_id
+    assert writer.observations[0].session_id == session_id
+    assert writer.observations[0].interaction_id == interaction_id
 
 
 def test_mcp_tool_call_is_observed_without_arguments_or_response(monkeypatch):

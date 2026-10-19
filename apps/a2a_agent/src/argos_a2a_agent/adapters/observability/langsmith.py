@@ -3,15 +3,40 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
 from argos_a2a_agent.settings import Settings
-from packages.observability import correlation_key
+from packages.observability import Billing, correlation_key, langsmith_usage_metadata
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def attach_provider_billing(
+    billing: Billing | None,
+    usage: Mapping[str, Any] | None = None,
+    *,
+    embedding: bool = False,
+) -> None:
+    """Attach provider cost or a configured-rate estimate to the active run."""
+    if billing is None:
+        return
+    try:
+        from langsmith.run_helpers import get_current_run_tree
+
+        run_tree = get_current_run_tree()
+        if run_tree is None:
+            return
+        run_tree.set(
+            metadata={"argos_billing": billing.model_dump(mode="json", exclude_none=True)},
+            usage_metadata=langsmith_usage_metadata(billing, usage, embedding=embedding),
+        )
+    except Exception:
+        # LangSmith is best effort; the Mongo observation is written separately.
+        _LOGGER.warning("LangSmith provider-cost annotation failed")
 
 
 @dataclass(slots=True)

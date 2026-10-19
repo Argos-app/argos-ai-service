@@ -32,6 +32,7 @@ from packages.observability import (
     ProtocolMetadata,
     ResultMetadata,
     bind_correlation,
+    bind_interaction,
     bind_user_id,
     observation_scope,
 )
@@ -83,6 +84,16 @@ class DocumentA2AExecutor(AgentExecutor):
                     if isinstance(access_context, DocumentAccessContext)
                     else None
                 ),
+                session_id=(
+                    access_context.session_id
+                    if isinstance(access_context, DocumentAccessContext)
+                    else None
+                ),
+                interaction_id=(
+                    access_context.interaction_id
+                    if isinstance(access_context, DocumentAccessContext)
+                    else None
+                ),
             )
             if self._observation_collector is not None
             else None
@@ -114,7 +125,20 @@ class DocumentA2AExecutor(AgentExecutor):
                 if isinstance(access_context, DocumentAccessContext)
                 else nullcontext()
             )
-            with correlation_scope, observation_parent_scope, trace_context, user_scope:
+            interaction_scope = (
+                bind_interaction(access_context.session_id, access_context.interaction_id)
+                if isinstance(access_context, DocumentAccessContext)
+                and access_context.session_id is not None
+                and access_context.interaction_id is not None
+                else nullcontext()
+            )
+            with (
+                correlation_scope,
+                observation_parent_scope,
+                trace_context,
+                user_scope,
+                interaction_scope,
+            ):
                 await self._execute_task(context, event_queue, updater, recorder)
         except BaseException as exc:
             if recorder is not None:
@@ -159,7 +183,7 @@ class DocumentA2AExecutor(AgentExecutor):
             if part.media_type and part.media_type != "application/json":
                 raise ValueError("media type não suportado")
             request = DocumentQuestionRequest.model_validate_json(part.text)
-        except (ValidationError, ValueError):
+        except ValidationError, ValueError:
             await updater.reject(
                 updater.new_agent_message(
                     [

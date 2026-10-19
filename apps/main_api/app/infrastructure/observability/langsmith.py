@@ -3,13 +3,71 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from langchain_core.messages.ai import add_usage
+
 from app.settings import Settings
+from packages.observability import billing_from_usage_payload, langsmith_usage_metadata
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _usage_metadata_from_outputs(outputs: Any) -> dict[str, Any] | None:
+    """Extract and aggregate LangChain's serialized message usage metadata."""
+    if not isinstance(outputs, Mapping):
+        return None
+    generations = outputs.get("generations")
+    if not isinstance(generations, (list, tuple)):
+        return None
+
+    usage = None
+    for batch in generations:
+        if not isinstance(batch, (list, tuple)):
+            continue
+        for generation in batch:
+            if not isinstance(generation, Mapping):
+                continue
+            message = generation.get("message")
+            if not isinstance(message, Mapping):
+                continue
+            kwargs = message.get("kwargs")
+            if not isinstance(kwargs, Mapping):
+                continue
+            message_usage = kwargs.get("usage_metadata")
+            if isinstance(message_usage, Mapping):
+                usage = add_usage(usage, dict(message_usage))
+    return dict(usage) if isinstance(usage, Mapping) else None
+
+
+def _attach_provider_billing(run: Any, *, billing: Any | None = None) -> None:
+    """Attach cost and token usage before LangSmith persists the completed run."""
+    outputs = getattr(run, "outputs", None)
+    billing = billing or billing_from_usage_payload(outputs)
+    if billing is None:
+        return
+
+    metadata = {"argos_billing": billing.model_dump(mode="json", exclude_none=True)}
+    usage_metadata = _usage_metadata_from_outputs(outputs)
+    extra = getattr(run, "extra", None)
+    current_metadata = extra.get("metadata") if isinstance(extra, Mapping) else None
+    current_usage = (
+        current_metadata.get("usage_metadata") if isinstance(current_metadata, Mapping) else None
+    )
+    if usage_metadata is None and isinstance(current_usage, Mapping):
+        usage_metadata = dict(current_usage)
+    if usage_metadata is None:
+        usage_metadata = {}
+    usage_metadata = langsmith_usage_metadata(billing, usage_metadata)
+
+    # RunTree.set validates the LangSmith usage schema and merges metadata. The
+    # tracer then sends tokens and cost together in its single terminal patch.
+    run.set(metadata=metadata, usage_metadata=usage_metadata)
+    if isinstance(outputs, dict):
+        outputs["usage_metadata"] = dict(usage_metadata)
 
 
 @dataclass(slots=True)
@@ -101,7 +159,21 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
             hide_outputs=not settings.langsmith_capture_content,
             anonymizer=anonymizer,
         )
-        callback = LangChainTracer(client=client, project_name=settings.langsmith_project)
+
+        class BillingAwareLangChainTracer(LangChainTracer):
+            """Persists configured/provider cost with the terminal token usage."""
+
+            def _on_llm_end(self, run: Any) -> None:
+                billing = billing_from_usage_payload(getattr(run, "outputs", None))
+                if billing is not None:
+                    _attach_provider_billing(run, billing=billing)
+                    self._update_run_single(run)
+                    return
+                super()._on_llm_end(run)
+
+        callback = BillingAwareLangChainTracer(
+            client=client, project_name=settings.langsmith_project
+        )
         return LangSmithTracing(client=client, callback=callback)
     except Exception:
         if client is not None:

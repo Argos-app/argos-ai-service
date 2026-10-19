@@ -58,6 +58,8 @@ def main() -> None:
         "POSTGRES_READER_PASSWORD": secrets.token_urlsafe(32),
         "MONGO_DATABASE": "argos_ai",
         "ARGOS_MODEL_MODE": "simulated",
+        "MODEL_INPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_OUTPUT_COST_PER_MILLION_TOKENS": "",
         "A2A_QDRANT_VECTOR_SIZE": "64",
         "MAIN_API_MODEL_API_BASE_URL": "",
         "MAIN_API_MODEL_API_KEY": "",

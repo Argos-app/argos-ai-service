@@ -11,6 +11,8 @@ _parent_observation_id: ContextVar[UUID | None] = ContextVar(
     "argos_parent_observation_id", default=None
 )
 _user_id: ContextVar[UUID | None] = ContextVar("argos_user_id", default=None)
+_session_id: ContextVar[UUID | None] = ContextVar("argos_session_id", default=None)
+_interaction_id: ContextVar[UUID | None] = ContextVar("argos_interaction_id", default=None)
 
 
 def current_correlation_id() -> UUID | None:
@@ -23,6 +25,14 @@ def current_parent_observation_id() -> UUID | None:
 
 def current_user_id() -> UUID | None:
     return _user_id.get()
+
+
+def current_session_id() -> UUID | None:
+    return _session_id.get()
+
+
+def current_interaction_id() -> UUID | None:
+    return _interaction_id.get()
 
 
 def correlation_key(correlation_id: UUID | str) -> str:
@@ -60,3 +70,15 @@ def bind_user_id(user_id: UUID) -> Iterator[None]:
         yield
     finally:
         _user_id.reset(token)
+
+
+@contextmanager
+def bind_interaction(session_id: UUID, interaction_id: UUID) -> Iterator[None]:
+    """Bind functional IDs to every technical observation in an interaction."""
+    session_token = _session_id.set(session_id)
+    interaction_token = _interaction_id.set(interaction_id)
+    try:
+        yield
+    finally:
+        _interaction_id.reset(interaction_token)
+        _session_id.reset(session_token)

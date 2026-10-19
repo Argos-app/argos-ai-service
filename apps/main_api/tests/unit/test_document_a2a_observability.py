@@ -76,6 +76,8 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     client = DocumentA2AClient(settings, observation_collector=collector)
     user_id = uuid4()
     correlation_id = uuid4()
+    session_id = uuid4()
+    interaction_id = uuid4()
 
     class FakeClient:
         def __init__(self) -> None:
@@ -114,7 +116,9 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     client._factory = SimpleNamespace(create=lambda _card: fake)
     question = "question containing private user text"
 
-    with bind_correlation(correlation_id):
+    from packages.observability import bind_interaction
+
+    with bind_correlation(correlation_id), bind_interaction(session_id, interaction_id):
         result = json.loads(
             run_immediate(
                 client.ask(
@@ -140,6 +144,8 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     assert delegated.user_id == user_id
     assert delegated.operations == frozenset({"documents.read"})
     assert delegated.correlation_id == correlation_id
+    assert delegated.session_id == session_id
+    assert delegated.interaction_id == interaction_id
     assert str(delegated.parent_observation_id) == collector.observations[0].id
     assert not hasattr(delegated, "authorized_property_ids")
 
@@ -148,6 +154,8 @@ def test_a2a_client_records_independent_call_and_keeps_protocol_result_separate(
     assert terminal.protocol.task_state == "completed"
     assert terminal.protocol.skill == skill.value
     assert terminal.result.code == "unavailable"
+    assert terminal.session_id == session_id
+    assert terminal.interaction_id == interaction_id
     assert terminal.duration_ms is not None
     serialized_observation = repr(terminal.model_dump())
     assert question not in serialized_observation

@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from packages.observability import (
+    Billing,
     CancellationState,
     DisabledObservationCollector,
     ErrorOrigin,
@@ -26,7 +27,9 @@ from packages.observability import (
     Usage,
     classify_exception,
     current_correlation_id,
+    current_interaction_id,
     current_parent_observation_id,
+    current_session_id,
     observation_scope,
 )
 
@@ -72,6 +75,8 @@ class OperationRecorder:
         model_requested: str | None = None,
         correlation_id: UUID | None = None,
         parent_observation_id: UUID | None = None,
+        session_id: UUID | None = None,
+        interaction_id: UUID | None = None,
     ) -> None:
         self._collector = collector
         self._error_origin = error_origin
@@ -81,6 +86,8 @@ class OperationRecorder:
             _id=str(uuid4()),
             correlation_id=correlation_id or current_correlation_id(),
             parent_observation_id=parent_observation_id or current_parent_observation_id(),
+            session_id=session_id or current_session_id(),
+            interaction_id=interaction_id or current_interaction_id(),
             service="main_api",
             environment=_environment(),
             operation_kind=operation_kind,
@@ -112,6 +119,7 @@ class OperationRecorder:
         cancellation_state: CancellationState | None = None,
         model_returned: str | None = None,
         usage: Usage | None = None,
+        billing: Billing | None = None,
     ) -> None:
         if self._finished:
             return
@@ -152,6 +160,7 @@ class OperationRecorder:
                 "cancellation_state": cancellation_state,
                 "model_returned": model_returned,
                 "usage": usage,
+                "billing": billing,
             }
         )
         self._emit(terminal)

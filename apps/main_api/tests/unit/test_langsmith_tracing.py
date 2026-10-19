@@ -98,3 +98,145 @@ def test_langsmith_workspace_id_is_loaded_from_environment(monkeypatch):
     monkeypatch.setenv("MAIN_API_LANGSMITH_WORKSPACE_ID", "workspace-id")
 
     assert Settings.from_env().langsmith_workspace_id == "workspace-id"
+
+
+def test_langsmith_run_includes_provider_billing_as_trace_metadata():
+    run = _fake_run({"generations": [{"response_metadata": {"usage": {"cost_usd": "0.01"}}}]})
+
+    langsmith_module._attach_provider_billing(run)
+
+    assert run.extra["metadata"]["existing"] == "preserved"
+    assert run.extra["metadata"]["argos_billing"] == {
+        "reported_cost": "0.01",
+        "currency": "USD",
+        "cost_source": "provider",
+    }
+    assert run.extra["metadata"]["usage_metadata"]["total_cost"] == 0.01
+    assert run.outputs["usage_metadata"]["total_cost"] == 0.01
+
+
+def test_langsmith_run_includes_configured_rate_estimate(monkeypatch):
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    run = _fake_run(
+        {
+            "generations": [
+                [
+                    {
+                        "message": {
+                            "kwargs": {
+                                "usage_metadata": {
+                                    "input_tokens": 200,
+                                    "output_tokens": 50,
+                                    "total_tokens": 250,
+                                }
+                            }
+                        }
+                    }
+                ]
+            ]
+        }
+    )
+
+    langsmith_module._attach_provider_billing(run)
+
+    assert run.extra["metadata"]["argos_billing"] == {
+        "reported_cost": "0.0010",
+        "currency": "USD",
+        "cost_source": "configured_rate",
+    }
+    assert run.extra["metadata"]["usage_metadata"]["total_cost"] == 0.001
+    assert run.extra["metadata"]["usage_metadata"]["input_cost"] == 0.0005
+    assert run.extra["metadata"]["usage_metadata"]["output_cost"] == 0.0005
+    assert run.outputs["usage_metadata"] == run.extra["metadata"]["usage_metadata"]
+
+
+def test_langchain_tracer_persists_cost_with_token_usage_in_one_terminal_patch(monkeypatch):
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    patches = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeTracer:
+        def __init__(self, **kwargs):
+            pass
+
+        @staticmethod
+        def _update_run_single(run):
+            patches.append(
+                {
+                    "metadata": dict(run.extra["metadata"]),
+                    "usage_metadata": dict(run.extra["metadata"]["usage_metadata"]),
+                    "output_usage_metadata": dict(run.outputs["usage_metadata"]),
+                }
+            )
+
+        def _on_llm_end(self, run):
+            self._update_run_single(run)
+
+    monkeypatch.setattr("langsmith.Client", FakeClient)
+    monkeypatch.setattr("langchain_core.tracers.LangChainTracer", FakeTracer)
+    tracing = langsmith_module.create_langsmith_tracing(Settings(langsmith_api_key="test-key"))
+    run = SimpleNamespace(
+        outputs={
+            "generations": [
+                [
+                    {
+                        "message": {
+                            "kwargs": {
+                                "usage_metadata": {
+                                    "input_tokens": 200,
+                                    "output_tokens": 50,
+                                    "total_tokens": 250,
+                                }
+                            }
+                        }
+                    }
+                ]
+            ]
+        },
+        extra={"metadata": {"existing": "preserved"}},
+        set=lambda *, metadata=None, usage_metadata=None: _set_run_metadata(
+            run, metadata=metadata, usage_metadata=usage_metadata
+        ),
+    )
+
+    tracing.callback._on_llm_end(run)
+
+    assert len(patches) == 1
+    assert patches[0]["metadata"]["existing"] == "preserved"
+    assert patches[0]["metadata"]["argos_billing"] == {
+        "reported_cost": "0.0010",
+        "currency": "USD",
+        "cost_source": "configured_rate",
+    }
+    assert patches[0]["usage_metadata"] == {
+        "input_tokens": 200,
+        "output_tokens": 50,
+        "total_tokens": 250,
+        "total_cost": 0.001,
+        "input_cost": 0.0005,
+        "output_cost": 0.0005,
+    }
+    assert patches[0]["output_usage_metadata"] == patches[0]["usage_metadata"]
+
+
+def _set_run_metadata(run, *, metadata=None, usage_metadata=None):
+    if metadata is not None:
+        run.extra.setdefault("metadata", {}).update(metadata)
+    if usage_metadata is not None:
+        run.extra.setdefault("metadata", {})["usage_metadata"] = usage_metadata
+
+
+def _fake_run(outputs):
+    run = SimpleNamespace(outputs=outputs, extra={"metadata": {"existing": "preserved"}})
+    run.set = lambda *, metadata=None, usage_metadata=None: _set_run_metadata(
+        run, metadata=metadata, usage_metadata=usage_metadata
+    )
+    return run

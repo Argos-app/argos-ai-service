@@ -38,6 +38,14 @@ class MongoObservationRepository:
             name="ix_observability_correlation_started",
         )
         await self._collection.create_index(
+            [("interaction_id", 1), ("started_at", 1)],
+            name="ix_observability_interaction_started",
+        )
+        await self._collection.create_index(
+            [("session_id", 1), ("started_at", 1)],
+            name="ix_observability_session_started",
+        )
+        await self._collection.create_index(
             [("started_at", 1), ("_id", 1)], name="ix_observability_started_id"
         )
         await self._collection.create_index(
@@ -111,6 +119,8 @@ def _same_attempt_identity(existing: dict[str, Any], incoming: dict[str, Any]) -
         "_id",
         "correlation_id",
         "parent_observation_id",
+        "session_id",
+        "interaction_id",
         "schema_version",
         "service",
         "environment",

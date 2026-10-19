@@ -18,6 +18,7 @@ from packages.observability import (
     OperationKind,
     Usage,
     UsageAvailability,
+    provider_billing,
 )
 
 
@@ -47,7 +48,7 @@ def _observation(**overrides) -> dict:
 def test_started_observation_has_no_end_and_uses_versioned_contract():
     observation = Observation(**_observation())
 
-    assert observation.schema_version == "1"
+    assert observation.schema_version == "2"
     assert observation.id
     assert observation.ended_at is None
     assert observation.duration_ms is None
@@ -141,29 +142,145 @@ def test_retention_expiration_is_not_part_of_the_observation_document():
         Observation(**_observation(expires_at=datetime(2026, 11, 12, tzinfo=UTC)))
 
 
-def test_reported_cost_requires_provider_source_and_currency():
+def test_reported_cost_requires_source_and_currency():
     assert Billing(reported_cost=Decimal("0.0123"), currency="USD", cost_source="provider")
 
     with pytest.raises(ValidationError, match="custo informado exige moeda"):
         Billing(reported_cost=Decimal("0.0123"))
 
-    with pytest.raises(ValidationError):
-        Billing(reported_cost=Decimal("0.0123"), currency="USD", cost_source="estimated")
+    assert Billing(reported_cost=Decimal("0.0123"), currency="USD", cost_source="configured_rate")
 
 
-def test_observation_accepts_optional_correlation_and_parent_ids():
+def test_provider_billing_uses_only_explicit_provider_cost_and_preserves_precision():
+    billing = provider_billing({"usage": {"total_cost_usd": "0.0000000000125"}})
+    assert billing is not None
+    assert billing.reported_cost == Decimal("0.0000000000125")
+    assert billing.currency == "USD"
+    assert billing.cost_source == "provider"
+    assert provider_billing({"usage": {"prompt_tokens": 20, "total_tokens": 20}}) is None
+    assert provider_billing({"usage": {"cost": "0.12"}}) is None
+
+
+def test_configured_rates_estimate_chat_and_embedding_costs(monkeypatch):
+    from packages.observability import billing_from_usage_payload
+
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+
+    chat = billing_from_usage_payload({"usage": {"prompt_tokens": 200, "completion_tokens": 50}})
+    assert chat is not None
+    assert chat.reported_cost == Decimal("0.001")
+    assert chat.currency == "USD"
+    assert chat.cost_source == "configured_rate"
+
+    embedding = billing_from_usage_payload({"usage": {"prompt_tokens": 200}}, embedding=True)
+    assert embedding is not None
+    assert embedding.reported_cost == Decimal("0.0005")
+
+
+def test_langsmith_usage_metadata_includes_configured_input_and_output_costs(monkeypatch):
+    from packages.observability import (
+        billing_from_usage_payload,
+        langsmith_usage_metadata,
+    )
+
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    usage = {"input_tokens": 200, "output_tokens": 50, "total_tokens": 250}
+    billing = billing_from_usage_payload({"usage": usage})
+
+    assert billing is not None
+    assert langsmith_usage_metadata(billing, usage) == {
+        "input_tokens": 200,
+        "output_tokens": 50,
+        "total_tokens": 250,
+        "total_cost": 0.001,
+        "input_cost": 0.0005,
+        "output_cost": 0.0005,
+    }
+
+
+def test_langsmith_usage_metadata_maps_observation_usage_to_sdk_contract(monkeypatch):
+    from packages.observability import configured_rate_billing, langsmith_usage_metadata
+
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    billing = configured_rate_billing(input_tokens=200, output_tokens=None, embedding=True)
+
+    assert billing is not None
+    assert langsmith_usage_metadata(
+        billing,
+        {
+            "availability": "partial",
+            "source": "provider",
+            "input_tokens": 200,
+            "total_tokens": 200,
+            "cache_read_tokens": 20,
+            "details": {"provider.extra": 10},
+        },
+        embedding=True,
+    ) == {
+        "input_tokens": 200,
+        "total_tokens": 200,
+        "input_token_details": {"cache_read": 20},
+        "total_cost": 0.0005,
+        "input_cost": 0.0005,
+    }
+
+
+def test_provider_cost_precedes_configured_rates_and_incomplete_usage_stays_unknown(monkeypatch):
+    from packages.observability import billing_from_usage_payload
+
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+
+    provider = billing_from_usage_payload(
+        {
+            "usage": {
+                "prompt_tokens": 200_000,
+                "completion_tokens": 50_000,
+                "cost_usd": "0.123",
+            }
+        }
+    )
+    assert provider is not None
+    assert provider.reported_cost == Decimal("0.123")
+    assert provider.cost_source == "provider"
+
+    assert billing_from_usage_payload({"usage": {"prompt_tokens": 200}}) is None
+    assert billing_from_usage_payload({"usage": {"prompt_tokens": 200}}, embedding=True) is not None
+
+
+def test_configured_rates_ignore_invalid_or_missing_values(monkeypatch):
+    from packages.observability import configured_rate_billing
+
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "-1")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    assert configured_rate_billing(input_tokens=10, output_tokens=10) is None
+
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2")
+    monkeypatch.delenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS")
+    assert configured_rate_billing(input_tokens=10, output_tokens=10) is None
+
+
+def test_observation_accepts_direct_interaction_and_trace_ids():
     from uuid import uuid4
 
     correlation_id = uuid4()
     parent_observation_id = uuid4()
+    session_id = uuid4()
+    interaction_id = uuid4()
     observation = Observation(
         **_observation(),
         correlation_id=correlation_id,
         parent_observation_id=parent_observation_id,
+        session_id=session_id,
+        interaction_id=interaction_id,
     )
 
     assert observation.correlation_id == correlation_id
     assert observation.parent_observation_id == parent_observation_id
+    assert observation.session_id == session_id
+    assert observation.interaction_id == interaction_id
 
 
 def test_correlation_context_restores_nested_parent_ids():
@@ -171,17 +288,25 @@ def test_correlation_context_restores_nested_parent_ids():
 
     from packages.observability import (
         bind_correlation,
+        bind_interaction,
         current_correlation_id,
+        current_interaction_id,
         current_parent_observation_id,
+        current_session_id,
         observation_scope,
     )
 
     correlation_id = uuid4()
     parent = uuid4()
     child = uuid4()
+    session_id = uuid4()
+    interaction_id = uuid4()
     assert current_correlation_id() is None
     with bind_correlation(correlation_id):
         assert current_correlation_id() == correlation_id
+        with bind_interaction(session_id, interaction_id):
+            assert current_session_id() == session_id
+            assert current_interaction_id() == interaction_id
         with observation_scope(parent):
             assert current_parent_observation_id() == parent
             with observation_scope(child):
@@ -189,3 +314,5 @@ def test_correlation_context_restores_nested_parent_ids():
             assert current_parent_observation_id() == parent
         assert current_parent_observation_id() is None
     assert current_correlation_id() is None
+    assert current_session_id() is None
+    assert current_interaction_id() is None

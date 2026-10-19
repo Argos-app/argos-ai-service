@@ -38,7 +38,9 @@ from packages.observability import (
     ProtocolMetadata,
     ResultMetadata,
     current_correlation_id,
+    current_interaction_id,
     current_parent_observation_id,
+    current_session_id,
 )
 
 _TASK_STATES = {
@@ -288,6 +290,10 @@ class DocumentA2AClient:
                 str(current_parent_observation_id())
                 if current_parent_observation_id() is not None
                 else None
+            ),
+            "session_id": str(current_session_id()) if current_session_id() is not None else None,
+            "interaction_id": (
+                str(current_interaction_id()) if current_interaction_id() is not None else None
             ),
             "jti": str(uuid4()),
             "iat": issued_at,

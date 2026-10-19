@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -101,6 +102,45 @@ async def test_callback_falls_back_to_provider_usage_and_records_missing_usage()
     assert terminal[0].usage.cache_write_tokens == 1
     assert terminal[1].usage.availability == UsageAvailability.ABSENT
     assert terminal[1].usage.input_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_callback_prefers_reported_cost_and_estimates_from_configured_rates(monkeypatch):
+    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    writer = InMemoryObservationWriter()
+    callback = ModelUsageCallback(BestEffortObservationCollector(writer))
+    serialized = {"id": ["langchain", "openai", "ChatOpenAI"], "kwargs": {}}
+
+    reported_run = uuid4()
+    await callback.on_chat_model_start(serialized, [], run_id=reported_run)
+    reported_message = SimpleNamespace(
+        usage_metadata={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+        response_metadata={"usage": {"total_cost_usd": "0.0042"}},
+    )
+    await callback.on_llm_end(
+        SimpleNamespace(generations=[[SimpleNamespace(message=reported_message)]], llm_output={}),
+        run_id=reported_run,
+    )
+
+    unknown_run = uuid4()
+    await callback.on_chat_model_start(serialized, [], run_id=unknown_run)
+    unknown_message = SimpleNamespace(
+        usage_metadata={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+        response_metadata={"usage": {"prompt_tokens": 5, "completion_tokens": 2}},
+    )
+    await callback.on_llm_end(
+        SimpleNamespace(generations=[[SimpleNamespace(message=unknown_message)]], llm_output={}),
+        run_id=unknown_run,
+    )
+
+    terminal = [item for item in writer.observations if item.status != ObservationStatus.STARTED]
+    assert str(terminal[0].billing.reported_cost) == "0.0042"
+    assert terminal[0].billing.currency == "USD"
+    assert terminal[0].billing.cost_source == "provider"
+    assert terminal[1].billing.reported_cost == Decimal("0.0000325")
+    assert terminal[1].billing.currency == "USD"
+    assert terminal[1].billing.cost_source == "configured_rate"
 
 
 @pytest.mark.asyncio

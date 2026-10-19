@@ -67,6 +67,7 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
     ResultMetadata,
+    bind_interaction,
     correlation_key,
     current_correlation_id,
 )
@@ -339,13 +340,14 @@ class SessionApplicationService:
             try:
                 memory_input = _memory_input(body, sanitized_input, answer_text)
                 if memory_input is not None:
-                    await self._update_user_memory(
-                        user_id=principal.user_id,
-                        session_id=session_id,
-                        interaction_id=interaction_id,
-                        source_created_at=accepted_message.created_at,
-                        sanitized_user_input=memory_input,
-                    )
+                    with bind_interaction(session_id, interaction_id):
+                        await self._update_user_memory(
+                            user_id=principal.user_id,
+                            session_id=session_id,
+                            interaction_id=interaction_id,
+                            source_created_at=accepted_message.created_at,
+                            sanitized_user_input=memory_input,
+                        )
                 session_context = await build_session_context(
                     session_id=session_id,
                     user_id=principal.user_id,
@@ -370,6 +372,8 @@ class SessionApplicationService:
                         operation_phase=OperationPhase.EXECUTION,
                         observation_level=ObservationLevel.LOCAL_OPERATION,
                         error_origin=ErrorOrigin.APPLICATION,
+                        session_id=session_id,
+                        interaction_id=interaction_id,
                     )
                     if self._observation_collector is not None
                     else None
@@ -402,35 +406,37 @@ class SessionApplicationService:
                             "argos_interaction_id": str(interaction_id),
                         }
                     if isinstance(body, MessageCommand):
-                        with execution_limits_scope(execution_limits):
-                            async with asyncio.timeout(self._execution_timeout_seconds):
-                                state = await executar_fluxo(
-                                    graph,
-                                    sanitized_input,
-                                    user_id=str(principal.user_id),
-                                    farm_id=str(authorized_farms[0]),
-                                    session_id=str(session_id),
-                                    interaction_id=str(interaction_id),
-                                    session_context=session_context,
-                                    recipient_selectors=recipient_selectors,
-                                    send_intent_requested=send_intent_requested,
-                                    config=graph_config,
-                                )
+                        with bind_interaction(session_id, interaction_id):
+                            with execution_limits_scope(execution_limits):
+                                async with asyncio.timeout(self._execution_timeout_seconds):
+                                    state = await executar_fluxo(
+                                        graph,
+                                        sanitized_input,
+                                        user_id=str(principal.user_id),
+                                        farm_id=str(authorized_farms[0]),
+                                        session_id=str(session_id),
+                                        interaction_id=str(interaction_id),
+                                        session_context=session_context,
+                                        recipient_selectors=recipient_selectors,
+                                        send_intent_requested=send_intent_requested,
+                                        config=graph_config,
+                                    )
                     else:
-                        with execution_limits_scope(execution_limits):
-                            async with asyncio.timeout(self._execution_timeout_seconds):
-                                state = await executar_resposta(
-                                    graph,
-                                    answer_text or sanitized_input,
-                                    question_id=str(body.question_id),
-                                    session_id=str(session_id),
-                                    interaction_id=str(interaction_id),
-                                    session_context=session_context,
-                                    recipient_selectors=recipient_selectors,
-                                    send_intent_requested=send_intent_requested,
-                                    send_intent_source_interaction_id=send_intent_source_interaction_id,
-                                    config=graph_config,
-                                )
+                        with bind_interaction(session_id, interaction_id):
+                            with execution_limits_scope(execution_limits):
+                                async with asyncio.timeout(self._execution_timeout_seconds):
+                                    state = await executar_resposta(
+                                        graph,
+                                        answer_text or sanitized_input,
+                                        question_id=str(body.question_id),
+                                        session_id=str(session_id),
+                                        interaction_id=str(interaction_id),
+                                        session_context=session_context,
+                                        recipient_selectors=recipient_selectors,
+                                        send_intent_requested=send_intent_requested,
+                                        send_intent_source_interaction_id=send_intent_source_interaction_id,
+                                        config=graph_config,
+                                    )
                 except BaseException as exc:
                     if graph_recorder is not None:
                         graph_recorder.finish(error=exc, error_origin=ErrorOrigin.APPLICATION)
@@ -512,6 +518,7 @@ class SessionApplicationService:
             summary_task = self._publish_due_summary(
                 session_id=session_id,
                 user_id=principal.user_id,
+                interaction_id=interaction_id,
                 user_message_count=accepted_message.user_message_number or 0,
                 through_sequence=committed_message.sequence,
             )
@@ -531,18 +538,20 @@ class SessionApplicationService:
         *,
         session_id: UUID,
         user_id: UUID,
+        interaction_id: UUID,
         user_message_count: int,
         through_sequence: int,
     ) -> None:
         if self._summary_service is None:
             return
         try:
-            await self._summary_service.publish_due(
-                session_id=session_id,
-                user_id=user_id,
-                user_message_count=user_message_count,
-                through_sequence=through_sequence,
-            )
+            with bind_interaction(session_id, interaction_id):
+                await self._summary_service.publish_due(
+                    session_id=session_id,
+                    user_id=user_id,
+                    user_message_count=user_message_count,
+                    through_sequence=through_sequence,
+                )
         except Exception:
             logger.exception(
                 "falha ao resumir sessão %s; resumo anterior e cobertura foram mantidos",
@@ -607,6 +616,8 @@ class SessionApplicationService:
                 operation_phase=OperationPhase.RECOVERY,
                 observation_level=ObservationLevel.LOCAL_OPERATION,
                 error_origin=ErrorOrigin.APPLICATION,
+                session_id=interaction.session_id,
+                interaction_id=interaction.interaction_id,
             )
             if self._observation_collector is not None
             else None
