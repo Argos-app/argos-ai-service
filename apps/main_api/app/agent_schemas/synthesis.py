@@ -23,6 +23,7 @@ class EmailDispatchEvidence(_SynthesisModel):
 
     status: Literal["pending", "accepted", "partial", "failed", "unknown"]
     confirmed: bool
+    recovered: bool = False
     operation_id: str | None = None
     report_id: str | None = None
     recipient_count: int | None = Field(default=None, ge=0)

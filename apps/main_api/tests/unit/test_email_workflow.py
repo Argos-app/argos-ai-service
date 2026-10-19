@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from app.agent_schemas.synthesis import EmailDispatchEvidence
 from app.application.email_dispatch_workflow import (
     EmailDispatchWorkflow,
     _recipient_selectors_match,
@@ -549,6 +550,19 @@ def test_dispatch_result_carries_structured_status_and_recipient_count():
     assert payload["operation_id"] == str(result.operation_id)
     assert payload["recipient_count"] == 5
     assert "não confirma a entrega" in payload["message"]
+
+
+def test_recovered_dispatch_result_matches_graph_evidence_contract():
+    result = _dispatch_result(uuid4())
+
+    evidence = EmailDispatchEvidence.model_validate_json(
+        _safe_result(result, recovered=True, status_refresh_failed=True)
+    )
+
+    assert evidence.status == "accepted"
+    assert evidence.confirmed is True
+    assert evidence.recovered is True
+    assert "último estado confirmado" in evidence.message
 
 
 def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
