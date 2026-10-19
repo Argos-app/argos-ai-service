@@ -594,7 +594,7 @@ def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
         repository.operation_references[authorization.authorization_id].operation_id
         == sent.operation_id
     )
-    assert json.loads(send_result)["operation_id"] == str(sent.operation_id)
+    assert send_result["operation_id"] == str(sent.operation_id)
     assert "idempotency_key" not in json.dumps(send_result)
 
 
