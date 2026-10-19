@@ -21,10 +21,6 @@ _EMAIL_WORKFLOW_CONTEXT_PATTERN = re.compile(
     r"encaminhe|encaminhar|prepare|preparar|gerar|gerado)\b",
     re.IGNORECASE,
 )
-_RECIPIENT_CONTEXT_PATTERN = re.compile(
-    r"\b(?:destinat[áa]rios?|endere[çc]os?\s+de\s+e-?mails?|lista\s+de\s+e-?mails?)\b",
-    re.IGNORECASE,
-)
 _QUOTED_NAME_PATTERN = re.compile(
     r"\bpara\s+(?:(?:o|a|os|as)\s+)?"
     r"(?:(?:seguinte|seguintes|usuári[oa]s?|contatos?|destinatári[oa]s?)\s+){0,2}"
@@ -87,8 +83,10 @@ def protect_user_input(text: str) -> ProtectedInput:
     """Extrai e-mails como seletores sem ocultá-los; minimiza outras PII."""
     candidates: list[tuple[int, int, str, str]] = []
     send_requested = _has_positive_send_intent(text)
-    email_workflow_context = bool(_EMAIL_WORKFLOW_CONTEXT_PATTERN.search(text))
     for match in EMAIL_PATTERN.finditer(text):
+        # Endereços são capturados como seletores independentemente da formulação
+        # ao redor. A Secretaria ainda resolve cada seletor no diretório; capturar
+        # um endereço nunca autoriza preparação ou envio.
         prefix_start = max(0, match.start() - 32)
         prefix = text[prefix_start : match.start()]
         destination = re.search(
@@ -96,26 +94,20 @@ def protect_user_input(text: str) -> ProtectedInput:
             prefix,
             re.IGNORECASE,
         )
-        recipient_prefix = text[max(0, match.start() - 200) : match.start()]
-        has_recipient_context = bool(_RECIPIENT_CONTEXT_PATTERN.search(recipient_prefix))
-        if email_workflow_context and (destination or has_recipient_context):
-            if destination:
-                start = match.start()
-                recipient_name = destination.group("label").strip()
-                if recipient_name and _NAME_ITEM_PATTERN.fullmatch(recipient_name):
-                    name_start = prefix_start + destination.start("label")
-                    candidates.append(
-                        (
-                            name_start,
-                            name_start + len(recipient_name),
-                            "masked_name",
-                            recipient_name,
-                        )
+        if destination:
+            recipient_name = destination.group("label").strip()
+            if recipient_name and _NAME_ITEM_PATTERN.fullmatch(recipient_name):
+                name_start = prefix_start + destination.start("label")
+                candidates.append(
+                    (
+                        name_start,
+                        name_start + len(recipient_name),
+                        "masked_name",
+                        recipient_name,
                     )
-            else:
-                start = match.start()
-            end = match.end() + int(text[match.end() : match.end() + 1] == ">")
-            candidates.append((start, end, "email", match.group()))
+                )
+        end = match.end() + int(text[match.end() : match.end() + 1] == ">")
+        candidates.append((match.start(), end, "email", match.group()))
 
     name_patterns = []
     # Nomes, com ou sem aspas, só são seletores no contexto de uma

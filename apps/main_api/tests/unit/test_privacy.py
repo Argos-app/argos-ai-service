@@ -53,6 +53,21 @@ def test_email_clarification_captures_addresses_without_send_intent_or_para_pref
     assert "bruno@example.com" in protected.sanitized_text
 
 
+def test_recipient_addresses_are_captured_without_nearby_email_wording():
+    emails = (
+        "luis.medeiros@institutojef.org.br",
+        "leticia.camargo@institutojef.org.br",
+        "beatriz.inacio@institutojef.org.br",
+        "enzo.alves@institutojef.org.br",
+        "vinicius.doliveira@institutojef.org.br",
+    )
+    protected = protect_user_input("Use estes cinco usuários cadastrados: " + ", ".join(emails))
+
+    assert {item["value"] for item in protected.recipient_selectors.values()} == set(emails)
+    assert all(email in protected.sanitized_text for email in emails)
+    assert protected.send_intent_requested is False
+
+
 def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name():
     protected = protect_user_input(
         'Prepare, mas não envie para "Ana Silva"; CPF 123.456.789-00, '
@@ -68,7 +83,8 @@ def test_protect_user_input_redacts_non_recipient_pii_and_captures_quoted_name()
     assert "[CPF]" in protected.sanitized_text
     assert "[REDACTED]" in protected.sanitized_text
     assert protected.recipient_selectors == {
-        "[DESTINATARIO_1]": {"kind": "name", "value": "Ana Silva"}
+        "[DESTINATARIO_1]": {"kind": "name", "value": "Ana Silva"},
+        "[DESTINATARIO_2]": {"kind": "email", "value": "contato@example.com"},
     }
 
 
