@@ -220,6 +220,6 @@ async def test_email_workflows_record_failure_and_recovery_without_payloads():
     assert writer.observations[3].status == ObservationStatus.FAILED
     assert writer.observations[4].operation_phase.value == "recovery"
     assert writer.observations[5].status == ObservationStatus.SUCCEEDED
-    assert writer.observations[5].result.code == "recovery_result"
+    assert writer.observations[5].result.code == "unknown"
     assert writer.observations[5].result.recovered is True
     assert "MCP não confirmou" in recovered

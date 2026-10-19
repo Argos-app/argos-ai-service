@@ -374,7 +374,7 @@ async def test_message_is_sanitized_and_replay_counts_once():
     assert record.next_message_sequence == 3
     assert graph.calls == 1
     assert len(conversations.messages) == 2
-    assert conversations.messages[0].sanitized_content.endswith("user@example.com")
+    assert conversations.messages[0].sanitized_content.endswith("usuario@example.invalid")
     assert all(message.sequence == index for index, message in enumerate(conversations.messages, 1))
 
 

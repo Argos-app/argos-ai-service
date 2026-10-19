@@ -190,7 +190,7 @@ async def test_secretary_invalid_output_recovers_only_current_valid_preparation(
     else:
         assert result.status.value == "error"
         assert "confirmou a preparação" not in result.answer
-        assert "preparação não foi confirmada" in update["final_answer"]
+        assert "preparação do relatório não foi confirmada" in update["final_answer"]
     assert "secretary_invalid_output" in update["errors"]
 
 
@@ -814,13 +814,15 @@ async def test_successful_external_tool_call_is_attached_as_runtime_evidence():
 
 
 def request_state(message: str = "Quais aplicações existem?") -> dict:
-    return initial_state(
+    state = initial_state(
         message,
         user_id="user-demo",
         farm_id="farm-demo",
         session_id="session-demo",
         interaction_id="interaction-origin",
     )
+    state["sanitized_message"] = state["messages"][0].content
+    return state
 
 
 @pytest.mark.asyncio

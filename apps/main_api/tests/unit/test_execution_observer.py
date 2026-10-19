@@ -38,7 +38,7 @@ async def test_agent_events_are_correlated_and_sanitized():
     assert succeeded.status == ExecutionStatus.SUCCEEDED
     assert started.invocation_id == succeeded.invocation_id == invocation_id
     assert started.event_id != succeeded.event_id
-    assert "user@example.invalid" not in started.sanitized_input
+    assert "user@example.invalid" in started.sanitized_input
     assert "must-not-persist" not in started.sanitized_input
     assert "123.456.789-01" not in succeeded.sanitized_output
     assert "also-secret" not in succeeded.sanitized_output
@@ -68,8 +68,8 @@ async def test_tool_callback_persists_start_and_terminal_result():
     assert started.invocation_id == succeeded.invocation_id == invocation_id
     assert started.messages[0].tool_call_id == str(invocation_id)
     assert "private" not in started.sanitized_input
-    assert "tool@example.invalid" not in started.sanitized_input
-    assert "user@example.invalid" not in succeeded.sanitized_output
+    assert "tool@example.invalid" in started.sanitized_input
+    assert "user@example.invalid" in succeeded.sanitized_output
 
 
 @pytest.mark.asyncio

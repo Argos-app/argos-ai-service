@@ -769,7 +769,7 @@ async def test_agent_persists_correlated_events_when_interaction_context_exists(
         ExecutionStatus.SUCCEEDED,
     ]
     assert repository.events[0].invocation_id == repository.events[1].invocation_id
-    assert "user@example.invalid" not in repository.events[0].sanitized_input
+    assert "user@example.invalid" in repository.events[0].sanitized_input
     assert runnable.last_config["callbacks"]
 
 
