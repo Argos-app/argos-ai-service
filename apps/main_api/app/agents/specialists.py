@@ -231,6 +231,20 @@ def build_agent_factory(
         response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
+    simulated_runtime = (
+        getattr(models[ModelPolicyId.ORCHESTRATOR], "_llm_type", None) == "argos_simulated"
+    )
+    orchestrator_options = (
+        {"response_format": ToolStrategy(OrchestratorResult, handle_errors=False)}
+        if simulated_runtime
+        else {}
+    )
+    judge_options = (
+        {"response_format": ToolStrategy(JudgeResult, handle_errors=False)}
+        if simulated_runtime
+        else {}
+    )
+
     orchestrator_app = create_agent(
         model=models[ModelPolicyId.ORCHESTRATOR],
         tools=[],
@@ -239,6 +253,7 @@ def build_agent_factory(
         # and validate it in LangChainAgentFactory; ToolStrategy made compatible
         # providers retry plain answers as synthetic tool calls and consume the
         # full execution deadline.
+        **orchestrator_options,
     )
 
     judge_app = create_agent(
@@ -248,6 +263,7 @@ def build_agent_factory(
         # Validate JSON or an explicit verdict in LangChainAgentFactory. Asking
         # the compatible endpoint for native structured output made the judge
         # fail before the application could validate the same contract.
+        **judge_options,
     )
 
     question_formatter_app = create_agent(

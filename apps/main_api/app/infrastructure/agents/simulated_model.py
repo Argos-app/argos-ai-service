@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from typing import Any
 from uuid import uuid4
 
-from app.privacy import minimize_sensitive_memory_input, protect_user_input
+from app.privacy import minimize_sensitive_memory_input
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -89,42 +89,6 @@ class SimulatedChatModel(BaseChatModel):
             request = _router_request_text(messages)
             normalized_request = request.casefold()
             lot_code = _extract_lot_code(request)
-            explicit_send = protect_user_input(request).send_intent_requested
-            is_send_confirmation = (
-                explicit_send
-                and any(
-                    term in normalized_request
-                    for term in (
-                        "confirmo",
-                        "confirme",
-                        "confirmação",
-                        "confirmacao",
-                        "preparação",
-                        "preparacao",
-                        "preparado",
-                    )
-                )
-                and not re.search(r"\[DESTINATARIO_\d+\]", request, re.IGNORECASE)
-            )
-            if is_send_confirmation:
-                return name, {
-                    "intent": "confirmar envio de preparação existente",
-                    "tasks": [
-                        {
-                            "task_id": "simulated_secretary_send_prepared",
-                            "agent": "secretary",
-                            "goal": (
-                                "Enviar a preparação válida desta sessão; o pedido original "
-                                "autorizou explicitamente o envio."
-                            ),
-                            "brief_sanitized": (
-                                "Use a preparação e os destinatários persistidos, sem gerar "
-                                "outro relatório."
-                            ),
-                            "required_evidence": ["resultado do envio da preparação existente"],
-                        }
-                    ],
-                }
             is_report_request = any(
                 term in normalized_request for term in ("relatório", "relatorio", "envie", "enviar")
             ) and any(term in normalized_request for term in ("relatório", "relatorio"))
@@ -139,24 +103,19 @@ class SimulatedChatModel(BaseChatModel):
                             "brief_sanitized": (
                                 "Consultar o lote e obter a origem autorizada do relatório."
                             ),
-                            "required_evidence": ["origem autorizada do relatório"],
+                            "required_evidence": ["signed_report_source"],
                         },
                         {
                             "task_id": "simulated_secretary_report",
                             "agent": "secretary",
                             "goal": (
-                                "Preparar e enviar o relatório solicitado a partir da origem "
-                                "autorizada; o pedido original autorizou explicitamente o envio."
-                                if explicit_send
-                                else (
-                                    "Preparar o relatório solicitado a partir da origem autorizada."
-                                )
+                                "Preparar o relatório solicitado a partir da origem autorizada."
                             ),
                             "brief_sanitized": (
                                 "Preparar o relatório usando a referência retornada por Fazenda."
                             ),
                             "depends_on": ["simulated_farm_report"],
-                            "required_evidence": ["resultado da preparação do relatório"],
+                            "required_evidence": ["confirmed_email_preparation"],
                         },
                     ],
                 }
@@ -169,7 +128,22 @@ class SimulatedChatModel(BaseChatModel):
             if any(term in normalized_request for term in ("consumo", "previsão", "previsao")):
                 agent = "analyst"
             elif any(
-                term in normalized_request for term in ("medicamento", "remédio", "remedio", "bula")
+                term in normalized_request
+                for term in (
+                    "medicamento",
+                    "remédio",
+                    "remedio",
+                    "vacina",
+                    "produto veterinário",
+                    "produto veterinario",
+                    "catálogo de medicamentos",
+                    "catalogo de medicamentos",
+                    "bula",
+                    "ficha técnica",
+                    "ficha tecnica",
+                    "princípio ativo",
+                    "principio ativo",
+                )
             ):
                 agent = "doctor"
             elif any(
@@ -203,33 +177,39 @@ class SimulatedChatModel(BaseChatModel):
             }
         if name == "SpecialistResult":
             agent = "farm"
-            tool_result: ToolMessage | None = None
-            tool_failed = False
-            for message in reversed(messages):
-                if isinstance(message, ToolMessage):
-                    tool_result = message
-                    agent = _agent_for_tool(getattr(message, "name", ""))
-                    tool_failed = getattr(message, "status", "success") == "error"
-                    break
+            tool_results = [message for message in messages if isinstance(message, ToolMessage)]
+            tool_failed = any(
+                getattr(message, "status", "success") == "error" for message in tool_results
+            )
+            if tool_results:
+                agent = _agent_for_tool(str(tool_results[-1].name or ""))
             answer = ""
             if tool_failed:
-                answer = "A consulta falhou; não há resultado verificável para responder."
-            elif tool_result is not None:
-                tool_name = str(tool_result.name or "ferramenta")
-                result = minimize_sensitive_memory_input(str(tool_result.content)).strip()
-                if len(result) > 2_000:
-                    result = result[:2_000] + "… [resultado truncado]"
-                answer = f"Resultado retornado por {tool_name}: {result}"
+                failed_names = [
+                    str(message.name or "ferramenta")
+                    for message in tool_results
+                    if getattr(message, "status", "success") == "error"
+                ]
+                answer = (
+                    "A consulta falhou em "
+                    + ", ".join(dict.fromkeys(failed_names))
+                    + "; não há resultado verificável para responder."
+                )
+            elif tool_results:
+                excerpts = []
+                for tool_result in tool_results:
+                    tool_name = str(tool_result.name or "ferramenta")
+                    result = minimize_sensitive_memory_input(str(tool_result.content)).strip()
+                    if len(result) > 2_000:
+                        result = result[:2_000] + "… [resultado truncado]"
+                    excerpts.append(f"Resultado retornado por {tool_name}: {result}")
+                answer = "\n".join(excerpts)[:4_000]
             else:
                 answer = "Nenhuma consulta foi executada."
             return name, {
                 "agent": agent,
                 "status": (
-                    "error"
-                    if tool_failed
-                    else "success"
-                    if tool_result is not None
-                    else "unavailable"
+                    "error" if tool_failed else "success" if tool_results else "unavailable"
                 ),
                 "answer": answer,
                 "sources": [],
@@ -251,6 +231,18 @@ class SimulatedChatModel(BaseChatModel):
                 and isinstance(result.get("answer"), str)
                 and result["answer"].strip()
             ]
+            sources: dict[str, dict[str, Any]] = {}
+            for outcome in outcomes:
+                result = outcome.get("result") if isinstance(outcome, dict) else None
+                result_sources = result.get("sources", ()) if isinstance(result, dict) else ()
+                if not isinstance(result_sources, (list, tuple)):
+                    continue
+                for source in result_sources:
+                    if not isinstance(source, dict):
+                        continue
+                    reference = source.get("reference")
+                    if isinstance(reference, str) and reference.strip():
+                        sources.setdefault(reference, source)
             return name, {
                 "draft_answer": (
                     "Não tenho informação suficiente para responder com segurança agora."
@@ -259,7 +251,7 @@ class SimulatedChatModel(BaseChatModel):
                     if answers
                     else "Nenhuma ferramenta retornou resultado verificável."
                 ),
-                "sources": [],
+                "sources": list(sources.values()),
             }
         if name == "JudgeResult":
             return name, {
@@ -378,25 +370,31 @@ def _router_request_text(messages: list[BaseMessage]) -> str:
 
 
 def _requested_medicine_name(text: str) -> str | None:
-    match = re.search(
-        r"\bmedicamento\s+(?:chamado\s+)?[\"“]?(.+?)[\"”]?"
-        r"(?:\s+(?:e\s+(?:informe|diga|me|qual|consulte|também|tambem)|para\s+)|[,?.!]|$)",
-        text,
-        flags=re.IGNORECASE,
+    patterns = (
+        r"[\"“]([^\"”]{2,100})[\"”]",
+        r"\b(?:medicamento|rem[eé]dio|vacina|produto)\s+"
+        r"(?:chamad[oa]\s+)?[\"“]?(.+?)[\"”]?"
+        r"(?=\s+(?:e\s+(?:informe|diga|me|qual|consulte|tamb[eé]m)|"
+        r"(?:e\s+)?(?:qual|informe|diga|consulte|mostre|busque)\b|para\s+)|[,?.!]|$)",
+        r"\b(?:do|da|de)\s+(?:medicamento|rem[eé]dio|vacina|produto)\s+"
+        r"[\"“]?(.+?)[\"”]?(?=\s+(?:e\s+)?(?:qual|informe|diga|consulte|mostre|busque)\b|[,?.!]|$)",
+        r"\b(?:do|da|de)\s+[\"“]([^\"”]{2,100})[\"”]",
     )
-    if match is None:
-        return None
-    return match.group(1).strip().strip("\"“”' ") or None
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match is not None:
+            return match.group(1).strip().strip("\"“”' ") or None
+    return None
 
 
 def _agent_for_tool(name: str) -> str:
-    if name.startswith("list_medicine"):
+    if name.startswith("list_medicine") or name == "mock_consultar_medicamento":
         return "doctor"
-    if name == "estimate_medicine_consumption":
+    if name in {"estimate_medicine_consumption", "mock_calcular_previsao"}:
         return "analyst"
-    if name in {"prepare_report", "send_report", "get_report_status"}:
+    if name in {"prepare_report", "send_report", "get_report_status", "mock_preparar_relatorio"}:
         return "secretary"
-    if "document" in name or "legal" in name:
+    if "document" in name or "legal" in name or name == "mock_consultar_documental":
         return "information"
     return "farm"
 
@@ -410,6 +408,23 @@ def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -
             specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
         )
         return {"question": question[:4_000] or "Consulte os documentos sintéticos disponíveis."}
+    if name == "mock_consultar_documental":
+        question = str(
+            specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
+        )
+        return {"pergunta": question[:4_000] or "Consulte os documentos sintéticos disponíveis."}
+    if name == "mock_consultar_fazenda":
+        query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
+        return {"consulta": query[:4_000] or "Consulte os dados sintéticos disponíveis."}
+    if name == "mock_consultar_medicamento":
+        query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
+        return {"nome": _requested_medicine_name(query) or query[:500]}
+    if name == "mock_calcular_previsao":
+        query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
+        return {"pergunta": query[:4_000] or "Calcule uma previsão sintética."}
+    if name == "mock_preparar_relatorio":
+        query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
+        return {"tipo": query[:500] or "relatório sintético"}
     if name in {"list_medicines", "list_medicine_documents"}:
         request_text = str(
             specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
@@ -443,27 +458,21 @@ def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -
     return {"payload": {}}
 
 
-def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str:
-    task_id = str(specialist_input.get("task_id") or "")
-    if task_id == "simulated_farm_report" and "resolve_report_lot_report_source" in names:
+def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str | None:
+    if "resolve_report_lot_report_source" in names:
         return "resolve_report_lot_report_source"
-    if (
-        "autorizou explicitamente o envio" in str(specialist_input.get("goal") or "")
-        and "send_report" in names
-    ):
-        return "send_report"
     if "prepare_report" in names:
         return "prepare_report"
-    return names[0]
+    if "list_medicines" in names:
+        return "list_medicines"
+    safe_tools = [name for name in names if name not in {"send_report"}]
+    return safe_tools[0] if len(safe_tools) == 1 else None
 
 
 def _next_tool(
     names: list[str], specialist_input: dict[str, Any], messages: list[BaseMessage]
 ) -> str | None:
-    if (
-        "autorizou explicitamente o envio" in str(specialist_input.get("goal") or "")
-        and "send_report" in names
-    ):
+    if specialist_input.get("email_send_authorized") is True and "send_report" in names:
         last_email_result = next(
             (
                 message
@@ -474,9 +483,9 @@ def _next_tool(
             None,
         )
         if last_email_result is None:
-            # A preparação pode existir apenas no repositório durável.
-            # O workflow valida sessão, validade, destinatários e escopo antes de enviar.
-            return "send_report"
+            # No pedido inicial, ainda não existe preparação persistida nesta execução.
+            # Prepare primeiro; só despache depois de o MCP confirmar status prepared.
+            return "prepare_report" if "prepare_report" in names else None
         if last_email_result.name == "send_report":
             return None
         try:
@@ -488,6 +497,50 @@ def _next_tool(
             if isinstance(preparation, dict) and preparation.get("status") == "prepared"
             else None
         )
+    request_text = str(
+        specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
+    ).casefold()
+    medicine_document_requested = any(
+        term in request_text
+        for term in (
+            "bula",
+            "ficha",
+            "princípio ativo",
+            "principio ativo",
+            "ingrediente ativo",
+            "dose",
+            "dosagem",
+            "carência",
+            "carencia",
+            "contraindicação",
+            "contraindicacao",
+            "indicação",
+            "indicacao",
+            "composição",
+            "composicao",
+        )
+    )
+    medicine_result = next(
+        (
+            message
+            for message in reversed(messages)
+            if isinstance(message, ToolMessage) and message.name == "list_medicines"
+        ),
+        None,
+    )
+    document_result = next(
+        (
+            message
+            for message in reversed(messages)
+            if isinstance(message, ToolMessage) and message.name == "list_medicine_documents"
+        ),
+        None,
+    )
+    if medicine_document_requested and "list_medicine_documents" in names:
+        if medicine_result is None:
+            return "list_medicines" if "list_medicines" in names else "list_medicine_documents"
+        if getattr(medicine_result, "status", "success") != "error" and document_result is None:
+            return "list_medicine_documents"
     prior_tool_result = next(
         (message for message in reversed(messages) if isinstance(message, ToolMessage)),
         None,

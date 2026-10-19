@@ -89,12 +89,45 @@ def test_simulated_doctor_filters_catalog_by_requested_medicine_name():
     }
 
 
-def test_simulated_model_routes_report_through_farm_then_secretary():
-    route = (
-        SimulatedChatModel()
-        .with_structured_output(RoutePlan)
-        .invoke("Envie o relatório do lote HC-LOTE-076 para usuario.teste@argos.local.")
+def test_simulated_medicine_route_and_filter_support_vaccine_and_followup_fields():
+    from app.infrastructure.agents.simulated_model import (
+        _next_tool,
+        _requested_medicine_name,
+        _tool_arguments,
     )
+
+    request = 'Qual o princípio ativo da "Vacina Teste A"?'
+    route = SimulatedChatModel._structured_call(
+        "RoutePlan", [HumanMessage(content=json.dumps({"message": request}))]
+    )[1]
+    assert route["tasks"][0]["agent"] == "doctor"
+    assert _requested_medicine_name(request) == "Vacina Teste A"
+    specialist = {"goal": request}
+    assert _tool_arguments("list_medicines", specialist) == {
+        "payload": {"brand_name": "Vacina Teste A"}
+    }
+    assert (
+        _next_tool(
+            ["list_medicines", "list_medicine_documents"],
+            specialist,
+            [
+                HumanMessage(content=json.dumps(specialist)),
+                ToolMessage(content='{"items": []}', tool_call_id="catalog", name="list_medicines"),
+            ],
+        )
+        == "list_medicine_documents"
+    )
+
+
+def test_simulated_model_routes_report_through_farm_then_secretary():
+    request = HumanMessage(
+        content=json.dumps(
+            {
+                "message": "Envie o relatório do lote HC-LOTE-076 para usuario.teste@argos.local.",
+            }
+        )
+    )
+    route = RoutePlan.model_validate(SimulatedChatModel._structured_call("RoutePlan", [request])[1])
 
     assert [task.agent for task in route.tasks] == [
         SpecialistAgentId.FARM,
@@ -102,19 +135,18 @@ def test_simulated_model_routes_report_through_farm_then_secretary():
     ]
     assert route.tasks[1].depends_on == (route.tasks[0].task_id,)
     assert route.tasks[0].goal.endswith("HC-LOTE-076.")
-    assert "autorizou explicitamente o envio" in route.tasks[1].goal
+    assert route.tasks[0].required_evidence == ("signed_report_source",)
+    assert route.tasks[1].required_evidence == ("confirmed_email_preparation",)
 
 
-def test_simulated_confirmation_sends_existing_preparation_without_rerunning_farm():
+def test_simulated_router_does_not_infer_confirmation_from_free_text():
     route = (
         SimulatedChatModel()
         .with_structured_output(RoutePlan)
         .invoke("Confirmo a preparação. Envie agora o relatório já preparado.")
     )
 
-    assert [task.agent for task in route.tasks] == [SpecialistAgentId.SECRETARY]
-    assert route.tasks[0].task_id == "simulated_secretary_send_prepared"
-    assert "autorizou explicitamente o envio" in route.tasks[0].goal
+    assert all(task.task_id != "simulated_secretary_send_prepared" for task in route.tasks)
 
 
 def test_simulated_model_does_not_authorize_send_for_prepare_only_request():
@@ -170,6 +202,7 @@ def test_simulated_secretary_sends_only_after_preparation_and_explicit_intent():
             {
                 "task_id": "simulated_secretary_report",
                 "goal": "Preparar e enviar; o pedido original autorizou explicitamente o envio.",
+                "email_send_authorized": True,
             }
         )
     )
@@ -193,7 +226,13 @@ def test_simulated_secretary_sends_only_after_preparation_and_explicit_intent():
     assert _next_tool(tools, json.loads(message.content), [message, ready]) == "send_report"
     assert _next_tool(tools, json.loads(message.content), [message, unresolved]) is None
     assert _next_tool(tools, json.loads(message.content), [message, sent]) is None
-    assert _next_tool(tools, json.loads(message.content), []) == "send_report"
+    assert _next_tool(tools, json.loads(message.content), []) == "prepare_report"
+    confirmation = {
+        "task_id": "simulated_task",
+        "goal": "Enviar a preparação válida; o pedido original autorizou explicitamente o envio.",
+        "email_send_authorized": False,
+    }
+    assert _next_tool(tools, confirmation, []) == "prepare_report"
     assert (
         _next_tool(
             ["resolve_report_lot_report_source", "list_lots"],
@@ -211,6 +250,50 @@ def test_simulated_secretary_sends_only_after_preparation_and_explicit_intent():
         )
         is None
     )
+
+
+def test_simulated_never_dispatches_without_a_preparation_result_in_this_execution():
+    message = HumanMessage(
+        content=json.dumps(
+            {
+                "task_id": "simulated_task",
+                "goal": (
+                    "Enviar a preparação válida; o pedido original autorizou explicitamente "
+                    "o envio."
+                ),
+            }
+        )
+    )
+    result = SimulatedChatModel()._generate(
+        [message],
+        tools=[{"name": "SpecialistResult"}, {"name": "send_report"}],
+    )
+
+    call = result.generations[0].message.tool_calls[0]
+    assert call["name"] == "SpecialistResult"
+    assert call["args"]["status"] == "unavailable"
+
+
+def test_simulated_prepare_only_never_calls_dispatch_tool():
+    message = HumanMessage(
+        content=json.dumps(
+            {
+                "task_id": "simulated_secretary_report",
+                "goal": "Preparar relatório sem enviar e-mail.",
+            }
+        )
+    )
+    result = SimulatedChatModel()._generate(
+        [message],
+        tools=[
+            {"name": "SpecialistResult"},
+            {"name": "prepare_report"},
+            {"name": "send_report"},
+        ],
+    )
+
+    call = result.generations[0].message.tool_calls[0]
+    assert call["name"] == "prepare_report"
 
 
 def test_simulated_specialist_preserves_tool_failure_instead_of_reporting_success():
@@ -248,6 +331,29 @@ def test_simulated_specialist_returns_sanitized_tool_result():
     assert "[EMAIL]" not in result["answer"]
 
 
+def test_simulated_specialist_combines_catalog_and_document_results():
+    result = SimulatedChatModel._structured_call(
+        "SpecialistResult",
+        [
+            ToolMessage(
+                content='{"items":[{"brand_name":"Vacina Teste A"}]}',
+                tool_call_id="catalog",
+                name="list_medicines",
+            ),
+            ToolMessage(
+                content='{"items":[{"active_ingredient":"Composto sintético"}]}',
+                tool_call_id="document",
+                name="list_medicine_documents",
+            ),
+        ],
+    )[1]
+
+    assert result["status"] == "success"
+    assert "list_medicines" in result["answer"]
+    assert "list_medicine_documents" in result["answer"]
+    assert "Composto sintético" in result["answer"]
+
+
 def test_simulated_orchestrator_does_not_claim_success_for_failed_specialist():
     result = SimulatedChatModel._structured_call(
         "OrchestratorResult",
@@ -273,6 +379,13 @@ def test_simulated_orchestrator_includes_verified_specialist_results():
                                     "answer": (
                                         'Resultado retornado por list_lots: [{"lot":"HC-01"}]'
                                     ),
+                                    "sources": [
+                                        {
+                                            "title": "Consulta de lote",
+                                            "reference": "mcp://farm/lots/HC-01",
+                                            "excerpt": "Lote HC-01",
+                                        }
+                                    ],
                                 }
                             }
                         ]
@@ -283,6 +396,13 @@ def test_simulated_orchestrator_includes_verified_specialist_results():
     )[1]
 
     assert result["draft_answer"] == ('Resultado retornado por list_lots: [{"lot":"HC-01"}]')
+    assert result["sources"] == [
+        {
+            "title": "Consulta de lote",
+            "reference": "mcp://farm/lots/HC-01",
+            "excerpt": "Lote HC-01",
+        }
+    ]
 
 
 def test_simulated_prediction_tool_arguments_match_mcp_contract():

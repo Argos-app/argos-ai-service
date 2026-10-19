@@ -33,6 +33,7 @@ from app.domain.sessions import ExecutionStatus
 from app.infrastructure.agents import langchain_factory
 from app.infrastructure.agents.langchain_factory import AgentResponseError
 from app.infrastructure.agents.model_factory import ModelRuntimeConfigurationError
+from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.infrastructure.mcp.client import McpClients
 from app.ports.agent import AgentId
 
@@ -161,6 +162,26 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
         )
     )
     assert result.answer == "Resultado de teste"
+
+
+def test_simulated_factory_uses_structured_outputs_for_orchestrator_and_judge(monkeypatch):
+    calls: list[dict[str, Any]] = []
+
+    def fake_create_agent(**kwargs: Any) -> _FakeRunnable:
+        calls.append(kwargs)
+        return _FakeRunnable()
+
+    monkeypatch.setattr(specialists, "create_agent", fake_create_agent)
+    simulated_model = SimulatedChatModel()
+    models = {policy: simulated_model for policy in ModelPolicyId}
+    build_agent_factory(models, use_mock_tools=True)
+
+    orchestrator_call = next(
+        call for call in calls if "Você é o Orquestrador do sistema." in call["system_prompt"]
+    )
+    judge_call = next(call for call in calls if "Você é o Juiz do Argos." in call["system_prompt"])
+    assert orchestrator_call["response_format"].schema is OrchestratorResult
+    assert judge_call["response_format"].schema is JudgeResult
 
 
 def test_build_agent_factory_registers_question_formatter_without_tools(monkeypatch) -> None:
