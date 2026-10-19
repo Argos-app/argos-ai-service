@@ -59,9 +59,11 @@ Firebase ID token e consulta o cadastro PostgreSQL. Configure o projeto
 Firebase, uma credencial Admin SDK (arquivo de service account montado como
 secret ou ADC), o DSN PostgreSQL somente leitura e
 `MAIN_API_ACCESS_TOKEN_KEY_ID` com `MAIN_API_ACCESS_TOKEN_PRIVATE_KEY` (chave
-Ed25519 PKCS#8 DER em Base64). O JWT carrega apenas o UUID interno do usuário;
-as fazendas são recarregadas do banco em cada chamada protegida. Tokens
-assinados pelo backend de identidade não são mais aceitos.
+Ed25519 PKCS#8 DER em Base64, exclusiva e diferente da chave de delegação MCP).
+O JWT dura cinco minutos e carrega o UUID interno do usuário no `sub` e seu UID
+Firebase; nome, e-mail, permissões e fazendas não são incluídos. As fazendas são
+recarregadas do banco em cada chamada protegida. Tokens assinados pelo backend
+de identidade não são mais aceitos.
 
 ## Banco PostgreSQL e dados sintéticos
 

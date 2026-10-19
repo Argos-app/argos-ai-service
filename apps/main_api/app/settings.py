@@ -111,7 +111,7 @@ class Settings:
     access_token_audience: str = "argos-ai-service-api"
     access_token_key_id: str | None = None
     access_token_private_key: str | None = field(default=None, repr=False)
-    access_token_ttl_seconds: int = 900
+    access_token_ttl_seconds: int = 300
     mcp_data_url: str | None = None
     mcp_data_token: str | None = field(default=None, repr=False)
     mcp_data_report_trusted_signature_keys: tuple[tuple[str, str], ...] = ()
@@ -224,7 +224,7 @@ class Settings:
             ),
             access_token_key_id=os.getenv("MAIN_API_ACCESS_TOKEN_KEY_ID") or None,
             access_token_private_key=os.getenv("MAIN_API_ACCESS_TOKEN_PRIVATE_KEY") or None,
-            access_token_ttl_seconds=int(os.getenv("MAIN_API_ACCESS_TOKEN_TTL_SECONDS", "900")),
+            access_token_ttl_seconds=int(os.getenv("MAIN_API_ACCESS_TOKEN_TTL_SECONDS", "300")),
             mcp_data_url=os.getenv("MAIN_API_MCP_DATA_URL") or None,
             mcp_data_token=os.getenv("MAIN_API_MCP_DATA_TOKEN") or None,
             mcp_data_report_trusted_signature_keys=tuple(report_keys.items()),
@@ -320,7 +320,7 @@ class Settings:
             or self.mcp_response_max_bytes < 1
             or not self.access_token_issuer.strip()
             or not self.access_token_audience.strip()
-            or not 60 <= self.access_token_ttl_seconds <= 3600
+            or not 60 <= self.access_token_ttl_seconds <= 300
             or not self.mcp_delegation_issuer.strip()
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
             or not 0 < self.document_a2a_timeout_seconds <= 60

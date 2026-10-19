@@ -30,6 +30,7 @@ class InvalidAccessToken(ValueError):
 @dataclass(frozen=True, slots=True)
 class AccessTokenClaims:
     user_id: UUID
+    firebase_uid: str
     token_id: UUID
 
 
@@ -104,7 +105,9 @@ class MainApiAccessTokenCodec:
             )
         return key
 
-    def issue(self, user_id: UUID) -> str:
+    def issue(self, user_id: UUID, firebase_uid: str) -> str:
+        if not isinstance(firebase_uid, str) or not firebase_uid.strip() or len(firebase_uid) > 128:
+            raise ValueError("firebase_uid inválido")
         issued_at = int(self._clock())
         token_id = uuid4()
         header = {"alg": "EdDSA", "kid": self._key_id, "typ": "JWT"}
@@ -112,6 +115,7 @@ class MainApiAccessTokenCodec:
             "iss": self._issuer,
             "aud": self._audience,
             "sub": str(user_id),
+            "firebase_uid": firebase_uid,
             "jti": str(token_id),
             "iat": issued_at,
             "nbf": issued_at,
@@ -146,6 +150,18 @@ class MainApiAccessTokenCodec:
             raise InvalidAccessToken("token inválido") from exc
 
         claims = _decode_object(_decode_segment(parts[1]))
+        if set(claims) != {
+            "iss",
+            "aud",
+            "sub",
+            "firebase_uid",
+            "jti",
+            "iat",
+            "nbf",
+            "exp",
+            "v",
+        }:
+            raise InvalidAccessToken("claims incompatíveis")
         issued_at = claims.get("iat")
         not_before = claims.get("nbf")
         expires_at = claims.get("exp")
@@ -167,6 +183,17 @@ class MainApiAccessTokenCodec:
         try:
             user_id = UUID(claims["sub"])
             token_id = UUID(claims["jti"])
+            firebase_uid = claims["firebase_uid"]
+            if (
+                not isinstance(firebase_uid, str)
+                or not firebase_uid.strip()
+                or len(firebase_uid) > 128
+            ):
+                raise ValueError
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise InvalidAccessToken("token inválido") from exc
-        return AccessTokenClaims(user_id=user_id, token_id=token_id)
+        return AccessTokenClaims(
+            user_id=user_id,
+            firebase_uid=firebase_uid,
+            token_id=token_id,
+        )

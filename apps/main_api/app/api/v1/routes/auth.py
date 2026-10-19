@@ -80,4 +80,4 @@ async def authenticate_firebase(
             detail="Usuário sem cadastro habilitado ou sem fazendas autorizadas",
         )
 
-    return AccessTokenResponse(access_token=codec.issue(user.user_id))
+    return AccessTokenResponse(access_token=codec.issue(user.user_id, result.identity.firebase_uid))

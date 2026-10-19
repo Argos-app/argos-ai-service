@@ -36,7 +36,7 @@ def test_api_accepts_jwt_issued_by_its_configured_signer() -> None:
     codec = _codec()
     user_id = uuid4()
 
-    claims = _verify_access_token(_request(codec), codec.issue(user_id))
+    claims = _verify_access_token(_request(codec), codec.issue(user_id, "firebase-user-123"))
 
     assert claims.user_id == user_id
 
@@ -44,7 +44,7 @@ def test_api_accepts_jwt_issued_by_its_configured_signer() -> None:
 def test_api_rejects_token_from_another_signer_without_legacy_fallback() -> None:
     issuer = _codec()
     verifier = _codec()
-    token = issuer.issue(uuid4())
+    token = issuer.issue(uuid4(), "firebase-other-user")
 
     with pytest.raises(HTTPException) as error:
         _verify_access_token(_request(verifier), token)

@@ -271,7 +271,7 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
         mcp_email_token=harness.token,
     )
     app = create_app(settings)
-    token = app.state.access_token_codec.issue(user_id)
+    token = app.state.access_token_codec.issue(user_id, "firebase-test-user")
     headers = {"Authorization": f"Bearer {token}"}
     mongo = AsyncIOMotorClient(mongo_uri, tz_aware=True)
     try:
@@ -309,7 +309,9 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
                 "client_message_id": client_message_id,
                 "message": message,
             }
-            other_user_token = app.state.access_token_codec.issue(other_user_id)
+            other_user_token = app.state.access_token_codec.issue(
+                other_user_id, "firebase-test-other-user"
+            )
             other_headers = {"Authorization": f"Bearer {other_user_token}"}
             cross_user = client.post(
                 f"/v1/sessions/{session_id}/interactions",

@@ -129,18 +129,21 @@ identidade; o serviço busca o cadastro pelo UID e autoriza somente usuários
 ativos, não bloqueados, com permissão cadastral ativa e ao menos uma fazenda
 vigente.
 
-O JWT próprio é assinado com Ed25519 e contém somente o UUID Argos no `sub`,
-além de claims técnicos de emissor, audiência, identificador e validade. Cada
-chamada protegida valida essa assinatura e recarrega cadastro e fazendas por
-UUID no PostgreSQL. As três operações atuais da IA são comuns e atribuídas pelo
-serviço; permissões de fazenda vêm do banco, nunca de claims ou campos enviados
-pelo cliente. Mudanças de vínculo ou bloqueios cadastrais têm efeito nas
-chamadas seguintes.
+O JWT próprio é assinado com Ed25519, identificado por `kid` e tem validade
+inicial de cinco minutos. Contém o UUID interno Argos no `sub`, o UID Firebase e
+claims técnicos de emissor, audiência, versão, identificador único e datas de
+emissão/expiração. Não inclui nome, e-mail, permissão ou fazendas. Sua chave é
+exclusiva e distinta da chave usada para assinar delegações MCP. Cada chamada
+protegida valida essa assinatura e recarrega cadastro e fazendas por UUID no
+PostgreSQL. As três operações atuais da IA são comuns e atribuídas pelo serviço;
+permissões de fazenda vêm do banco, nunca de claims ou campos enviados pelo
+cliente. Mudanças de vínculo ou bloqueios cadastrais têm efeito nas chamadas
+seguintes.
 
 As rotas `/v1/` não aceitam JWTs do backend de identidade. O `AUTH_MODE=stub`
 continua disponível somente para desenvolvimento local; fora dele, Firebase,
 PostgreSQL read-only e a chave privada Ed25519 do emissor são obrigatórios. A
-validade padrão do JWT próprio é 15 minutos; o cliente renova obtendo um
+validade padrão do JWT próprio é cinco minutos; o cliente renova obtendo um
 Firebase ID token atualizado e chamando novamente a rota de troca.
 
 ## Critérios para concluir a confirmação do ambiente
