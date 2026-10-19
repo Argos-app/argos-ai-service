@@ -41,6 +41,17 @@ Para recriá-lo, especifique `--force`; isso invalida as credenciais de uma pilh
 já iniciada. O arquivo `.env.example` da raiz serve como referência; prefira o
 script para gerar o `.env` com as credenciais internas.
 
+Para estimar custos quando o provider não retorna preço, configure
+`MODEL_INPUT_COST_PER_MILLION_TOKENS` e `MODEL_OUTPUT_COST_PER_MILLION_TOKENS`
+como valores decimais em USD por milhão de tokens. As mesmas tarifas são
+aplicadas a todos os modelos e serviços. O custo explícito do provider tem
+precedência; sem uso completo ou tarifa necessária, o custo permanece ausente.
+Embeddings usam somente a tarifa de entrada. O campo `billing.cost_source`
+distingue `provider` de `configured_rate`; o formato das observações Mongo e dos
+metadados LangSmith não muda. A estimativa é indicativa e não substitui a
+cobrança do provider. O script cria essas duas variáveis vazias, então elas não
+ativam estimativas até serem preenchidas.
+
 Por padrão, o ambiente local usa `AUTH_MODE=stub`, que representa todos os
 requests como um único usuário sintético. Para validar o contrato de identidade
 do backend, configure no `.env` `AUTH_MODE=jwt`, `MAIN_API_AUTH_ISSUER`,
@@ -149,11 +160,13 @@ essa variável para `provider`. O Compose injeta o mesmo modo na API principal e
 no A2A. Assim, no modo `simulated`, nenhum serviço precisa de API key de modelo,
 endpoint externo ou credencial LangSmith. O modelo principal produz planos e
 respostas estruturados de forma determinística e ainda chama as ferramentas MCP
-reais, que consultam a carga sintética. O A2A cria embeddings determinísticos
-para indexar os PDFs do repositório e responde com texto fixo citando os trechos
-recuperados. Esses vetores não têm qualidade semântica e as respostas são
-marcadas como ilustrativas; esse modo testa contratos e integração, não a
-qualidade dos modelos.
+reais, que consultam a carga sintética. As respostas estruturadas do
+Orquestrador e do Juiz também são simuladas, para que a resposta final passe
+pelos mesmos contratos do fluxo sem depender de um provider. No A2A, embeddings
+simulados usam hashing lexical determinístico: termos compartilhados ajudam a
+recuperar trechos relacionados, mas não há compreensão semântica. A resposta
+mostra os trechos encontrados e suas citações, sem inventar uma síntese; o modo
+continua voltado a testar contratos e integração, não a qualidade de modelos.
 
 No modo `provider`, preencha os endpoints, nomes e chaves correspondentes em
 `.env`, usando `.env.example` da raiz como referência. Informe

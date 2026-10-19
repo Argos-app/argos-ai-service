@@ -68,14 +68,18 @@ desativada. O writer usa uma fila limitada em memória, sem spool local; falhas
 de configuração ou indisponibilidade do MongoDB desativam a persistência sem
 interromper as respostas A2A. Os registros incluem tentativas de operações A2A,
 agentes, provedores HTTP, embeddings, autorização PostgreSQL e adapters de
-documentos/Qdrant, sem persistir argumentos, prompts, respostas ou
-identificadores de usuário/task/contexto.
+documentos/Qdrant, sem persistir argumentos, prompts, respostas, ID do usuário,
+ID da task ou ID de contexto do protocolo. Nas chamadas delegadas pelo
+principal, persistem `session_id` e `interaction_id` funcionais para permitir a
+junção com as conversas; esses IDs não substituem nem expõem os IDs de
+task/contexto A2A.
 
-O principal inclui correlation ID e ID do span pai na delegação assinada. O
-executor valida esses claims, grava `correlation_id` e `parent_observation_id`
-na observação A2A e associa os spans de execução. O ID de protocolo da task
-continua distinto. A resposta da API principal expõe `X-Argos-Correlation-ID`;
-veja o guia de [operação](../../docs/operacao-observabilidade.md) para seguir a
+O principal inclui correlation ID, ID do span pai, `session_id` e
+`interaction_id` na delegação assinada. O executor valida esses claims e grava
+`correlation_id`, `parent_observation_id`, `session_id` e `interaction_id` na
+observação A2A e nos spans de execução. O ID de protocolo da task continua
+distinto. A resposta da API principal expõe `X-Argos-Correlation-ID`; veja o
+guia de [operação](../../docs/operacao-observabilidade.md) para seguir a
 requisição nas collections de ambos os serviços. A coleta Mongo funciona sem
 LangSmith.
 
@@ -89,7 +93,13 @@ sem anonimização por decisão do projeto e podem ser enviados ao LangSmith nes
 modalidade. Considere essa exposição ao habilitar captura de conteúdo. O
 endpoint HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`. Para chaves de
 escopo organizacional, configure `A2A_LANGSMITH_WORKSPACE_ID` com o ID do
-workspace.
+workspace. Quando há uso de tokens, o serviço persiste custo explícito do
+provider ou uma estimativa configurada no Mongo e o propaga ao LangSmith. As
+variáveis opcionais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_OUTPUT_COST_PER_MILLION_TOKENS` são tarifas globais em USD por milhão;
+embeddings usam somente a tarifa de entrada. `billing.cost_source` identifica
+`provider` ou `configured_rate`. Sem uso/tarifa suficientes, o custo fica
+ausente. Consulte o guia operacional para limites e semântica dos valores.
 
 ## Contrato A2A
 

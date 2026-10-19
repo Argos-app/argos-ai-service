@@ -116,11 +116,19 @@ LangSmith. `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e
 Mongo continua armazenando apenas os eventos brutos sanitizados existentes;
 conteúdo de trace é armazenado separadamente pelo LangSmith. A coleta local no
 Mongo independe do LangSmith e inclui `X-Argos-Correlation-ID` na resposta,
-`correlation_id` nos spans e `parent_observation_id` para relacionar chamadas
-aninhadas. O correlation ID é enviado às chamadas MCP e segue assinado para
-Data, Prediction e A2A; os MCPs não persistem observações próprias no momento.
-Filas limitadas podem perder observações, então ausência não significa zero uso.
-Operação, ranking de chamadas e tokens por usuário e limites estão em
+`correlation_id` nos spans, `parent_observation_id` para relacionar chamadas
+aninhadas e `session_id`/`interaction_id` nos spans do grafo. Esses IDs seguem
+assinados até as observações A2A para junção direta com as conversas no Mongo. O
+correlation ID é enviado às chamadas MCP e segue assinado para Data, Prediction
+e A2A; os MCPs não persistem observações próprias no momento. Filas limitadas
+podem perder observações, então ausência não significa zero uso. Quando há
+contagens de tokens, o custo pode vir do provider ou ser estimado pelas tarifas
+globais opcionais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_OUTPUT_COST_PER_MILLION_TOKENS`; `billing.cost_source` distingue as
+origens. Os valores estimados são persistidos nas observações Mongo e propagados
+ao LangSmith, mas são indicativos e não substituem a fatura do provider. Sem
+contagens ou tarifas suficientes, custo permanece desconhecido. Operação,
+ranking de chamadas e tokens por usuário e limites estão em
 [`docs/operacao-observabilidade.md`](docs/operacao-observabilidade.md); a
 extração e o dicionário BI estão em
 [`docs/observabilidade-extracao-mongo.md`](docs/observabilidade-extracao-mongo.md)
