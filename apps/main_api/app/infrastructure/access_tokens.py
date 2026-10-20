@@ -32,6 +32,7 @@ class AccessTokenClaims:
     user_id: UUID
     firebase_uid: str
     token_id: UUID
+    issued_at: int
 
 
 def _b64url(value: bytes) -> str:
@@ -196,4 +197,5 @@ class MainApiAccessTokenCodec:
             user_id=user_id,
             firebase_uid=firebase_uid,
             token_id=token_id,
+            issued_at=issued_at,
         )

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.application.identity import ActorContext
 from app.domain.user_access import UserAccess
 from app.infrastructure.access_tokens import AccessTokenClaims, InvalidAccessToken
+from app.infrastructure.firebase_auth import FirebaseVerificationUnavailable
 from app.settings import Settings
 from packages.observability import bind_user_id
 
@@ -108,33 +109,7 @@ async def get_principal(request: Request) -> AsyncIterator[Principal]:
     if codec is None and settings.app_env == "local" and settings.auth_mode == "stub":
         principal = _local_stub_principal()
     else:
-        claims = _verify_access_token(request, token)
-        repository = getattr(request.app.state, "user_access_repository", None)
-        if repository is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Consulta de autorização não configurada",
-            )
-        try:
-            user = await repository.find_by_user_id(claims.user_id)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Não foi possível consultar o cadastro de acesso",
-            ) from exc
-        if user is None or not _user_access_is_enabled(user):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Usuário sem cadastro habilitado ou sem fazendas autorizadas",
-            )
-        principal = Principal(
-            user_id=user.user_id,
-            email=user.email,
-            name=user.name,
-            permission=user.permission_code,
-            farm_ids=tuple(farm.farm_id for farm in user.farms),
-            operations=_ALLOWED_OPERATIONS,
-        )
+        principal = await _principal_from_access_token(request, token)
 
     counter = getattr(request.app.state, "user_usage_counter", None)
     if counter is not None:
@@ -144,6 +119,71 @@ async def get_principal(request: Request) -> AsyncIterator[Principal]:
             _LOGGER.warning("Redis user call counter increment failed")
     with bind_user_id(principal.user_id):
         yield principal
+
+
+async def _principal_from_access_token(request: Request, token: str) -> Principal:
+    """Valida JWT, revogação Firebase e cadastro atual antes de criar o Principal."""
+    claims = _verify_access_token(request, token)
+    firebase_authenticator = getattr(request.app.state, "firebase_identity_authenticator", None)
+    if firebase_authenticator is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Verificação de revogação não configurada",
+        )
+    try:
+        token_revoked = await firebase_authenticator.is_access_token_revoked(
+            claims.firebase_uid,
+            claims.issued_at,
+        )
+    except FirebaseVerificationUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível verificar a revogação no Firebase",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível verificar a revogação no Firebase",
+        ) from exc
+    if token_revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer revogado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    repository = getattr(request.app.state, "user_access_repository", None)
+    if repository is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Consulta de autorização não configurada",
+        )
+    try:
+        user = await repository.find_by_user_id(claims.user_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Não foi possível consultar o cadastro de acesso",
+        ) from exc
+    if user is None or user.firebase_uid != claims.firebase_uid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Identidade Firebase não corresponde ao cadastro",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not _user_access_is_enabled(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuário sem cadastro habilitado ou sem fazendas autorizadas",
+        )
+    return Principal(
+        user_id=user.user_id,
+        email=user.email,
+        name=user.name,
+        permission=user.permission_code,
+        farm_ids=tuple(farm.farm_id for farm in user.farms),
+        operations=_ALLOWED_OPERATIONS,
+    )
 
 
 def principal_with_operation(operation: str) -> Callable[..., Principal]:

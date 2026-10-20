@@ -140,6 +140,12 @@ permissões de fazenda vêm do banco, nunca de claims ou campos enviados pelo
 cliente. Mudanças de vínculo ou bloqueios cadastrais têm efeito nas chamadas
 seguintes.
 
+Em cada chamada protegida, o Firebase Admin consulta a conta pelo UID e compara
+`iat` do JWT com `tokens_valid_after_timestamp`. Se a conta foi desativada,
+removida ou teve os tokens revogados após a emissão, o JWT é rejeitado. Falha de
+comunicação com Firebase resulta em indisponibilidade (503), sem liberar a rota.
+Essa checagem faz uma chamada externa ao Firebase por requisição autenticada.
+
 As rotas `/v1/` não aceitam JWTs do backend de identidade. O `AUTH_MODE=stub`
 continua disponível somente para desenvolvimento local; fora dele, Firebase,
 PostgreSQL read-only e a chave privada Ed25519 do emissor são obrigatórios. A

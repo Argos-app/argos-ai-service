@@ -45,6 +45,8 @@ class FirebaseAuthenticationResult:
 class FirebaseTokenVerifier(Protocol):
     def verify(self, id_token: str) -> FirebaseIdentity: ...
 
+    def is_access_token_revoked(self, firebase_uid: str, issued_at: int) -> bool: ...
+
 
 class FirebaseAdminIdTokenVerifier:
     """Invoca o Admin SDK com checagem obrigatória de revogação."""
@@ -104,9 +106,29 @@ class FirebaseAdminIdTokenVerifier:
             email_verified=claims.get("email_verified") is True,
         )
 
+    def is_access_token_revoked(self, firebase_uid: str, issued_at: int) -> bool:
+        """Aplica ao JWT da API o corte de revogação da conta Firebase."""
+        try:
+            user = self._auth.get_user(firebase_uid, app=self._app)
+        except self._auth.UserNotFoundError:
+            return True
+        except self._firebase_error_type as exc:
+            raise FirebaseVerificationUnavailable(
+                "Firebase Auth indisponível para verificar revogação"
+            ) from exc
+
+        if user.uid != firebase_uid or user.disabled:
+            return True
+        valid_after_ms = user.tokens_valid_after_timestamp
+        if type(valid_after_ms) is not int or valid_after_ms < 0:
+            raise FirebaseVerificationUnavailable(
+                "Firebase não retornou o marco de revogação da conta"
+            )
+        return issued_at * 1000 < valid_after_ms
+
 
 class FirebaseIdentityAuthenticator:
-    """Valida o token e busca o cadastro exclusivamente por firebase_uid."""
+    """Valida identidade, busca por UID e aplica revogação Firebase aos JWTs."""
 
     def __init__(
         self,
@@ -122,6 +144,13 @@ class FirebaseIdentityAuthenticator:
         # usado para associar ou localizar cadastros legados.
         user = await self._users.find_by_firebase_uid(identity.firebase_uid)
         return FirebaseAuthenticationResult(identity=identity, user=user)
+
+    async def is_access_token_revoked(self, firebase_uid: str, issued_at: int) -> bool:
+        return await asyncio.to_thread(
+            self._verifier.is_access_token_revoked,
+            firebase_uid,
+            issued_at,
+        )
 
 
 def create_firebase_id_token_verifier(settings: Settings) -> FirebaseAdminIdTokenVerifier:
