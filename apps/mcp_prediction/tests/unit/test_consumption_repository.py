@@ -32,7 +32,7 @@ START, END = date(2024, 1, 15), date(2025, 1, 14)
 def make_scope(properties):
     now = datetime.now(UTC)
     context = AccessContext(
-        uuid4(),
+        "firebase-user-123",
         properties,
         frozenset({"prediction.read"}),
         "analista",
@@ -42,7 +42,7 @@ def make_scope(properties):
         "request",
     )
     return AuthorizedScope.build(
-        context, current_property_ids=set(properties), operation="prediction.read"
+        context, user_id=uuid4(), current_property_ids=set(properties), operation="prediction.read"
     )
 
 

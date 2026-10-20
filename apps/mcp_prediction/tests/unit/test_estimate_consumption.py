@@ -23,6 +23,7 @@ from argos_mcp_prediction.infrastructure import UnknownCoverageRepository
 
 from packages.contracts import DataOrigin, EstimateMedicineConsumptionRequest
 from packages.security.access import AccessContext
+from packages.security.access_directory import UserPropertyAccess
 from packages.security.access_policy import AccessPolicy
 from packages.security.errors import AccessDeniedError
 
@@ -48,7 +49,7 @@ def scenario():
     property_id = uuid4()
     now = datetime.now(UTC)
     context = AccessContext(
-        uuid4(),
+        "firebase-user-123",
         (property_id,),
         frozenset({"prediction.read"}),
         "analista",
@@ -58,7 +59,7 @@ def scenario():
         "request",
     )
     directory = AsyncMock()
-    directory.get_active_property_ids.return_value = {property_id}
+    directory.get_user_property_access.return_value = UserPropertyAccess(uuid4(), {property_id})
     repository = AsyncMock()
     group = ConsumptionGroup(
         property_id, uuid4(), ConsumptionUnit.ML, "Marca de teste", "Ivermectina"
@@ -98,7 +99,7 @@ async def test_unconfirmed_coverage_keeps_observations_but_suppresses_estimate(s
     scope = repository.aggregate_monthly.await_args.args[0]
     assert scope.property_ids == context.authorized_property_ids
     assert repository.aggregate_monthly.await_args.kwargs["medicine_names"] == ("ivermectina",)
-    directory.get_active_property_ids.assert_awaited_once_with(context.user_id)
+    directory.get_user_property_access.assert_awaited_once_with(context.firebase_uid)
 
 
 @pytest.mark.parametrize("names", [("ivermectina", "missing"), ("missing",)])
@@ -137,7 +138,7 @@ async def test_name_without_history_in_one_selected_farm_blocks_partial_estimate
     context = replace(
         context, authorized_property_ids=(*context.authorized_property_ids, other_property)
     )
-    directory.get_active_property_ids.return_value.add(other_property)
+    directory.get_user_property_access.return_value.property_ids.add(other_property)
     response = await service().execute(context, request())
     assert response.status == "insufficient_data"
     assert response.reason
@@ -153,7 +154,7 @@ async def test_denied_access_never_queries_history(scenario, change):
     elif change == "wrong_agent":
         context = replace(context, agent_id="doutor")
     elif change == "revoked":
-        directory.get_active_property_ids.return_value = set()
+        directory.get_user_property_access.return_value = None
     else:
         payload = request(property_ids=(uuid4(),))
     with pytest.raises(AccessDeniedError):

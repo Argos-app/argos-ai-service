@@ -139,7 +139,9 @@ class DelegationTokenVerifier:
             subject = claims["sub"]
             if not isinstance(subject, str):
                 raise ValueError
-            user_id = UUID(subject)
+            firebase_uid = subject
+            if not firebase_uid.strip() or len(firebase_uid) > 128:
+                raise ValueError
             properties_raw = claims["authorized_property_ids"]
             if not isinstance(properties_raw, list) or not 1 <= len(properties_raw) <= 1000:
                 raise ValueError
@@ -172,7 +174,7 @@ class DelegationTokenVerifier:
             raise AccessContextError("contexto delegado inválido")
 
         return AccessContext(
-            user_id=user_id,
+            firebase_uid=firebase_uid,
             authorized_property_ids=properties,
             operations=frozenset(operations_raw),
             agent_id=agent_id,

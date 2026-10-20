@@ -169,14 +169,14 @@ def _delegation_headers(
     if issuer is None:
         raise McpToolBindingConfigurationError(f"emissor de delegação ausente para o MCP {service}")
     context = _trusted_config(config)
-    user_id = context.get("argos_user_id")
+    firebase_uid = context.get("argos_firebase_uid")
     property_ids = context.get("argos_authorized_property_ids")
     request_id = context.get("argos_request_id")
-    if not user_id or not property_ids or not request_id:
+    if not firebase_uid or not property_ids or not request_id:
         raise ValueError("identidade e propriedades autorizadas são obrigatórias para a tool MCP")
     return issuer.headers_for_call(
         service=service,
-        user_id=user_id,
+        firebase_uid=firebase_uid,
         authorized_property_ids=property_ids,
         agent=agent,
         operation=operation,

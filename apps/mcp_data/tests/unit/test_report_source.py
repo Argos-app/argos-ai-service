@@ -21,12 +21,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 class _AccessDirectory(AccessDirectory):
-    def __init__(self, property_id):
+    def __init__(self, property_id, user_id):
         self.property_id = property_id
+        self.user_id = user_id
 
-    async def get_active_property_ids(self, user_id):
-        del user_id
-        return {self.property_id}
+    async def get_user_property_access(self, firebase_uid):
+        from argos_mcp_data.ports.access_directory import UserPropertyAccess
+
+        del firebase_uid
+        return UserPropertyAccess(user_id=self.user_id, property_ids={self.property_id})
 
 
 class _Repository:
@@ -73,7 +76,7 @@ def _setup(*, applications_have_more=False):
         ttl_seconds=120,
     )
     context = AccessContext(
-        user_id=user_id,
+        firebase_uid="firebase-user-123",
         authorized_property_ids=(property_id,),
         operations=frozenset({"report.read"}),
         agent_id="fazenda",
@@ -128,7 +131,7 @@ def _setup(*, applications_have_more=False):
         applications_have_more=applications_have_more,
     )
     service = CattleQueryService(
-        AccessPolicy(_AccessDirectory(property_id)),
+        AccessPolicy(_AccessDirectory(property_id, user_id)),
         repository,
         object(),
         report_signer=signer,

@@ -195,6 +195,8 @@ def build_agent_context(
     configurable = (config or {}).get("configurable") or {}
     if configurable.get("argos_user_id"):
         context["argos_user_id"] = configurable["argos_user_id"]
+    if configurable.get("argos_firebase_uid"):
+        context["argos_firebase_uid"] = configurable["argos_firebase_uid"]
     if configurable.get("argos_authorized_property_ids"):
         context["argos_authorized_property_ids"] = configurable["argos_authorized_property_ids"]
     if configurable.get("argos_request_id"):

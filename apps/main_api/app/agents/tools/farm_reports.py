@@ -38,6 +38,7 @@ def build_farm_report_tool(
             raise ValueError("contexto confiável de execução ausente")
         try:
             principal_user_id = UUID(str(configurable["argos_user_id"]))
+            firebase_uid = str(configurable["argos_firebase_uid"])
             request_id = UUID(str(configurable["argos_request_id"]))
             session_id = UUID(str(configurable["session_id"]))
             interaction_id = UUID(str(configurable["interaction_id"]))
@@ -52,6 +53,7 @@ def build_farm_report_tool(
 
         resolution = await data_client.resolve_report_lot(
             lot_code=lot_code,
+            firebase_uid=firebase_uid,
             principal_user_id=principal_user_id,
             authorized_property_ids=authorized_property_ids,
             request_id=request_id,
@@ -85,6 +87,7 @@ def build_farm_report_tool(
             envelope = await data_client.get_lot_report_source(
                 lot_id=candidate.lot_id,
                 property_id=candidate.property_id,
+                firebase_uid=firebase_uid,
                 principal_user_id=principal_user_id,
                 authorized_property_ids=authorized_property_ids,
                 request_id=request_id,

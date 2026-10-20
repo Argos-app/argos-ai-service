@@ -43,9 +43,6 @@ class _UserAccessRepository:
             (user for user in self._users.values() if user.firebase_uid == firebase_uid), None
         )
 
-    async def find_by_user_id(self, user_id: UUID) -> UserAccess | None:
-        return self._users.get(user_id)
-
 
 class _FirebaseAccessTokenStatus:
     async def is_access_token_revoked(self, firebase_uid: str, issued_at: int) -> bool:

@@ -31,7 +31,7 @@ def make_verifier_and_token(*, overrides: dict[str, object] | None = None):
         "v": 1,
         "iss": "argos-main-service",
         "aud": "https://prediction.example.test/mcp",
-        "sub": str(uuid4()),
+        "sub": "firebase-user-123",
         "authorized_property_ids": [property_id],
         "operations": ["prediction.read"],
         "agent": "analista",
@@ -61,7 +61,7 @@ def test_valid_delegation_produces_immutable_access_context() -> None:
 
     context = verifier.verify(token)
 
-    assert str(context.user_id) == claims["sub"]
+    assert context.firebase_uid == claims["sub"]
     assert str(context.authorized_property_ids[0]) == claims["authorized_property_ids"][0]
     assert context.operations == frozenset({"prediction.read"})
     assert context.agent_id == "analista"
@@ -118,7 +118,7 @@ def test_deeply_nested_token_header_is_rejected() -> None:
 def test_access_context_cannot_select_property_outside_claim_or_current_access() -> None:
     property_a, property_b = uuid4(), uuid4()
     context = AccessContext(
-        user_id=uuid4(),
+        firebase_uid="firebase-user-123",
         authorized_property_ids=(property_a,),
         operations=frozenset({"prediction.read"}),
         agent_id="analista",
@@ -130,6 +130,7 @@ def test_access_context_cannot_select_property_outside_claim_or_current_access()
 
     scope = AuthorizedScope.build(
         context,
+        user_id=uuid4(),
         current_property_ids={property_a, property_b},
         operation="prediction.read",
         selected_property_ids=(property_a,),
@@ -139,6 +140,7 @@ def test_access_context_cannot_select_property_outside_claim_or_current_access()
     with pytest.raises(AccessDeniedError):
         AuthorizedScope.build(
             context,
+            user_id=uuid4(),
             current_property_ids={property_a, property_b},
             operation="prediction.read",
             selected_property_ids=(property_b,),
@@ -147,6 +149,7 @@ def test_access_context_cannot_select_property_outside_claim_or_current_access()
     with pytest.raises(AccessDeniedError):
         AuthorizedScope.build(
             context,
+            user_id=uuid4(),
             current_property_ids={property_b},
             operation="prediction.read",
         )

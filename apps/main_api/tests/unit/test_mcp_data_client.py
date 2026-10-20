@@ -171,6 +171,7 @@ async def test_resolve_report_lot_passes_delegated_scope_and_matches_exact_code(
 
     result = await data.resolve_report_lot(
         lot_code="L-1",
+        firebase_uid="firebase-user-123",
         principal_user_id=user_id,
         authorized_property_ids=(property_id,),
         request_id=request_id,
@@ -202,6 +203,7 @@ async def test_resolve_report_lot_pages_and_batches_property_scope():
 
     result = await data.resolve_report_lot(
         lot_code="L-1",
+        firebase_uid="firebase-user-123",
         principal_user_id=uuid4(),
         authorized_property_ids=properties,
         request_id=uuid4(),
@@ -224,6 +226,7 @@ async def test_resolve_report_lot_rejects_property_outside_delegated_scope():
     with pytest.raises(ValueError, match="fora do escopo"):
         await data.resolve_report_lot(
             lot_code="L-1",
+            firebase_uid="firebase-user-123",
             principal_user_id=uuid4(),
             authorized_property_ids=(uuid4(),),
             request_id=uuid4(),
@@ -270,6 +273,7 @@ async def test_report_tool_returns_candidates_then_fails_closed_without_signed_s
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_request_id": str(uuid4()),
             "argos_authorized_property_ids": (str(property_id),),
             "session_id": str(uuid4()),

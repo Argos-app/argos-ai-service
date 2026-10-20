@@ -31,6 +31,7 @@ class Principal(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     user_id: UUID
+    firebase_uid: str = Field(min_length=1, max_length=128)
     email: str = Field(min_length=1)
     name: str = Field(min_length=1)
     permission: str = Field(min_length=1)
@@ -41,13 +42,18 @@ class Principal(BaseModel):
 
 def to_actor_context(principal: Principal) -> ActorContext:
     """Adapta a identidade HTTP ao contexto mínimo exigido pelos casos de uso."""
-    return ActorContext(user_id=principal.user_id, farm_ids=principal.farm_ids)
+    return ActorContext(
+        user_id=principal.user_id,
+        farm_ids=principal.farm_ids,
+        firebase_uid=principal.firebase_uid,
+    )
 
 
 def _local_stub_principal() -> Principal:
     """Usuário fixo para desenvolvimento local, sem representar token real."""
     return Principal(
         user_id=UUID("00000000-0000-4000-8000-000000000001"),
+        firebase_uid="local-stub-user",
         email="usuario.teste@argos.local",
         name="Usuário de teste",
         permission="USER",
@@ -159,13 +165,13 @@ async def _principal_from_access_token(request: Request, token: str) -> Principa
             detail="Consulta de autorização não configurada",
         )
     try:
-        user = await repository.find_by_user_id(claims.user_id)
+        user = await repository.find_by_firebase_uid(claims.firebase_uid)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Não foi possível consultar o cadastro de acesso",
         ) from exc
-    if user is None or user.firebase_uid != claims.firebase_uid:
+    if user is None or user.firebase_uid != claims.firebase_uid or user.user_id != claims.user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Identidade Firebase não corresponde ao cadastro",
@@ -178,6 +184,7 @@ async def _principal_from_access_token(request: Request, token: str) -> Principa
         )
     return Principal(
         user_id=user.user_id,
+        firebase_uid=claims.firebase_uid,
         email=user.email,
         name=user.name,
         permission=user.permission_code,

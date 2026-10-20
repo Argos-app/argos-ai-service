@@ -45,8 +45,8 @@ class _UserRepository:
     def __init__(self, user: UserAccess) -> None:
         self.user = user
 
-    async def find_by_user_id(self, user_id):
-        return self.user if user_id == self.user.user_id else None
+    async def find_by_firebase_uid(self, firebase_uid):
+        return self.user if firebase_uid == self.user.firebase_uid else None
 
 
 class _FirebaseAccessStatus:
@@ -128,6 +128,7 @@ async def test_principal_revalidates_firebase_uid_and_builds_actor_context() -> 
         }
     )
     assert actor.user_id == user.user_id
+    assert actor.firebase_uid == user.firebase_uid
     assert actor.farm_ids == tuple(farm.farm_id for farm in user.farms)
     assert firebase_status.checked is not None
     assert firebase_status.checked[0] == user.firebase_uid

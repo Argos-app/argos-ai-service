@@ -72,13 +72,6 @@ class PostgresUserAccessRepository:
         )
         return _user_access_from_records(records)
 
-    async def find_by_user_id(self, user_id: UUID) -> UserAccess | None:
-        records = await self._sql_reader.fetch_all(
-            _USER_ACCESS_SELECT.format(identity_predicate="u.id = $1"),
-            user_id,
-        )
-        return _user_access_from_records(records)
-
 
 def _user_access_from_records(
     records: Sequence[Mapping[str, Any]],

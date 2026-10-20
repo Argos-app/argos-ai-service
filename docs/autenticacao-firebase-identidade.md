@@ -134,11 +134,19 @@ inicial de cinco minutos. Contém o UUID interno Argos no `sub`, o UID Firebase 
 claims técnicos de emissor, audiência, versão, identificador único e datas de
 emissão/expiração. Não inclui nome, e-mail, permissão ou fazendas. Sua chave é
 exclusiva e distinta da chave usada para assinar delegações MCP. Cada chamada
-protegida valida essa assinatura e recarrega cadastro e fazendas por UUID no
-PostgreSQL. As três operações atuais da IA são comuns e atribuídas pelo serviço;
-permissões de fazenda vêm do banco, nunca de claims ou campos enviados pelo
-cliente. Mudanças de vínculo ou bloqueios cadastrais têm efeito nas chamadas
-seguintes.
+protegida valida essa assinatura e recarrega cadastro e fazendas por
+`firebase_uid` no PostgreSQL, confirmando também que o UUID interno do cadastro
+corresponde ao `sub` do JWT. As três operações atuais da IA são comuns e
+atribuídas pelo serviço; permissões de fazenda vêm do banco, nunca de claims ou
+campos enviados pelo cliente. Mudanças de vínculo ou bloqueios cadastrais têm
+efeito nas chamadas seguintes.
+
+As delegações assinadas enviadas aos MCPs usam o UID Firebase como `sub` e
+incluem somente as propriedades autorizadas necessárias à chamada. Cada MCP
+consulta o acesso atual por `app_user.firebase_uid`, revalida situação e
+vínculos, e resolve o UUID interno do cadastro na mesma consulta. O UUID
+resolvido permanece no escopo interno do MCP de dados para assinar a origem de
+relatórios; ele não é transportado na delegação.
 
 Em cada chamada protegida, o Firebase Admin consulta a conta pelo UID e compara
 `iat` do JWT com `tokens_valid_after_timestamp`. Se a conta foi desativada,
