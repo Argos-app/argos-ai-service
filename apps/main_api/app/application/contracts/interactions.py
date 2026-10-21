@@ -90,6 +90,7 @@ class InteractionOutcome(ApplicationModel):
     schema_version: Literal["1"] = "1"
     status: Literal["completed", "degraded"] = "completed"
     degradation_reasons: tuple[str, ...] = ()
+    created_at: datetime | None = Field(default=None, exclude=True)
     session_id: UUID
     interaction_id: UUID
     public_request_id: UUID

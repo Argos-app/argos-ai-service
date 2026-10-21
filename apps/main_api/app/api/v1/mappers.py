@@ -26,7 +26,9 @@ def interaction_command_from_http(body: InteractionInput) -> InteractionCommand:
 
 
 def interaction_result_to_http(result: InteractionOutcome) -> InteractionResult:
-    return InteractionResult.model_validate(result.model_dump(mode="python"))
+    payload = result.model_dump(mode="python")
+    payload["created_at"] = result.created_at
+    return InteractionResult.model_validate(payload)
 
 
 def session_to_http(session: SessionView) -> Session:

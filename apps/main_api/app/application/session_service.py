@@ -650,7 +650,7 @@ class SessionApplicationService:
             await summary_task
         else:
             self._background_task_scheduler(summary_task)
-        return response
+        return response.model_copy(update={"created_at": finished_at})
 
     async def _publish_due_summary(
         self,
@@ -772,7 +772,10 @@ class SessionApplicationService:
             InteractionStatus.FAILED,
         }:
             if interaction.result_json:
-                return InteractionOutcome.model_validate_json(interaction.result_json)
+                result = InteractionOutcome.model_validate_json(interaction.result_json)
+                if result.created_at is None:
+                    result = result.model_copy(update={"created_at": interaction.updated_at})
+                return result
         now = _utcnow()
         lease = session.processing_lease
         if interaction.status in {InteractionStatus.ACCEPTED, InteractionStatus.RUNNING} and (

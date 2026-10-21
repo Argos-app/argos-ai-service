@@ -6,7 +6,7 @@ import base64
 import binascii
 import hashlib
 import json
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import TypeAdapter, ValidationError
@@ -146,6 +146,8 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
     answer: AnswerCommandValue | None = None
     question_id: UUID | None = None
     response: ApplicationResponse | None = None
+    status: Literal["completed", "degraded"] | None = None
+    degradation_reasons: tuple[str, ...] = ()
     if not redact and message.payload_json:
         try:
             payload = json.loads(message.payload_json)
@@ -161,6 +163,14 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
                         update={"option_id": minimize_sensitive_memory_input(answer.option_id)}
                     )
             elif message.role == MessageRole.ASSISTANT:
+                stored_status = payload.get("status")
+                if isinstance(stored_status, str) and stored_status in {"completed", "degraded"}:
+                    status = stored_status
+                stored_reasons = payload.get("degradation_reasons")
+                if isinstance(stored_reasons, list) and all(
+                    isinstance(reason, str) for reason in stored_reasons
+                ):
+                    degradation_reasons = tuple(stored_reasons)
                 result = payload.get("response")
                 if isinstance(result, dict):
                     response = _RESPONSE_ADAPTER.validate_python(result)
@@ -200,4 +210,6 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
         answer=answer,
         response=response,
         redacted=redact,
+        status=status,
+        degradation_reasons=degradation_reasons,
     )
