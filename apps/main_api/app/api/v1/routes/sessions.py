@@ -4,10 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 
-from app.api.v1.dependencies.auth import (
-    CreateSessionPrincipal,
-    ReadSessionsPrincipal,
-)
+from app.api.v1.dependencies.auth import PrincipalDep
 from app.api.v1.dependencies.services import MessageHistoryServiceDep, SessionServiceDep
 from app.api.v1.mappers import (
     actor_from_http,
@@ -26,15 +23,13 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 @router.post("", response_model=Session, status_code=status.HTTP_201_CREATED)
-async def create_session(principal: CreateSessionPrincipal, service: SessionServiceDep) -> Session:
+async def create_session(principal: PrincipalDep, service: SessionServiceDep) -> Session:
     result = await service.create_session(actor_from_http(principal))
     return session_to_http(result)
 
 
 @router.get("", response_model=list[Session])
-async def list_sessions(
-    principal: ReadSessionsPrincipal, service: SessionServiceDep
-) -> list[Session]:
+async def list_sessions(principal: PrincipalDep, service: SessionServiceDep) -> list[Session]:
     result = await service.list_sessions(actor_from_http(principal))
     return sessions_to_http(result)
 
@@ -42,7 +37,7 @@ async def list_sessions(
 @router.get("/{session_id}/messages", response_model=SessionMessagesPage)
 async def list_session_messages(
     session_id: UUID,
-    principal: ReadSessionsPrincipal,
+    principal: PrincipalDep,
     service: MessageHistoryServiceDep,
     limit: int = Query(default=DEFAULT_MESSAGES_PAGE_SIZE, ge=1, le=MAX_MESSAGES_PAGE_SIZE),
     cursor: str | None = Query(default=None, min_length=1, max_length=2048),

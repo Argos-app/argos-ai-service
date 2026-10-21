@@ -106,13 +106,7 @@ async def test_principal_revalidates_firebase_uid_and_builds_actor_context() -> 
     principal = await _principal_from_access_token(_principal_request(codec, token, user), token)
     actor = to_actor_context(principal)
 
-    assert principal.operations == frozenset(
-        {
-            "ai.sessions.create",
-            "ai.sessions.read",
-            "ai.interactions.create",
-        }
-    )
+    assert not hasattr(principal, "operations")
     assert actor.user_id == user.user_id
     assert actor.firebase_uid == user.firebase_uid
     assert actor.farm_ids == tuple(farm.farm_id for farm in user.farms)
@@ -196,18 +190,14 @@ async def test_principal_returns_503_on_database_failure() -> None:
 
 @pytest.mark.parametrize("role", ["ADMIN", "GERENTE", "PECUARISTA", "APLICADOR", "SISTEMA"])
 @pytest.mark.asyncio
-async def test_enabled_roles_share_operations_and_only_current_farms(role) -> None:
+async def test_enabled_roles_share_api_access_and_only_current_farms(role) -> None:
     codec = _codec()
     user = replace(_user(), permission_code=role)
     token = codec.issue(user.user_id, user.firebase_uid)
     principal = await _principal_from_access_token(_principal_request(codec, token, user), token)
     assert principal.permission == role
     assert principal.farm_ids == tuple(farm.farm_id for farm in user.farms)
-    assert principal.operations == {
-        "ai.sessions.create",
-        "ai.sessions.read",
-        "ai.interactions.create",
-    }
+    assert not hasattr(principal, "operations")
 
 
 @pytest.mark.asyncio

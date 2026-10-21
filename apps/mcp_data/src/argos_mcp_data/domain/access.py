@@ -5,20 +5,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from argos_mcp_data.domain.errors import AccessDeniedError
-
-
-@dataclass(frozen=True, slots=True)
-class AccessContext:
-    firebase_uid: str
-    authorized_property_ids: tuple[UUID, ...]
-    operations: frozenset[str]
-    agent_id: str
-    issued_at: datetime
-    expires_at: datetime
-    token_id: str
-    request_id: str
-    correlation_id: UUID | None = None
-    parent_observation_id: UUID | None = None
+from packages.security.access import AccessContext
 
 
 @dataclass(frozen=True, slots=True)

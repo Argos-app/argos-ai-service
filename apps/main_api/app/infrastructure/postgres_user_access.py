@@ -38,7 +38,7 @@ _USER_ACCESS_SELECT = """
                AND (up.unlink_date IS NULL OR up.unlink_date >= CURRENT_DATE)
          )
      )
-    WHERE {identity_predicate}
+    WHERE u.firebase_uid = $1
     ORDER BY p.name, p.id
 """
 
@@ -67,7 +67,7 @@ class PostgresUserAccessRepository:
         if not firebase_uid or not firebase_uid.strip():
             raise ValueError("firebase_uid não pode estar vazio")
         records = await self._sql_reader.fetch_all(
-            _USER_ACCESS_SELECT.format(identity_predicate="u.firebase_uid = $1"),
+            _USER_ACCESS_SELECT,
             firebase_uid,
         )
         return _user_access_from_records(records)

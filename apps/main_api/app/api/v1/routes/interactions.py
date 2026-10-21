@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 
-from app.api.v1.dependencies.auth import CreateInteractionPrincipal
+from app.api.v1.dependencies.auth import PrincipalDep
 from app.api.v1.dependencies.services import SessionServiceDep
 from app.api.v1.mappers import (
     actor_from_http,
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/sessions/{session_id}/interactions", tags=["interact
 async def create_interaction(
     session_id: UUID,
     body: InteractionInput,
-    principal: CreateInteractionPrincipal,
+    principal: PrincipalDep,
     service: SessionServiceDep,
 ) -> InteractionResult:
     result = await service.create_interaction(

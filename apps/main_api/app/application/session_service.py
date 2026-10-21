@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from collections.abc import Callable, Collection, Coroutine
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -78,6 +78,33 @@ MemoryExtractorProvider = Callable[[], UserMemoryExtractor | None]
 BackgroundTaskScheduler = Callable[[Coroutine[Any, Any, Any]], None]
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _AcceptedInteraction:
+    principal: ActorContext
+    session: SessionRecord
+    body: InteractionCommand
+    authorized_farms: tuple[UUID, ...]
+    sanitized_input: str
+    public_request_id: UUID
+    recipient_selectors: dict[str, dict[str, str]]
+    send_intent_requested: bool
+    answer_text: str | None
+    send_intent_source_interaction_id: str | None
+    graph: Any
+    accepted_message: ConversationMessage
+    lease: ProcessingLease
+    lease_lost: asyncio.Event
+    stop_renewal: asyncio.Event
+    heartbeat: asyncio.Task[None]
+    running: InteractionRecord
+
+
+@dataclass(frozen=True, slots=True)
+class _InteractionContext:
+    session_context: Any
+    graph_config: dict[str, Any]
 
 
 class SessionApplicationService:
@@ -200,6 +227,56 @@ class SessionApplicationService:
         session_id: UUID,
         body: InteractionCommand,
     ) -> InteractionOutcome:
+        accepted = await self._accept_interaction(principal, session_id, body)
+        if isinstance(accepted, InteractionOutcome):
+            return accepted
+
+        try:
+            execution_limits = ExecutionLimits(
+                max_model_calls=self._execution_max_model_calls,
+                max_tool_calls=self._execution_max_tool_calls,
+            )
+            failed = False
+            try:
+                context = await self._build_interaction_context(accepted)
+                state = await self._execute_interaction(accepted, context, execution_limits)
+            except TimeoutError as exc:
+                logger.warning(
+                    "session interaction exceeded execution timeout",
+                    extra={"error_type": type(exc).__name__},
+                )
+                evidence = execution_limits.evidence_snapshot()
+                state = {
+                    "final_answer": (
+                        verified_evidence_fallback(evidence, unavailable_stage="processamento")
+                        or "O processamento excedeu o tempo limite antes de obter "
+                        "um resultado verificável. Tente novamente."
+                    ),
+                    "errors": ["execution_timeout"],
+                }
+                failed = True
+            except Exception as exc:
+                logger.error(
+                    "session interaction graph failed",
+                    extra={"error_type": type(exc).__name__},
+                )
+                state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
+                failed = True
+            return await self._finalize_interaction(accepted, state, failed=failed)
+        finally:
+            await self._release_interaction_lease(
+                accepted.session.session_id,
+                accepted.lease,
+                accepted.stop_renewal,
+                accepted.heartbeat,
+            )
+
+    async def _accept_interaction(
+        self,
+        principal: ActorContext,
+        session_id: UUID,
+        body: InteractionCommand,
+    ) -> _AcceptedInteraction | InteractionOutcome:
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
             raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
@@ -248,12 +325,11 @@ class SessionApplicationService:
                 session, body, graph, new_recipient_selectors=recipient_selectors
             )
 
-        lease_owner = uuid4()
         now = _utcnow()
         lease = await self._sessions.acquire_lease(
             session_id,
             principal.user_id,
-            owner_id=lease_owner,
+            owner_id=uuid4(),
             now=now,
             expires_at=now + timedelta(seconds=self._lease_seconds),
         )
@@ -276,7 +352,9 @@ class SessionApplicationService:
                 input_hash=input_hash,
             )
             if existing is not None:
-                return await self._replay_or_reject(existing, session)
+                outcome = await self._replay_or_reject(existing, session)
+                await self._release_interaction_lease(session_id, lease, stop_renewal, heartbeat)
+                return outcome
 
             interaction_id = _interaction_id(session_id, kind, deduplication_key, input_hash)
             interaction = InteractionRecord(
@@ -317,7 +395,11 @@ class SessionApplicationService:
                         input_hash=input_hash,
                     )
                     if duplicate is not None:
-                        return await self._replay_or_reject(duplicate, session)
+                        outcome = await self._replay_or_reject(duplicate, session)
+                        await self._release_interaction_lease(
+                            session_id, lease, stop_renewal, heartbeat
+                        )
+                        return outcome
                 raise
             if accepted_message is None:
                 raise ApplicationError(
@@ -336,204 +418,220 @@ class SessionApplicationService:
                 raise ApplicationError(
                     ApplicationErrorCode.CONFLICT, "A interação mudou durante o processamento"
                 )
-
-            failed = False
-            try:
-                execution_limits = ExecutionLimits(
-                    max_model_calls=self._execution_max_model_calls,
-                    max_tool_calls=self._execution_max_tool_calls,
-                )
-                memory_input = _memory_input(body, sanitized_input, answer_text)
-                if memory_input is not None:
-                    with bind_interaction(session_id, interaction_id):
-                        await self._update_user_memory(
-                            user_id=principal.user_id,
-                            session_id=session_id,
-                            interaction_id=interaction_id,
-                            source_created_at=accepted_message.created_at,
-                            sanitized_user_input=memory_input,
-                        )
-                session_context = await build_session_context(
-                    session_id=session_id,
-                    user_id=principal.user_id,
-                    before_sequence=accepted_message.sequence,
-                    conversations=self._conversations,
-                    interactions=self._interactions,
-                    summaries=self._summaries,
-                    user_memory=self._user_memory,
-                )
-                from app.graph.workflow import (
-                    executar_fluxo,
-                    executar_resposta,
-                )
-
-                graph_recorder = (
-                    OperationRecorder(
-                        self._observation_collector,
-                        operation_kind=OperationKind.GRAPH,
-                        operation_name=(
-                            "graph.execute" if isinstance(body, MessageCommand) else "graph.resume"
-                        ),
-                        operation_phase=OperationPhase.EXECUTION,
-                        observation_level=ObservationLevel.LOCAL_OPERATION,
-                        error_origin=ErrorOrigin.APPLICATION,
-                        session_id=session_id,
-                        interaction_id=interaction_id,
-                    )
-                    if self._observation_collector is not None
-                    else None
-                )
-                try:
-                    graph_config = {
-                        "configurable": {
-                            "argos_user_id": str(principal.user_id),
-                            "argos_firebase_uid": principal.firebase_uid,
-                            "argos_authorized_property_ids": tuple(
-                                str(farm_id) for farm_id in authorized_farms
-                            ),
-                            "argos_request_id": str(current_correlation_id() or interaction_id),
-                        }
-                    }
-                    if self._langsmith_callback is not None:
-                        graph_config["callbacks"] = [self._langsmith_callback]
-                        graph_config["metadata"] = {
-                            "argos_operation": "session.interaction",
-                            "argos_correlation_id": str(
-                                current_correlation_id() or public_request_id
-                            ),
-                            "argos_correlation_key": correlation_key(
-                                current_correlation_id() or public_request_id
-                            ),
-                            "argos_session_id": str(session_id),
-                            "argos_interaction_id": str(interaction_id),
-                        }
-                    if isinstance(body, MessageCommand):
-                        with bind_interaction(session_id, interaction_id):
-                            with execution_limits_scope(execution_limits):
-                                async with asyncio.timeout(self._execution_timeout_seconds):
-                                    state = await executar_fluxo(
-                                        graph,
-                                        sanitized_input,
-                                        user_id=str(principal.user_id),
-                                        farm_id=str(authorized_farms[0]),
-                                        session_id=str(session_id),
-                                        interaction_id=str(interaction_id),
-                                        session_context=session_context,
-                                        recipient_selectors=recipient_selectors,
-                                        send_intent_requested=send_intent_requested,
-                                        config=graph_config,
-                                    )
-                    else:
-                        with bind_interaction(session_id, interaction_id):
-                            with execution_limits_scope(execution_limits):
-                                async with asyncio.timeout(self._execution_timeout_seconds):
-                                    state = await executar_resposta(
-                                        graph,
-                                        answer_text or sanitized_input,
-                                        question_id=str(body.question_id),
-                                        session_id=str(session_id),
-                                        interaction_id=str(interaction_id),
-                                        session_context=session_context,
-                                        recipient_selectors=recipient_selectors,
-                                        send_intent_requested=send_intent_requested,
-                                        send_intent_source_interaction_id=send_intent_source_interaction_id,
-                                        config=graph_config,
-                                    )
-                except BaseException as exc:
-                    if graph_recorder is not None:
-                        graph_recorder.finish(error=exc, error_origin=ErrorOrigin.APPLICATION)
-                    raise
-                else:
-                    if graph_recorder is not None:
-                        graph_recorder.finish()
-            except TimeoutError as exc:
-                logger.warning(
-                    "session interaction exceeded execution timeout",
-                    extra={"error_type": type(exc).__name__},
-                )
-                evidence = execution_limits.evidence_snapshot()
-                state = {
-                    "final_answer": (
-                        verified_evidence_fallback(
-                            evidence,
-                            unavailable_stage="processamento",
-                        )
-                        or "O processamento excedeu o tempo limite antes de obter "
-                        "um resultado verificável. Tente novamente."
-                    ),
-                    "errors": ["execution_timeout"],
-                }
-                failed = True
-            except Exception as exc:
-                logger.error(
-                    "session interaction graph failed",
-                    extra={"error_type": type(exc).__name__},
-                )
-                failed = True
-                state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
-
-            if lease_lost.is_set():
-                raise ApplicationError(
-                    ApplicationErrorCode.CONFLICT,
-                    "A posse da sessão expirou durante o processamento",
-                )
-
-            response = _response_from_state(
-                session_id=session_id,
-                interaction_id=interaction_id,
+            return _AcceptedInteraction(
+                principal=principal,
+                session=session,
+                body=body,
+                authorized_farms=authorized_farms,
+                sanitized_input=sanitized_input,
                 public_request_id=public_request_id,
-                state=state,
-                now=_utcnow(),
+                recipient_selectors=recipient_selectors,
+                send_intent_requested=send_intent_requested,
+                answer_text=answer_text,
+                send_intent_source_interaction_id=send_intent_source_interaction_id,
+                graph=graph,
+                accepted_message=accepted_message,
+                lease=lease,
+                lease_lost=lease_lost,
+                stop_renewal=stop_renewal,
+                heartbeat=heartbeat,
+                running=running,
             )
-            result_json = response.model_dump_json()
-            finished_at = _utcnow()
-            completed = replace(
-                running,
-                status=(
-                    InteractionStatus.FAILED
-                    if failed
-                    else InteractionStatus.DEGRADED
-                    if response.status == "degraded"
-                    else InteractionStatus.COMPLETED
-                ),
-                result_json=result_json,
-                updated_at=finished_at,
-                version=running.version + 1,
-            )
-            assistant_message = _assistant_message(
-                session_id=session_id,
-                interaction_id=interaction_id,
-                response=response,
-                created_at=finished_at,
-            )
-            committed_message = await self._session_work.finalize_interaction(
-                completed,
-                assistant_message,
-                lease,
-                expected_version=running.version,
-                now=finished_at,
-            )
-            if committed_message is None:
-                raise ApplicationError(
-                    ApplicationErrorCode.CONFLICT, "A posse da sessão mudou antes da finalização"
+        except BaseException:
+            await self._release_interaction_lease(session_id, lease, stop_renewal, heartbeat)
+            raise
+
+    async def _release_interaction_lease(
+        self,
+        session_id: UUID,
+        lease: ProcessingLease,
+        stop_renewal: asyncio.Event,
+        heartbeat: asyncio.Task[None],
+    ) -> None:
+        stop_renewal.set()
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
+        await self._sessions.release_lease(session_id, lease)
+
+    async def _build_interaction_context(
+        self, accepted: _AcceptedInteraction
+    ) -> _InteractionContext:
+        principal = accepted.principal
+        session_id = accepted.session.session_id
+        interaction_id = accepted.running.interaction_id
+        memory_input = _memory_input(accepted.body, accepted.sanitized_input, accepted.answer_text)
+        if memory_input is not None:
+            with bind_interaction(session_id, interaction_id):
+                await self._update_user_memory(
+                    user_id=principal.user_id,
+                    session_id=session_id,
+                    interaction_id=interaction_id,
+                    source_created_at=accepted.accepted_message.created_at,
+                    sanitized_user_input=memory_input,
                 )
-            summary_task = self._publish_due_summary(
+        session_context = await build_session_context(
+            session_id=session_id,
+            user_id=principal.user_id,
+            before_sequence=accepted.accepted_message.sequence,
+            conversations=self._conversations,
+            interactions=self._interactions,
+            summaries=self._summaries,
+            user_memory=self._user_memory,
+        )
+        correlation_id = current_correlation_id() or accepted.public_request_id
+        graph_config: dict[str, Any] = {
+            "configurable": {
+                "argos_user_id": str(principal.user_id),
+                "argos_firebase_uid": principal.firebase_uid,
+                "argos_authorized_property_ids": tuple(
+                    str(farm_id) for farm_id in accepted.authorized_farms
+                ),
+                "argos_request_id": str(current_correlation_id() or interaction_id),
+            }
+        }
+        if self._langsmith_callback is not None:
+            graph_config["callbacks"] = [self._langsmith_callback]
+            graph_config["metadata"] = {
+                "argos_operation": "session.interaction",
+                "argos_correlation_id": str(correlation_id),
+                "argos_correlation_key": correlation_key(correlation_id),
+                "argos_session_id": str(session_id),
+                "argos_interaction_id": str(interaction_id),
+            }
+        return _InteractionContext(session_context=session_context, graph_config=graph_config)
+
+    async def _execute_interaction(
+        self,
+        accepted: _AcceptedInteraction,
+        context: _InteractionContext,
+        execution_limits: ExecutionLimits,
+    ) -> dict[str, Any]:
+        from app.graph.workflow import executar_fluxo, executar_resposta
+
+        body = accepted.body
+        session_id = accepted.session.session_id
+        interaction_id = accepted.running.interaction_id
+        graph_recorder = (
+            OperationRecorder(
+                self._observation_collector,
+                operation_kind=OperationKind.GRAPH,
+                operation_name=(
+                    "graph.execute" if isinstance(body, MessageCommand) else "graph.resume"
+                ),
+                operation_phase=OperationPhase.EXECUTION,
+                observation_level=ObservationLevel.LOCAL_OPERATION,
+                error_origin=ErrorOrigin.APPLICATION,
                 session_id=session_id,
-                user_id=principal.user_id,
                 interaction_id=interaction_id,
-                user_message_count=accepted_message.user_message_number or 0,
-                through_sequence=committed_message.sequence,
             )
-            if self._background_task_scheduler is None:
-                await summary_task
-            else:
-                self._background_task_scheduler(summary_task)
-            return response
-        finally:
-            stop_renewal.set()
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
-            await self._sessions.release_lease(session_id, lease)
+            if self._observation_collector is not None
+            else None
+        )
+        try:
+            with bind_interaction(session_id, interaction_id):
+                with execution_limits_scope(execution_limits):
+                    async with asyncio.timeout(self._execution_timeout_seconds):
+                        if isinstance(body, MessageCommand):
+                            state = await executar_fluxo(
+                                accepted.graph,
+                                accepted.sanitized_input,
+                                user_id=str(accepted.principal.user_id),
+                                farm_id=str(accepted.authorized_farms[0]),
+                                session_id=str(session_id),
+                                interaction_id=str(interaction_id),
+                                session_context=context.session_context,
+                                recipient_selectors=accepted.recipient_selectors,
+                                send_intent_requested=accepted.send_intent_requested,
+                                config=context.graph_config,
+                            )
+                        else:
+                            state = await executar_resposta(
+                                accepted.graph,
+                                accepted.answer_text or accepted.sanitized_input,
+                                question_id=str(body.question_id),
+                                session_id=str(session_id),
+                                interaction_id=str(interaction_id),
+                                session_context=context.session_context,
+                                recipient_selectors=accepted.recipient_selectors,
+                                send_intent_requested=accepted.send_intent_requested,
+                                send_intent_source_interaction_id=(
+                                    accepted.send_intent_source_interaction_id
+                                ),
+                                config=context.graph_config,
+                            )
+        except BaseException as exc:
+            if graph_recorder is not None:
+                graph_recorder.finish(error=exc, error_origin=ErrorOrigin.APPLICATION)
+            raise
+        if graph_recorder is not None:
+            graph_recorder.finish()
+        return state
+
+    async def _finalize_interaction(
+        self,
+        accepted: _AcceptedInteraction,
+        state: dict[str, Any],
+        *,
+        failed: bool,
+    ) -> InteractionOutcome:
+        if accepted.lease_lost.is_set():
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT,
+                "A posse da sessão expirou durante o processamento",
+            )
+
+        session_id = accepted.session.session_id
+        interaction_id = accepted.running.interaction_id
+        response = _response_from_state(
+            session_id=session_id,
+            interaction_id=interaction_id,
+            public_request_id=accepted.public_request_id,
+            state=state,
+            now=_utcnow(),
+        )
+        finished_at = _utcnow()
+        completed = replace(
+            accepted.running,
+            status=(
+                InteractionStatus.FAILED
+                if failed
+                else InteractionStatus.DEGRADED
+                if response.status == "degraded"
+                else InteractionStatus.COMPLETED
+            ),
+            result_json=response.model_dump_json(),
+            updated_at=finished_at,
+            version=accepted.running.version + 1,
+        )
+        assistant_message = _assistant_message(
+            session_id=session_id,
+            interaction_id=interaction_id,
+            response=response,
+            created_at=finished_at,
+        )
+        committed_message = await self._session_work.finalize_interaction(
+            completed,
+            assistant_message,
+            accepted.lease,
+            expected_version=accepted.running.version,
+            now=finished_at,
+        )
+        if committed_message is None:
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT, "A posse da sessão mudou antes da finalização"
+            )
+        summary_task = self._publish_due_summary(
+            session_id=session_id,
+            user_id=accepted.principal.user_id,
+            interaction_id=interaction_id,
+            user_message_count=accepted.accepted_message.user_message_number or 0,
+            through_sequence=committed_message.sequence,
+        )
+        if self._background_task_scheduler is None:
+            await summary_task
+        else:
+            self._background_task_scheduler(summary_task)
+        return response
 
     async def _publish_due_summary(
         self,

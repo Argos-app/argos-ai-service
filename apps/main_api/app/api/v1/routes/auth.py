@@ -1,12 +1,11 @@
 """Rotas de autenticação do serviço principal."""
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
 from app.api.v1.models.auth import AccessTokenResponse
-from app.domain.user_access import UserAccess
+from app.application.user_access_policy import is_user_enabled_for_ai
 from app.infrastructure.firebase_auth import (
     FirebaseVerificationUnavailable,
     InvalidFirebaseIdToken,
@@ -24,17 +23,6 @@ def _bearer_token(authorization: str | None) -> str:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token.strip()
-
-
-def _is_enabled_with_farms(user: UserAccess) -> bool:
-    if not user.active or not user.permission_active or not user.farms:
-        return False
-    if user.blocked_until is None:
-        return True
-    blocked_until = user.blocked_until
-    if blocked_until.tzinfo is None:
-        blocked_until = blocked_until.replace(tzinfo=UTC)
-    return blocked_until <= datetime.now(UTC)
 
 
 @router.post("/firebase", response_model=AccessTokenResponse)
@@ -73,7 +61,7 @@ async def authenticate_firebase(
         ) from exc
 
     user = result.user
-    if user is None or not _is_enabled_with_farms(user):
+    if user is None or not is_user_enabled_for_ai(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuário sem cadastro habilitado ou sem fazendas autorizadas",

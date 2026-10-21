@@ -1,8 +1,8 @@
-"""Erros seguros de autenticação delegada e autorização."""
+"""Erros locais de autorização e erro compartilhado de contexto delegado."""
 
+from packages.security.errors import AccessContextError
 
-class AccessContextError(Exception):
-    """Contexto de usuário ausente, inválido ou expirado."""
+__all__ = ["AccessContextError", "AccessDeniedError"]
 
 
 class AccessDeniedError(Exception):
