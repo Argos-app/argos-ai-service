@@ -1,8 +1,10 @@
 """Fluxos de sessão, deduplicação, contador e lease do serviço de aplicação."""
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -376,6 +378,100 @@ async def test_message_is_sanitized_and_replay_counts_once():
     assert len(conversations.messages) == 2
     assert conversations.messages[0].sanitized_content.endswith("usuario@example.invalid")
     assert all(message.sequence == index for index, message in enumerate(conversations.messages, 1))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["context", "graph"])
+@pytest.mark.parametrize("renewal", ["refused", "error", "timeout"])
+async def test_lease_loss_cancels_processing_before_finalization(
+    monkeypatch, caplog, phase, renewal
+):
+    graph = FakeGraph()
+    service, sessions, interactions, conversations = _service(graph)
+    service._renew_seconds = 0.001
+    principal = _principal()
+    session = await service.create_session(principal)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def blocked_phase(*args, **kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    async def renew(*args, **kwargs):
+        await started.wait()
+        if renewal == "error":
+            raise RuntimeError("database unavailable")
+        if renewal == "timeout":
+            raise TimeoutError("database timeout")
+        return False
+
+    target, method = (
+        (service, "_build_interaction_context") if phase == "context" else (graph, "ainvoke")
+    )
+    monkeypatch.setattr(target, method, blocked_phase)
+    monkeypatch.setattr(sessions, "renew_lease", renew)
+    finalize = AsyncMock()
+    release = AsyncMock(wraps=sessions.release_lease)
+    monkeypatch.setattr(service, "_finalize_interaction", finalize)
+    monkeypatch.setattr(sessions, "release_lease", release)
+
+    with pytest.raises(ApplicationError) as caught:
+        await asyncio.wait_for(
+            service.create_interaction(
+                principal,
+                session.session_id,
+                MessageCommand(kind="message", client_message_id=uuid4(), message="Consultar lote"),
+            ),
+            timeout=5,
+        )
+
+    assert caught.value.code == ApplicationErrorCode.CONFLICT
+    assert stopped.is_set()
+    finalize.assert_not_awaited()
+    release.assert_awaited_once()
+    assert sessions.records[session.session_id].processing_lease is None
+    assert len(conversations.messages) == 1
+    assert next(iter(interactions.records.values())).status == InteractionStatus.RUNNING
+    if renewal != "refused":
+        assert "session lease renewal failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_cancellation_stops_processing_and_releases_lease(monkeypatch):
+    service, sessions, _, _ = _service(FakeGraph())
+    principal = _principal()
+    session = await service.create_session(principal)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def blocked_context(*args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(service, "_build_interaction_context", blocked_context)
+    task = asyncio.create_task(
+        service.create_interaction(
+            principal,
+            session.session_id,
+            MessageCommand(kind="message", client_message_id=uuid4(), message="Consultar lote"),
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert task.cancelled()
+    assert stopped.is_set()
+    assert sessions.records[session.session_id].processing_lease is None
 
 
 @pytest.mark.asyncio

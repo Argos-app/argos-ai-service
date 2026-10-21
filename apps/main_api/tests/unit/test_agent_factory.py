@@ -35,6 +35,7 @@ from app.infrastructure.agents.langchain_factory import AgentResponseError
 from app.infrastructure.agents.model_factory import ModelRuntimeConfigurationError
 from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.infrastructure.mcp.client import McpClients
+from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.ports.agent import AgentId
 
 
@@ -725,13 +726,15 @@ async def test_agent_passes_context_to_runnable(monkeypatch) -> None:
         },
     )
 
-    assert runnable.last_config == {
-        "configurable": {
-            "user_id": "user-demo",
-            "farm_id": "farm-demo",
-            "session_id": "session-demo",
-        }
+    assert runnable.last_config is not None
+    assert runnable.last_config["configurable"] == {
+        "user_id": "user-demo",
+        "farm_id": "farm-demo",
+        "session_id": "session-demo",
     }
+    assert any(
+        isinstance(callback, ModelUsageCallback) for callback in runnable.last_config["callbacks"]
+    )
 
 
 @pytest.mark.asyncio

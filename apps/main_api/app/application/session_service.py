@@ -236,37 +236,60 @@ class SessionApplicationService:
             if isinstance(accepted, InteractionOutcome):
                 return accepted
 
-            execution_limits = ExecutionLimits(
-                max_model_calls=self._execution_max_model_calls,
-                max_tool_calls=self._execution_max_tool_calls,
-            )
-            failed = False
+            if accepted.lease_lost.is_set():
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT,
+                    "A posse da sessão foi perdida durante o processamento",
+                )
+            processing = asyncio.create_task(self._process_accepted_interaction(accepted))
+            lease_watch = asyncio.create_task(accepted.lease_lost.wait())
             try:
-                context = await self._build_interaction_context(accepted)
-                state = await self._execute_interaction(accepted, context, execution_limits)
-            except TimeoutError as exc:
-                logger.warning(
-                    "session interaction exceeded execution timeout",
-                    extra={"error_type": type(exc).__name__},
-                )
-                evidence = execution_limits.evidence_snapshot()
-                state = {
-                    "final_answer": (
-                        verified_evidence_fallback(evidence, unavailable_stage="processamento")
-                        or "O processamento excedeu o tempo limite antes de obter "
-                        "um resultado verificável. Tente novamente."
-                    ),
-                    "errors": ["execution_timeout"],
-                }
-                failed = True
-            except Exception as exc:
-                logger.error(
-                    "session interaction graph failed",
-                    extra={"error_type": type(exc).__name__},
-                )
-                state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
-                failed = True
-            return await self._finalize_interaction(accepted, state, failed=failed)
+                await asyncio.wait((processing, lease_watch), return_when=asyncio.FIRST_COMPLETED)
+                if accepted.lease_lost.is_set():
+                    raise ApplicationError(
+                        ApplicationErrorCode.CONFLICT,
+                        "A posse da sessão foi perdida durante o processamento",
+                    )
+                return await processing
+            finally:
+                processing.cancel()
+                lease_watch.cancel()
+                await asyncio.gather(processing, lease_watch, return_exceptions=True)
+
+    async def _process_accepted_interaction(
+        self, accepted: _AcceptedInteraction
+    ) -> InteractionOutcome:
+        execution_limits = ExecutionLimits(
+            max_model_calls=self._execution_max_model_calls,
+            max_tool_calls=self._execution_max_tool_calls,
+        )
+        failed = False
+        try:
+            context = await self._build_interaction_context(accepted)
+            state = await self._execute_interaction(accepted, context, execution_limits)
+        except TimeoutError as exc:
+            logger.warning(
+                "session interaction exceeded execution timeout",
+                extra={"error_type": type(exc).__name__},
+            )
+            evidence = execution_limits.evidence_snapshot()
+            state = {
+                "final_answer": (
+                    verified_evidence_fallback(evidence, unavailable_stage="processamento")
+                    or "O processamento excedeu o tempo limite antes de obter "
+                    "um resultado verificável. Tente novamente."
+                ),
+                "errors": ["execution_timeout"],
+            }
+            failed = True
+        except Exception as exc:
+            logger.error(
+                "session interaction graph failed",
+                extra={"error_type": type(exc).__name__},
+            )
+            state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
+            failed = True
+        return await self._finalize_interaction(accepted, state, failed=failed)
 
     @asynccontextmanager
     async def _accept_interaction(
@@ -947,12 +970,19 @@ class SessionApplicationService:
                 return
             except TimeoutError:
                 now = _utcnow()
-                renewed = await self._sessions.renew_lease(
-                    session_id,
-                    lease,
-                    now=now,
-                    expires_at=now + timedelta(seconds=self._lease_seconds),
-                )
+                try:
+                    renewed = await self._sessions.renew_lease(
+                        session_id,
+                        lease,
+                        now=now,
+                        expires_at=now + timedelta(seconds=self._lease_seconds),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "session lease renewal failed",
+                        extra={"session_id": str(session_id), "error_type": type(exc).__name__},
+                    )
+                    renewed = False
                 if not renewed:
                     lease_lost.set()
                     return
