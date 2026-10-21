@@ -141,7 +141,10 @@ As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
 `GET /v1/sessions/{session_id}/messages`. A consulta de mensagens não chama o
 LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
 (padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
-público.
+público. O POST de interação retorna `created_at` da mensagem do assistente,
+além de `status` e `degradation_reasons`; o GET do histórico também retorna os
+metadados de degradação disponíveis nas mensagens visíveis do assistente, para
+que o aplicativo preserve o aviso de resposta parcial ao reabrir a conversa.
 
 O contrato OpenAPI e exemplos de autenticação, erros e correlação estão em
 [`docs/api-main-api.md`](docs/api-main-api.md) e

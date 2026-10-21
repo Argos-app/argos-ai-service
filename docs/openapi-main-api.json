@@ -349,6 +349,19 @@
   },
   "components": {
     "schemas": {
+      "AccessTokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Access Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["access_token"],
+        "title": "AccessTokenResponse"
+      },
       "AnswerChoice": {
         "properties": {
           "kind": {
@@ -499,6 +512,18 @@
             },
             "type": "array",
             "title": "Degradation Reasons"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "session_id": {
             "type": "string",
@@ -762,6 +787,25 @@
             "type": "boolean",
             "title": "Redacted",
             "default": false
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["completed", "degraded"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "degradation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degradation Reasons"
           }
         },
         "additionalProperties": false,
@@ -855,19 +899,6 @@
         "type": "object",
         "required": ["loc", "msg", "type"],
         "title": "ValidationError"
-      },
-      "AccessTokenResponse": {
-        "properties": {
-          "access_token": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Access Token"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": ["access_token"],
-        "title": "AccessTokenResponse"
       }
     }
   }

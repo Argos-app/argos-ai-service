@@ -1,8 +1,9 @@
 # Autenticação Firebase: identidade e regra de acesso
 
-Este documento registra a primeira etapa da integração de autenticação do
-serviço de IA: a chave de identidade do usuário, a política para cadastros
-legados e a divisão entre autenticação e autorização.
+Este documento descreve o fluxo implementado de autenticação Firebase do serviço
+de IA, a política para cadastros legados e a divisão entre autenticação e
+autorização. A rota de troca emite o JWT próprio; as rotas protegidas recarregam
+o cadastro e o acesso às fazendas no PostgreSQL.
 
 ## Evidência disponível
 
