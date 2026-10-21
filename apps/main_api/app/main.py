@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.v1.router import router as v1_router
 from app.application.errors import ApplicationError, ApplicationErrorCode
@@ -49,6 +50,63 @@ from packages.observability import (
     observation_scope,
 )
 from packages.security.signatures import TrustedEd25519SignatureVerifier
+
+
+class BodySizeLimitMiddleware:
+    """Rejeita corpos grandes após ler no máximo o limite configurado."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+
+        raw_content_length = next(
+            (value for name, value in scope.get("headers", ()) if name == b"content-length"),
+            None,
+        )
+        if raw_content_length is not None:
+            try:
+                if int(raw_content_length) > self.max_bytes:
+                    await JSONResponse(
+                        status_code=413,
+                        content={"detail": "Corpo excede 32 KiB"},
+                    )(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > self.max_bytes:
+                await JSONResponse(
+                    status_code=413,
+                    content={"detail": "Corpo excede 32 KiB"},
+                )(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
 
 
 def create_app(
@@ -190,14 +248,6 @@ def create_app(
         if configured.mcp_delegation_key_id and configured.mcp_delegation_private_key
         else None
     )
-
-    @app.middleware("http")
-    async def limit_body(request: Request, call_next):
-        if request.method in {"POST", "PUT", "PATCH"}:
-            body = await request.body()
-            if len(body) > 32 * 1024:
-                return JSONResponse(status_code=413, content={"detail": "Corpo excede 32 KiB"})
-        return await call_next(request)
 
     @app.middleware("http")
     async def observe_http(request: Request, call_next):
@@ -354,6 +404,7 @@ def create_app(
         return schema
 
     app.openapi = openapi_with_correlation_header
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=32 * 1024)
     return app
 
 

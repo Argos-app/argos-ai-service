@@ -86,6 +86,8 @@ class FirebaseAdminIdTokenVerifier:
         except ValueError as exc:
             raise InvalidFirebaseIdToken("Firebase ID token inválido") from exc
         except self._firebase_error_type as exc:
+            if isinstance(exc, getattr(self._auth, "UserNotFoundError", ())):
+                raise InvalidFirebaseIdToken("Firebase ID token inválido") from exc
             raise FirebaseVerificationUnavailable(
                 "Firebase Auth indisponível para validar o token"
             ) from exc

@@ -65,6 +65,22 @@ Firebase; nome, e-mail, permissões e fazendas não são incluídos. As fazendas
 recarregadas do banco em cada chamada protegida. Tokens assinados pelo backend
 de identidade não são mais aceitos.
 
+Para montar um JSON de service account no `main_api`, defina
+`MAIN_API_FIREBASE_PROJECT_ID` e `MAIN_API_FIREBASE_CREDENTIALS_HOST_PATH` no
+`.env`. O arquivo `compose.firebase.yaml` monta a credencial em
+`/run/secrets/firebase-service-account.json` como somente leitura e configura
+`MAIN_API_FIREBASE_CREDENTIALS_FILE` e `GOOGLE_APPLICATION_CREDENTIALS` com o
+caminho dentro do container. Suba a pilha incluindo o override:
+
+```powershell
+docker compose --file compose.yaml --file compose.firebase.yaml --profile apps config --quiet
+docker compose --file compose.yaml --file compose.firebase.yaml --profile apps up --build -d
+```
+
+O caminho do host não é passado ao container. Para usar ADC, não inclua o
+override e configure o mecanismo de credenciais do ambiente onde o container
+executa.
+
 ## Banco PostgreSQL e dados sintéticos
 
 Em um volume PostgreSQL novo, a imagem executa, em ordem, os módulos

@@ -339,6 +339,10 @@ class SessionApplicationService:
 
             failed = False
             try:
+                execution_limits = ExecutionLimits(
+                    max_model_calls=self._execution_max_model_calls,
+                    max_tool_calls=self._execution_max_tool_calls,
+                )
                 memory_input = _memory_input(body, sanitized_input, answer_text)
                 if memory_input is not None:
                     with bind_interaction(session_id, interaction_id):
@@ -380,10 +384,6 @@ class SessionApplicationService:
                     else None
                 )
                 try:
-                    execution_limits = ExecutionLimits(
-                        max_model_calls=self._execution_max_model_calls,
-                        max_tool_calls=self._execution_max_tool_calls,
-                    )
                     graph_config = {
                         "configurable": {
                             "argos_user_id": str(principal.user_id),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -23,6 +24,7 @@ from packages.observability import (
     UsageAvailability,
     UsageSource,
     billing_with_fallback,
+    current_correlation_id,
 )
 
 from .recording import OperationRecorder
@@ -38,6 +40,7 @@ _PROVIDER_MODULES = {
     "mistralai": "mistral",
     "cohere": "cohere",
 }
+_LOGGER = logging.getLogger(__name__)
 
 
 def _safe_identifier(value: Any) -> str | None:
@@ -81,6 +84,55 @@ def _mapping(value: Any) -> Mapping[str, Any] | None:
 
 def _integer(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _provider_http_status(error: BaseException) -> int | None:
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        status = getattr(current, "status_code", None)
+        if isinstance(status, int) and 100 <= status <= 599:
+            return status
+        response_status = getattr(getattr(current, "response", None), "status_code", None)
+        if isinstance(response_status, int) and 100 <= response_status <= 599:
+            return response_status
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _provider_request_id(error: BaseException) -> str | None:
+    current: BaseException | None = error
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        request_id = _safe_identifier(getattr(current, "request_id", None))
+        if request_id is not None:
+            return request_id
+        headers = getattr(getattr(current, "response", None), "headers", None)
+        if isinstance(headers, Mapping):
+            request_id = _safe_identifier(headers.get("x-request-id"))
+            if request_id is not None:
+                return request_id
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _log_provider_failure(
+    *, agent: str | None, provider: str, model: str | None, error: BaseException
+) -> None:
+    correlation_id = current_correlation_id()
+    _LOGGER.warning(
+        "provider model request failed agent=%s provider=%s model=%s http_status=%s "
+        "request_id=%s correlation_id=%s error_type=%s",
+        agent or "unknown",
+        provider,
+        model or "unknown",
+        _provider_http_status(error) or "unknown",
+        _provider_request_id(error) or "unknown",
+        correlation_id or "unknown",
+        type(error).__name__,
+    )
 
 
 def _first_count(sources: tuple[Mapping[str, Any], ...], keys: tuple[str, ...]) -> int | None:
@@ -236,7 +288,7 @@ class ModelUsageCallback(AsyncCallbackHandler):
 
     def __init__(
         self,
-        collector: ObservationCollector,
+        collector: ObservationCollector | None,
         *,
         agent: str | None = None,
     ) -> None:
@@ -244,6 +296,7 @@ class ModelUsageCallback(AsyncCallbackHandler):
         self._collector = collector
         self._agent = agent
         self._recorders: dict[UUID, OperationRecorder] = {}
+        self._requests: dict[UUID, tuple[str, str | None]] = {}
 
     async def on_chat_model_start(
         self,
@@ -270,6 +323,7 @@ class ModelUsageCallback(AsyncCallbackHandler):
     async def on_llm_end(self, response: Any, *, run_id: UUID, **kwargs: Any) -> None:
         del kwargs
         recorder = self._recorders.pop(run_id, None)
+        self._requests.pop(run_id, None)
         if recorder is None:
             return
         message = self._first_message(response)
@@ -294,6 +348,15 @@ class ModelUsageCallback(AsyncCallbackHandler):
     ) -> None:
         del kwargs
         recorder = self._recorders.pop(run_id, None)
+        provider_model = self._requests.pop(run_id, None)
+        if provider_model is not None:
+            provider, model = provider_model
+            _log_provider_failure(
+                agent=self._agent,
+                provider=provider,
+                model=model,
+                error=error,
+            )
         if recorder is not None:
             recorder.finish(
                 error=error,
@@ -314,6 +377,14 @@ class ModelUsageCallback(AsyncCallbackHandler):
     def finish_pending(self, error: BaseException) -> None:
         """Close provider observations when cancellation bypasses LangChain callbacks."""
         cancelled = isinstance(error, asyncio.CancelledError)
+        for run_id, (provider, model) in tuple(self._requests.items()):
+            _log_provider_failure(
+                agent=self._agent,
+                provider=provider,
+                model=model,
+                error=error,
+            )
+            self._requests.pop(run_id, None)
         for run_id, recorder in tuple(self._recorders.items()):
             recorder.finish(
                 error=error,
@@ -330,9 +401,12 @@ class ModelUsageCallback(AsyncCallbackHandler):
         run_id: UUID,
         callback_kwargs: Mapping[str, Any],
     ) -> None:
-        if run_id in self._recorders:
+        if run_id in self._requests:
             return
         provider, model = _model_identity(serialized, callback_kwargs)
+        self._requests[run_id] = (provider, model)
+        if self._collector is None:
+            return
         self._recorders[run_id] = OperationRecorder(
             self._collector,
             operation_kind=OperationKind.MODEL,
