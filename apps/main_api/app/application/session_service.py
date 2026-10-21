@@ -204,9 +204,10 @@ class SessionApplicationService:
         if session is None:
             raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
         authorized_farms = _authorized_farm_ids(session, principal.farm_ids)
-        if not authorized_farms:
+        if not _has_full_farm_access(session, principal.farm_ids):
             raise ApplicationError(
-                ApplicationErrorCode.FORBIDDEN, "Nenhuma fazenda desta sessão segue autorizada"
+                ApplicationErrorCode.FORBIDDEN,
+                "A sessão perdeu acesso a uma ou mais fazendas; crie uma nova sessão",
             )
 
         (
@@ -872,6 +873,12 @@ def _authorized_farm_ids(
 ) -> tuple[UUID, ...]:
     current = set(current_farms)
     return tuple(farm_id for farm_id in session.farm_ids if farm_id in current)
+
+
+def _has_full_farm_access(session: SessionRecord, current_farms: Collection[UUID]) -> bool:
+    """Novas interações exigem acesso atual a todas as fazendas originais."""
+    original = set(session.farm_ids)
+    return bool(original) and original.issubset(set(current_farms))
 
 
 def _session_response(

@@ -379,6 +379,63 @@ async def test_message_is_sanitized_and_replay_counts_once():
 
 
 @pytest.mark.asyncio
+async def test_partial_farm_revocation_blocks_replaying_persisted_interaction():
+    graph = FakeGraph()
+    service, sessions, _, _ = _service(graph)
+    farm_ids = (uuid4(), uuid4())
+    principal = ActorContext(user_id=uuid4(), farm_ids=farm_ids)
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte os dados da fazenda.",
+    )
+    first = await service.create_interaction(principal, session.session_id, request)
+    partially_authorized = ActorContext(user_id=principal.user_id, farm_ids=(farm_ids[0],))
+
+    with pytest.raises(ApplicationError) as denied:
+        await service.create_interaction(partially_authorized, session.session_id, request)
+
+    assert denied.value.code == ApplicationErrorCode.FORBIDDEN
+    assert "nova sessão" in denied.value.detail
+    assert graph.calls == 1
+    assert sessions.records[session.session_id].user_message_count == 1
+    assert first.session_id == session.session_id
+
+
+@pytest.mark.asyncio
+async def test_partial_farm_revocation_blocks_resuming_a_persisted_question():
+    graph = FakeGraph()
+    service, _, _, _ = _service(graph)
+    farm_ids = (uuid4(), uuid4())
+    principal = ActorContext(user_id=uuid4(), farm_ids=farm_ids)
+    session = await service.create_session(principal)
+    initial = await service.create_interaction(
+        principal,
+        session.session_id,
+        MessageCommand(
+            kind="message",
+            client_message_id=uuid4(),
+            message="Consulte os dados da fazenda.",
+        ),
+    )
+    answer = AnswerCommand(
+        kind="answer",
+        interaction_id=initial.interaction_id,
+        question_id=initial.response.question_id,
+        answer=TextAnswer(kind="text", text="Últimos 30 dias"),
+    )
+    partially_authorized = ActorContext(user_id=principal.user_id, farm_ids=(farm_ids[0],))
+
+    with pytest.raises(ApplicationError) as denied:
+        await service.create_interaction(partially_authorized, session.session_id, answer)
+
+    assert denied.value.code == ApplicationErrorCode.FORBIDDEN
+    assert graph.calls == 1
+    assert graph.state_configs == []
+
+
+@pytest.mark.asyncio
 async def test_langsmith_trace_metadata_contains_interaction_correlation_ids():
     graph = FakeGraph()
     callback = object()
