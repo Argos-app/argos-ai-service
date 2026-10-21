@@ -25,9 +25,7 @@ def complete_settings(**overrides: object) -> Settings:
         "sql_dsn": "postgresql://readonly@localhost/argos",
         "mongo_uri": "mongodb://readonly@localhost:27017",
         "mongo_database": "argos",
-        "mongo_cattle_collection": "bois",
         "mongo_relational_id_format": "string",
-        "mongo_medicine_collection": "medicamentos",
         "mongo_medicine_id_format": "string",
         "internal_service_token": "internal-test-token",
         "mcp_auth_issuer_url": "https://issuer.example.test",
@@ -39,6 +37,16 @@ def complete_settings(**overrides: object) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]
+
+
+def test_mongo_collection_names_are_fixed(monkeypatch):
+    monkeypatch.setenv("MCP_DATA_MONGO_CATTLE_COLLECTION", "override_cattle")
+    monkeypatch.setenv("MCP_DATA_MONGO_MEDICINE_COLLECTION", "override_medicine")
+
+    settings = Settings.from_env()
+
+    assert settings.mongo_cattle_collection == "cattle_documents"
+    assert settings.mongo_medicine_collection == "medicine_documents"
 
 
 def test_runtime_rejects_missing_read_only_connections_and_auth() -> None:

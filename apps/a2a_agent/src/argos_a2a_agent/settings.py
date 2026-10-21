@@ -70,7 +70,7 @@ class Settings:
     a2a_endpoint_url: str | None = None
     observability_mongo_uri: str | None = field(default=None, repr=False)
     observability_mongo_database: str = "argos_ai"
-    observability_collection: str | None = None
+    observability_collection: str = "ai_a2a_observations"
     observability_mongo_server_selection_timeout_ms: int = 5_000
     observability_mongo_write_timeout_ms: int = 5_000
     observability_queue_max_items: int = 2_048
@@ -157,7 +157,6 @@ class Settings:
             a2a_endpoint_url=os.getenv("A2A_ENDPOINT_URL"),
             observability_mongo_uri=os.getenv("A2A_OBSERVABILITY_MONGO_URI") or None,
             observability_mongo_database=os.getenv("A2A_OBSERVABILITY_MONGO_DATABASE", "argos_ai"),
-            observability_collection=os.getenv("A2A_OBSERVABILITY_COLLECTION") or None,
             observability_mongo_server_selection_timeout_ms=_observability_int(
                 "A2A_OBSERVABILITY_MONGO_SERVER_SELECTION_TIMEOUT_MS", 5_000
             ),
@@ -235,11 +234,6 @@ class Settings:
         ]
         if not self.trusted_delegation_keys:
             missing.append("A2A_TRUSTED_DELEGATION_KEYS")
-        if (self.observability_mongo_uri is None) != (self.observability_collection is None):
-            missing.append(
-                "A2A_OBSERVABILITY_MONGO_URI e A2A_OBSERVABILITY_COLLECTION "
-                "devem ser configuradas juntas"
-            )
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.a2a_port <= 65535:
@@ -384,17 +378,17 @@ class Settings:
                 valid_langsmith_endpoint = False
             if not valid_langsmith_endpoint:
                 raise ValueError("A2A_LANGSMITH_ENDPOINT deve usar HTTPS")
-        if self.observability_collection is not None:
-            collection = self.observability_collection
-            if (
-                not collection
-                or collection.strip() != collection
-                or collection.startswith("system.")
-                or "$" in collection
-                or "\x00" in collection
-                or len(collection.encode("utf-8")) > 120
-            ):
-                raise ValueError("A2A_OBSERVABILITY_COLLECTION inválida")
+        collection = self.observability_collection
+        if (
+            not collection
+            or collection.strip() != collection
+            or collection.startswith("system.")
+            or "$" in collection
+            or "\x00" in collection
+            or len(collection.encode("utf-8")) > 120
+        ):
+            raise ValueError("collection de observabilidade A2A inválida")
+        if self.observability_mongo_uri is not None:
             try:
                 mongo_uri = urlsplit(self.observability_mongo_uri or "")
                 valid_mongo_uri = mongo_uri.scheme in {"mongodb", "mongodb+srv"} and bool(

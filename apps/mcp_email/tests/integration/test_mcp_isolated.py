@@ -81,11 +81,13 @@ async def test_real_tools_persist_send_once_and_recover_after_restart(mcp_harnes
             await session.call_tool("prepare_report", {"payload": preparation_payload(harness)})
         )
         assert prepared["status"] == "prepared"
-        report = await harness.database.prepared_reports.find_one({"_id": prepared["report_id"]})
+        report = await harness.database.ai_email_prepared_reports.find_one(
+            {"_id": prepared["report_id"]}
+        )
         assert report["body"] == prepared["body"]
         assert report["recipients"][0]["email"] == harness.recipient_email
 
-        indexes = await harness.database.email_dispatches.index_information()
+        indexes = await harness.database.ai_email_dispatches.index_information()
         assert indexes["uq_dispatch_idempotency_key"]["unique"] is True
         send_payload = {
             "report_id": prepared["report_id"],
@@ -104,7 +106,7 @@ async def test_real_tools_persist_send_once_and_recover_after_restart(mcp_harnes
             await session.call_tool("get_report_status", {"payload": status_payload})
         )
         assert status["status"] == "accepted"
-        operation = await harness.database.email_dispatches.find_one({"_id": operation_id})
+        operation = await harness.database.ai_email_dispatches.find_one({"_id": operation_id})
         assert operation["state"] == "accepted"
         assert operation["send_claimed"] is True
 
@@ -129,7 +131,7 @@ async def test_real_tools_persist_send_once_and_recover_after_restart(mcp_harnes
         assert restored["status"] == repeated["status"] == "accepted"
         assert restored["operation_id"] == repeated["operation_id"] == operation_id
     assert len(await harness.messages()) == 1
-    assert await harness.database.email_dispatches.count_documents({}) == 1
+    assert await harness.database.ai_email_dispatches.count_documents({}) == 1
 
 
 async def test_transport_auth_and_altered_signature_are_rejected(mcp_harness):
@@ -150,6 +152,6 @@ async def test_transport_auth_and_altered_signature_are_rejected(mcp_harness):
     async with harness.client() as session:
         result = await session.call_tool("prepare_report", {"payload": payload})
         assert result.isError
-    assert await harness.database.prepared_reports.count_documents({}) == 0
-    assert await harness.database.email_dispatches.count_documents({}) == 0
+    assert await harness.database.ai_email_prepared_reports.count_documents({}) == 0
+    assert await harness.database.ai_email_dispatches.count_documents({}) == 0
     assert await harness.messages() == []

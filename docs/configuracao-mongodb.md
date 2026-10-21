@@ -8,19 +8,19 @@ collections nos parâmetros próprios do serviço.
 
 ## Variáveis por sistema e modo
 
-| Sistema       | Variáveis Mongo                                                                                                                                               | Individual no host                                                                                                                                                  | Integrado em Compose                                                                      |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `main_api`    | `MAIN_API_MONGO_URI`, `MAIN_API_MONGO_DATABASE`, `MAIN_API_MONGO_COLLECTION_*`, `MAIN_API_OBSERVABILITY_COLLECTION`                                           | Use o endereço publicado do replica set e `directConnection=true` quando o replica set anunciar um DNS interno inacessível pelo host. O processo exige replica set. | Compose integrado habilita `ai_observations` por padrão no mesmo Mongo/database.          |
-| MCP de dados  | `MCP_DATA_MONGO_URI`, `MCP_DATA_MONGO_DATABASE`, `MCP_DATA_MONGO_CATTLE_COLLECTION`, `MCP_DATA_MONGO_MEDICINE_COLLECTION` e os formatos de ID correspondentes | Use o endpoint Mongo acessível pelo host e informe os nomes reais das collections de negócio.                                                                       | Use DNS do Mongo na rede do Compose e mantenha os nomes reais das collections de negócio. |
-| MCP de e-mail | `MCP_EMAIL_MONGO_URI`, `MCP_EMAIL_MONGO_DATABASE`, `MCP_EMAIL_REPORTS_COLLECTION`, `MCP_EMAIL_DISPATCH_COLLECTION`                                            | Use o endpoint acessível pelo host.                                                                                                                                 | Use DNS do Mongo na rede do Compose.                                                      |
-| A2A           | `A2A_OBSERVABILITY_MONGO_URI`, `A2A_OBSERVABILITY_MONGO_DATABASE`, `A2A_OBSERVABILITY_COLLECTION`                                                             | Opcional; URI e collection precisam ser fornecidas juntas.                                                                                                          | Compose integrado habilita `ai_a2a_observations` no mesmo Mongo/database.                 |
+| Sistema       | Variáveis Mongo                                                                     | Individual no host                                                                                                                                                  | Integrado em Compose                                                         |
+| ------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `main_api`    | `MAIN_API_MONGO_URI`, `MAIN_API_MONGO_DATABASE`                                     | Use o endereço publicado do replica set e `directConnection=true` quando o replica set anunciar um DNS interno inacessível pelo host. O processo exige replica set. | Usa collections fixas, incluindo `ai_observations`, no mesmo Mongo/database. |
+| MCP de dados  | `MCP_DATA_MONGO_URI`, `MCP_DATA_MONGO_DATABASE` e os formatos de ID correspondentes | Use endpoint Mongo acessível pelo host. As collections fixas são `cattle_documents` e `medicine_documents`; o database diferencia os ambientes.                     | Use DNS do Mongo na rede do Compose; os nomes das collections são os mesmos. |
+| MCP de e-mail | `MCP_EMAIL_MONGO_URI`, `MCP_EMAIL_MONGO_DATABASE`                                   | Use o endpoint acessível pelo host.                                                                                                                                 | Use DNS do Mongo na rede do Compose.                                         |
+| A2A           | `A2A_OBSERVABILITY_MONGO_URI`, `A2A_OBSERVABILITY_MONGO_DATABASE`                   | Opcional; sem URI, a persistência de observabilidade fica desativada. A collection fixa é `ai_a2a_observations`.                                                    | Compose integrado habilita `ai_a2a_observations` no mesmo Mongo/database.    |
 
 `MAIN_API_MONGO_DATABASE`, `MCP_DATA_MONGO_DATABASE` e
 `MCP_EMAIL_MONGO_DATABASE` têm padrão `argos_ai`. Configure o mesmo valor nos
 três serviços. O A2A usa `argos_ai` quando sua persistência opcional é ligada.
-As collections de persistência principal e e-mail têm nomes padrão prefixados
-por `ai_`; as duas collections de origem do MCP de dados devem ser nomeadas
-explicitamente para corresponder ao ambiente.
+Os nomes das collections são fixos no código para manter consistência entre
+serviços, migrations operacionais e consultas BI; alterar esses nomes exige uma
+mudança versionada no serviço.
 
 O dicionário das collections, campos, origem, relações e retenção está em
 [dicionario-mongodb-bi.md](dicionario-mongodb-bi.md). A consulta operacional de
@@ -39,8 +39,7 @@ passados aos containers.
 
 ## Collections do `main_api`
 
-Cada nome pode ser sobrescrito com a variável `MAIN_API_MONGO_COLLECTION_`
-seguida do nome em maiúsculas:
+Os nomes são fixos no código e não podem ser sobrescritos por ambiente:
 
 | Sufixo                          | Padrão                             | Conteúdo                                                                              |
 | ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
@@ -58,10 +57,10 @@ seguida do nome em maiúsculas:
 | `LANGGRAPH_CHECKPOINTS`         | `ai_langgraph_checkpoints`         | Checkpoints do grafo.                                                                 |
 | `LANGGRAPH_CHECKPOINT_WRITES`   | `ai_langgraph_checkpoint_writes`   | Escritas do checkpointer.                                                             |
 
-Os nomes precisam ser distintos dentro do serviço. A collection configurada para
-observabilidade do principal também não pode coincidir com uma delas. As
-collections do MCP de e-mail usam por padrão `ai_email_prepared_reports` e
-`ai_email_dispatches`, distintas das collections internas do principal.
+Os nomes são distintos dentro do serviço. A observabilidade principal usa
+`ai_observations`. As collections do MCP de e-mail são
+`ai_email_prepared_reports` e `ai_email_dispatches`, distintas das collections
+internas do principal.
 
 ## Migração dos dados antigos do MCP de e-mail
 

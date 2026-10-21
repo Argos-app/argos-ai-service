@@ -23,6 +23,12 @@ def _runtime_settings() -> Settings:
     )
 
 
+def test_observability_collection_name_is_fixed(monkeypatch):
+    monkeypatch.setenv("A2A_OBSERVABILITY_COLLECTION", "override_observations")
+
+    assert Settings.from_env().observability_collection == "ai_a2a_observations"
+
+
 def test_injected_permission_adapter_does_not_require_sql_dsn():
     _runtime_settings().validate_runtime(
         require_providers=False,

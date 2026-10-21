@@ -166,15 +166,8 @@ async def main() -> None:
 
     mongo_uri = _required("MCP_DATA_MONGO_URI")
     database_name = _required("MCP_DATA_MONGO_DATABASE")
-    cattle_collection_name = _required("MCP_DATA_MONGO_CATTLE_COLLECTION")
-    medicine_collection_name = _required("MCP_DATA_MONGO_MEDICINE_COLLECTION")
-    if (
-        not cattle_collection_name.startswith("local_")
-        or not medicine_collection_name.startswith("local_")
-        or cattle_collection_name == medicine_collection_name
-    ):
-        raise RuntimeError("A carga local exige duas collections distintas com prefixo local_")
-
+    cattle_collection_name = "cattle_documents"
+    medicine_collection_name = "medicine_documents"
     property_rows, medicine_rows = await _load_postgres_rows(_required("MCP_DATA_SQL_DSN"))
     now = datetime.now(UTC)
     cattle_documents = _cattle_documents(property_rows, now)

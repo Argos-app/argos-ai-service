@@ -154,15 +154,14 @@ o fluxo e os dados de destinatário autorizados permitirem; subir Mailpit não
 cria documentos de negócio.
 
 A configuração não carrega automaticamente documentos empresariais para as
-collections `local_cattle_documents` e `local_medicine_documents`; o Compose
-também não as popula. Um fluxo que depende desses documentos exige fixtures
-locais ou dados preparados separadamente, conforme o contrato da ferramenta.
-PostgreSQL recebe os scripts `infrastructure/docker/postgres/init/01_*.sql` a
-`12_*.sql` e `99-read-only-role.sh` em volume vazio; modificar os scripts não
-aplica migrações a um volume existente. Para reconstruir apenas o banco de
-teste, pare os consumidores, remova o PVC/PV PostgreSQL ou recrie o cluster e
-aplique tudo novamente. Não use remoção de PVC para preservar dados que queira
-reter.
+collections `cattle_documents` e `medicine_documents`; o Compose também não as
+popula. Um fluxo que depende desses documentos exige fixtures locais ou dados
+preparados separadamente, conforme o contrato da ferramenta. PostgreSQL recebe
+os scripts `infrastructure/docker/postgres/init/01_*.sql` a `12_*.sql` e
+`99-read-only-role.sh` em volume vazio; modificar os scripts não aplica
+migrações a um volume existente. Para reconstruir apenas o banco de teste, pare
+os consumidores, remova o PVC/PV PostgreSQL ou recrie o cluster e aplique tudo
+novamente. Não use remoção de PVC para preservar dados que queira reter.
 
 ## Diagnóstico e persistência
 

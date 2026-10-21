@@ -3,13 +3,13 @@
 Este é o guia operacional vigente para a telemetria do `main_api` e do A2A. Ele
 funciona sem LangSmith. A coleta Mongo e os contadores Redis são best effort. No
 Compose integrado, `ai_observations` e `ai_a2a_observations` são ativadas por
-padrão; em execução individual, configure `MAIN_API_OBSERVABILITY_COLLECTION` no
-`main_api` junto com `MAIN_API_MONGO_URI`; para observações do A2A, configure em
-conjunto `A2A_OBSERVABILITY_MONGO_URI`, `A2A_OBSERVABILITY_MONGO_DATABASE` e
-`A2A_OBSERVABILITY_COLLECTION`. Os demais limites da fila podem ser ajustados
-pelas variáveis `MAIN_API_OBSERVABILITY_*` e `A2A_OBSERVABILITY_*` mostradas nos
-respectivos `.env.example`. Não é necessário configurar `LANGSMITH_API_KEY` para
-usar Mongo ou o ranking local.
+padrão. Em execução individual, configure `MAIN_API_MONGO_URI` no `main_api`;
+para observações do A2A, configure `A2A_OBSERVABILITY_MONGO_URI` e, se
+necessário, `A2A_OBSERVABILITY_MONGO_DATABASE`. Os nomes das collections são
+fixos no código. Os demais limites da fila podem ser ajustados pelas variáveis
+`MAIN_API_OBSERVABILITY_*` e `A2A_OBSERVABILITY_*` mostradas nos respectivos
+`.env.example`. Não é necessário configurar `LANGSMITH_API_KEY` para usar Mongo
+ou o ranking local.
 
 ## Seguir uma interação
 
@@ -30,7 +30,7 @@ from pymongo import ASCENDING, MongoClient
 
 client = MongoClient(os.environ["MAIN_API_MONGO_URI"], tz_aware=True)
 collection = client[os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai")][
-    os.environ["MAIN_API_OBSERVABILITY_COLLECTION"]
+    "ai_observations"
 ]
 correlation_id = "UUID recebido no header X-Argos-Correlation-ID"
 for item in collection.find({"correlation_id": correlation_id}).sort(

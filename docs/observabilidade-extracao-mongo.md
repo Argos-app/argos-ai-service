@@ -28,8 +28,7 @@ faturamento completo.
 ## Conexão e permissões
 
 - Database: valor de `MAIN_API_MONGO_DATABASE` (padrão atual: `argos_ai`).
-- Coleção: valor de `MAIN_API_OBSERVABILITY_COLLECTION`, definido no ambiente do
-  `main_api`.
+- Coleção: `ai_observations` (nome fixo no código do `main_api`).
 - O consumidor BI deve usar uma credencial própria, guardada no secret store do
   ambiente de BI. Conceda somente `find` na coleção configurada, por uma role
   Mongo com recurso limitado a `{ db: <database>, collection: <coleção> }`.
@@ -98,7 +97,7 @@ from pymongo import ASCENDING, MongoClient
 
 client = MongoClient(os.environ["BI_OBSERVABILITY_MONGO_URI"], tz_aware=True)
 collection = client[os.environ["BI_OBSERVABILITY_DATABASE"]][
-    os.environ["BI_OBSERVABILITY_COLLECTION"]
+    "ai_observations"
 ]
 
 

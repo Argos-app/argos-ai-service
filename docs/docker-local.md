@@ -115,11 +115,11 @@ apropriado para validação de negócio, previsão real ou produção.
 ## Documentos sintéticos no MongoDB
 
 Ao iniciar o perfil `apps`, o serviço de carga `mongo_seed` espera MongoDB e
-PostgreSQL saudáveis e preenche `local_cattle_documents` e
-`local_medicine_documents` no banco `argos_ai`. A carga lê do PostgreSQL os dois
-imóveis fixos do stub local, seus rebanhos/lotes e o catálogo de medicamentos;
-assim, os UUIDs relacionais dos documentos Mongo correspondem à massa SQL da
-mesma execução. Os campos não representam histórico real de produção.
+PostgreSQL saudáveis e preenche `cattle_documents` e `medicine_documents` no
+banco `argos_ai`. A carga lê do PostgreSQL os dois imóveis fixos do stub local,
+seus rebanhos/lotes e o catálogo de medicamentos; assim, os UUIDs relacionais
+dos documentos Mongo correspondem à massa SQL da mesma execução. Os campos não
+representam histórico real de produção.
 
 O script `scripts/docker/seed-local-mongo.py` pode ser executado novamente: ele
 substitui somente documentos marcados por essa carga e preserva os demais dados

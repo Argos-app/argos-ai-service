@@ -56,12 +56,6 @@ class Settings:
             service_name=os.getenv("MCP_EMAIL_SERVICE_NAME", "mcp_email"),
             mongo_uri=os.getenv("MCP_EMAIL_MONGO_URI"),
             mongo_database=os.getenv("MCP_EMAIL_MONGO_DATABASE", "argos_ai"),
-            mongo_reports_collection=os.getenv(
-                "MCP_EMAIL_REPORTS_COLLECTION", "ai_email_prepared_reports"
-            ),
-            mongo_dispatch_collection=os.getenv(
-                "MCP_EMAIL_DISPATCH_COLLECTION", "ai_email_dispatches"
-            ),
             sql_dsn=os.getenv("MCP_EMAIL_SQL_DSN"),
             trusted_signature_keys=tuple(trusted_keys.items()),
             internal_service_token=os.getenv("MCP_EMAIL_INTERNAL_SERVICE_TOKEN"),

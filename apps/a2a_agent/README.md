@@ -61,18 +61,17 @@ estão ausentes, a permissão não pode ser confirmada ou um provedor retorna
 resposta inválida.
 
 Para persistir observabilidade bruta, configure `A2A_OBSERVABILITY_MONGO_URI`
-como segredo e informe `A2A_OBSERVABILITY_COLLECTION` e, se necessário,
-`A2A_OBSERVABILITY_MONGO_DATABASE` como configuração. URI e coleção precisam ser
-informadas juntas; quando ambas forem omitidas, a coleta persistente fica
-desativada. O writer usa uma fila limitada em memória, sem spool local; falhas
-de configuração ou indisponibilidade do MongoDB desativam a persistência sem
-interromper as respostas A2A. Os registros incluem tentativas de operações A2A,
-agentes, provedores HTTP, embeddings, autorização PostgreSQL e adapters de
-documentos/Qdrant, sem persistir argumentos, prompts, respostas, ID do usuário,
-ID da task ou ID de contexto do protocolo. Nas chamadas delegadas pelo
-principal, persistem `session_id` e `interaction_id` funcionais para permitir a
-junção com as conversas; esses IDs não substituem nem expõem os IDs de
-task/contexto A2A.
+como segredo e, se necessário, `A2A_OBSERVABILITY_MONGO_DATABASE` como
+configuração. A collection fixa é `ai_a2a_observations`; sem URI, a coleta
+persistente fica desativada. O writer usa uma fila limitada em memória, sem
+spool local; falhas de configuração ou indisponibilidade do MongoDB desativam a
+persistência sem interromper as respostas A2A. Os registros incluem tentativas
+de operações A2A, agentes, provedores HTTP, embeddings, autorização PostgreSQL e
+adapters de documentos/Qdrant, sem persistir argumentos, prompts, respostas, ID
+do usuário, ID da task ou ID de contexto do protocolo. Nas chamadas delegadas
+pelo principal, persistem `session_id` e `interaction_id` funcionais para
+permitir a junção com as conversas; esses IDs não substituem nem expõem os IDs
+de task/contexto A2A.
 
 O principal inclui correlation ID, ID do span pai, `session_id` e
 `interaction_id` na delegação assinada. O executor valida esses claims e grava

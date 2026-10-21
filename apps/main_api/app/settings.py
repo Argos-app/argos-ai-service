@@ -67,19 +67,6 @@ class MongoCollectionSettings:
         if len(names) != len(set(names)):
             raise ValueError("collections Mongo do main_api devem ter nomes distintos")
 
-    @classmethod
-    def from_env(cls) -> MongoCollectionSettings:
-        defaults = cls()
-        return cls(
-            **{
-                item.name: os.getenv(
-                    f"MAIN_API_MONGO_COLLECTION_{item.name.upper()}",
-                    getattr(defaults, item.name),
-                )
-                for item in fields(cls)
-            }
-        )
-
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -94,7 +81,7 @@ class Settings:
     mongo_collections: MongoCollectionSettings = field(default_factory=MongoCollectionSettings)
     mongo_server_selection_timeout_ms: int = 5_000
     mongo_write_timeout_ms: int = 5_000
-    observability_collection: str | None = None
+    observability_collection: str = "ai_observations"
     observability_queue_max_items: int = 2_048
     observability_queue_max_bytes: int = 8 * 1024 * 1024
     observability_document_max_bytes: int = 16 * 1024
@@ -183,12 +170,11 @@ class Settings:
                 os.getenv("MAIN_API_AUTH_DATABASE_QUERY_TIMEOUT_SECONDS", "3")
             ),
             mongo_database=os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai"),
-            mongo_collections=MongoCollectionSettings.from_env(),
+            mongo_collections=MongoCollectionSettings(),
             mongo_server_selection_timeout_ms=int(
                 os.getenv("MAIN_API_MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
             ),
             mongo_write_timeout_ms=int(os.getenv("MAIN_API_MONGO_WRITE_TIMEOUT_MS", "5000")),
-            observability_collection=os.getenv("MAIN_API_OBSERVABILITY_COLLECTION") or None,
             observability_queue_max_items=_observability_int(
                 "MAIN_API_OBSERVABILITY_QUEUE_MAX_ITEMS", 2048
             ),
@@ -308,10 +294,10 @@ class Settings:
             raise ValueError("limites e timeouts de conexão PostgreSQL são inválidos")
         if self.model_thinking not in {"auto", "enabled", "disabled"}:
             raise ValueError("MAIN_API_MODEL_THINKING deve ser auto, enabled ou disabled")
-        if self.observability_collection is not None and self.observability_collection in {
+        if self.observability_collection in {
             getattr(self.mongo_collections, item.name) for item in fields(self.mongo_collections)
         }:
-            raise ValueError("MAIN_API_OBSERVABILITY_COLLECTION colide com collection do main_api")
+            raise ValueError("collection de observabilidade colide com collection do main_api")
         if (
             self.mongo_server_selection_timeout_ms < 1
             or self.mongo_write_timeout_ms < 1

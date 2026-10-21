@@ -104,9 +104,7 @@ class McpDataHarness:
             MCP_DATA_SQL_DSN=SQL_ADMIN_DSN.rsplit("/", 1)[0] + "/" + self.database_name,
             MCP_DATA_MONGO_URI=MONGO_URI,
             MCP_DATA_MONGO_DATABASE=self.database_name,
-            MCP_DATA_MONGO_CATTLE_COLLECTION="bois",
             MCP_DATA_MONGO_RELATIONAL_ID_FORMAT="string",
-            MCP_DATA_MONGO_MEDICINE_COLLECTION="medicamentos",
             MCP_DATA_MONGO_MEDICINE_ID_FORMAT="string",
             MCP_DATA_INTERNAL_SERVICE_TOKEN=self.service_token,
             MCP_DATA_AUTH_ISSUER_URL=f"http://127.0.0.1:{self.port}/test-issuer",
@@ -234,7 +232,7 @@ async def mcp_data_harness():
 async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> None:
     """Insere documentos sintéticos independentes das linhas relacionais."""
     now = datetime.now(UTC)
-    await database["bois"].insert_many(
+    await database["cattle_documents"].insert_many(
         [
             {
                 "_id": f"historico-{key}",
@@ -270,7 +268,7 @@ async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> N
         "unit": "ml",
         "route": "INTRAMUSCULAR",
     }
-    await database["medicamentos"].insert_many(
+    await database["medicine_documents"].insert_many(
         [
             {
                 **medicine,

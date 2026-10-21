@@ -13,9 +13,9 @@ class Settings:
     sql_dsn: str | None = None
     mongo_uri: str | None = None
     mongo_database: str | None = "argos_ai"
-    mongo_cattle_collection: str | None = None
+    mongo_cattle_collection: str = "cattle_documents"
     mongo_relational_id_format: str | None = None
-    mongo_medicine_collection: str | None = None
+    mongo_medicine_collection: str = "medicine_documents"
     mongo_medicine_id_format: str | None = None
     internal_service_token: str | None = None
     mcp_auth_issuer_url: str | None = None
@@ -57,9 +57,7 @@ class Settings:
             sql_dsn=os.getenv("MCP_DATA_SQL_DSN"),
             mongo_uri=os.getenv("MCP_DATA_MONGO_URI"),
             mongo_database=os.getenv("MCP_DATA_MONGO_DATABASE", "argos_ai"),
-            mongo_cattle_collection=os.getenv("MCP_DATA_MONGO_CATTLE_COLLECTION"),
             mongo_relational_id_format=os.getenv("MCP_DATA_MONGO_RELATIONAL_ID_FORMAT"),
-            mongo_medicine_collection=os.getenv("MCP_DATA_MONGO_MEDICINE_COLLECTION"),
             mongo_medicine_id_format=os.getenv("MCP_DATA_MONGO_MEDICINE_ID_FORMAT"),
             internal_service_token=os.getenv("MCP_DATA_INTERNAL_SERVICE_TOKEN"),
             mcp_auth_issuer_url=os.getenv("MCP_DATA_AUTH_ISSUER_URL"),
@@ -80,9 +78,7 @@ class Settings:
             "MCP_DATA_SQL_DSN": self.sql_dsn,
             "MCP_DATA_MONGO_URI": self.mongo_uri,
             "MCP_DATA_MONGO_DATABASE": self.mongo_database,
-            "MCP_DATA_MONGO_CATTLE_COLLECTION": self.mongo_cattle_collection,
             "MCP_DATA_MONGO_RELATIONAL_ID_FORMAT": self.mongo_relational_id_format,
-            "MCP_DATA_MONGO_MEDICINE_COLLECTION": self.mongo_medicine_collection,
             "MCP_DATA_MONGO_MEDICINE_ID_FORMAT": self.mongo_medicine_id_format,
             "MCP_DATA_INTERNAL_SERVICE_TOKEN": self.internal_service_token,
             "MCP_DATA_AUTH_ISSUER_URL": self.mcp_auth_issuer_url,
