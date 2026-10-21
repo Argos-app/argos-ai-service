@@ -20,12 +20,14 @@ from app.agent_schemas.results import (
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import EmailDispatchEvidence, OrchestratorResult, TaskOutcome
+from app.graph.specialist_helpers import (
+    email_dispatch_recovery_context as _email_dispatch_recovery_context,
+)
 from app.graph.workflow import (
     NO_VERIFIED_RESULT_ANSWER,
     ROUTER_UNAVAILABLE_ANSWER,
     SAFE_ANSWER,
     _agent_failure_reason,
-    _email_dispatch_recovery_context,
     answer_state,
     build_agent_context,
     build_graph,

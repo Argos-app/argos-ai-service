@@ -1,14 +1,16 @@
 """Preparação, confirmação e recuperação do fluxo de e-mail da Secretária."""
 
-from collections.abc import Callable
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from app.agent_schemas.results import SpecialistResult, SpecialistStatus
 from app.agent_schemas.synthesis import EmailDispatchEvidence
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
-from app.domain.email_preparations import PendingRecipientResolution
+from app.domain.email_preparations import EmailPreparation, PendingRecipientResolution
+from app.graph.specialist_helpers import email_dispatch_recovery_context
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.email_preparation_repository import EmailPreparationRepository
@@ -36,7 +38,6 @@ async def process_secretary_flow(
     email_preparations: EmailPreparationRepository | None,
     email_dispatch: EmailDispatchWorkflow | None,
     config: RunnableConfig | None,
-    recovery_context_builder: Callable[[AgentState, dict[str, Any]], dict[str, Any]],
 ) -> SecretaryFlowResult:
     """Aplica verificações persistidas de destinatário, preparação e envio."""
     recipient_question: PendingRecipientResolution | None = None
@@ -75,16 +76,8 @@ async def process_secretary_flow(
             SpecialistStatus.PARTIAL,
         }:
             try:
-                preparations = await email_preparations.list_prepared_for_session(
-                    principal_user_id=UUID(str(configurable["argos_user_id"])),
-                    session_id=UUID(state["session_id"]),
-                )
-                prepared = tuple(
-                    item
-                    for item in preparations
-                    if str(item.interaction_id) == state["interaction_id"]
-                    and item.prepared_report.status.value == "prepared"
-                    and item.prepared_report.expires_at > _now_utc()
+                prepared = await _preparations_for_interaction(
+                    email_preparations, configurable, state
                 )
                 if not prepared:
                     result = SpecialistResult(
@@ -108,16 +101,8 @@ async def process_secretary_flow(
                 updated_errors.append("secretary_preparation_verification_failed")
         elif result.status in {SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE}:
             try:
-                preparations = await email_preparations.list_prepared_for_session(
-                    principal_user_id=UUID(str(configurable["argos_user_id"])),
-                    session_id=UUID(state["session_id"]),
-                )
-                prepared = tuple(
-                    item
-                    for item in preparations
-                    if str(item.interaction_id) == state["interaction_id"]
-                    and item.prepared_report.status.value == "prepared"
-                    and item.prepared_report.expires_at > _now_utc()
+                prepared = await _preparations_for_interaction(
+                    email_preparations, configurable, state
                 )
                 if len(prepared) == 1:
                     preparation_confirmed = True
@@ -141,7 +126,7 @@ async def process_secretary_flow(
         and email_dispatch is not None
         and state.get("send_intent_requested")
     ):
-        recovery_context = recovery_context_builder(state, configurable)
+        recovery_context = email_dispatch_recovery_context(state, configurable)
         dispatch_result = await email_dispatch.recover_interaction_outcome(
             configurable=recovery_context
         )
@@ -165,7 +150,20 @@ async def process_secretary_flow(
     )
 
 
-def _now_utc():
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC)
+async def _preparations_for_interaction(
+    repository: EmailPreparationRepository,
+    configurable: Mapping[str, Any],
+    state: AgentState,
+) -> tuple[EmailPreparation, ...]:
+    preparations = await repository.list_prepared_for_session(
+        principal_user_id=UUID(str(configurable["argos_user_id"])),
+        session_id=UUID(state["session_id"]),
+    )
+    now = datetime.now(UTC)
+    return tuple(
+        item
+        for item in preparations
+        if str(item.interaction_id) == state["interaction_id"]
+        and item.prepared_report.status.value == "prepared"
+        and item.prepared_report.expires_at > now
+    )

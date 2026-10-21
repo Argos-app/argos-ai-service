@@ -7,12 +7,14 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable, Collection, Coroutine
+from collections.abc import AsyncIterator, Callable, Collection, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from app.agent_schemas.inputs import SessionContext
 from app.application.context_builder import build_session_context
 from app.application.contracts.interactions import (
     AnswerCommand,
@@ -81,9 +83,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
-class _AcceptedInteraction:
-    principal: ActorContext
-    session: SessionRecord
+class _InteractionRequest:
     body: InteractionCommand
     authorized_farms: tuple[UUID, ...]
     sanitized_input: str
@@ -92,18 +92,23 @@ class _AcceptedInteraction:
     send_intent_requested: bool
     answer_text: str | None
     send_intent_source_interaction_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _AcceptedInteraction:
+    principal: ActorContext
+    session: SessionRecord
+    request: _InteractionRequest
     graph: Any
     accepted_message: ConversationMessage
     lease: ProcessingLease
     lease_lost: asyncio.Event
-    stop_renewal: asyncio.Event
-    heartbeat: asyncio.Task[None]
     running: InteractionRecord
 
 
 @dataclass(frozen=True, slots=True)
 class _InteractionContext:
-    session_context: Any
+    session_context: SessionContext
     graph_config: dict[str, Any]
 
 
@@ -227,11 +232,10 @@ class SessionApplicationService:
         session_id: UUID,
         body: InteractionCommand,
     ) -> InteractionOutcome:
-        accepted = await self._accept_interaction(principal, session_id, body)
-        if isinstance(accepted, InteractionOutcome):
-            return accepted
+        async with self._accept_interaction(principal, session_id, body) as accepted:
+            if isinstance(accepted, InteractionOutcome):
+                return accepted
 
-        try:
             execution_limits = ExecutionLimits(
                 max_model_calls=self._execution_max_model_calls,
                 max_tool_calls=self._execution_max_tool_calls,
@@ -263,20 +267,14 @@ class SessionApplicationService:
                 state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
                 failed = True
             return await self._finalize_interaction(accepted, state, failed=failed)
-        finally:
-            await self._release_interaction_lease(
-                accepted.session.session_id,
-                accepted.lease,
-                accepted.stop_renewal,
-                accepted.heartbeat,
-            )
 
+    @asynccontextmanager
     async def _accept_interaction(
         self,
         principal: ActorContext,
         session_id: UUID,
         body: InteractionCommand,
-    ) -> _AcceptedInteraction | InteractionOutcome:
+    ) -> AsyncIterator[_AcceptedInteraction | InteractionOutcome]:
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
             raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
@@ -305,7 +303,8 @@ class SessionApplicationService:
             input_hash=input_hash,
         )
         if existing is not None:
-            return await self._replay_or_reject(existing, session)
+            yield await self._replay_or_reject(existing, session)
+            return
 
         graph = self._graph_provider()
         if graph is None:
@@ -352,9 +351,8 @@ class SessionApplicationService:
                 input_hash=input_hash,
             )
             if existing is not None:
-                outcome = await self._replay_or_reject(existing, session)
-                await self._release_interaction_lease(session_id, lease, stop_renewal, heartbeat)
-                return outcome
+                yield await self._replay_or_reject(existing, session)
+                return
 
             interaction_id = _interaction_id(session_id, kind, deduplication_key, input_hash)
             interaction = InteractionRecord(
@@ -395,11 +393,8 @@ class SessionApplicationService:
                         input_hash=input_hash,
                     )
                     if duplicate is not None:
-                        outcome = await self._replay_or_reject(duplicate, session)
-                        await self._release_interaction_lease(
-                            session_id, lease, stop_renewal, heartbeat
-                        )
-                        return outcome
+                        yield await self._replay_or_reject(duplicate, session)
+                        return
                 raise
             if accepted_message is None:
                 raise ApplicationError(
@@ -418,28 +413,27 @@ class SessionApplicationService:
                 raise ApplicationError(
                     ApplicationErrorCode.CONFLICT, "A interação mudou durante o processamento"
                 )
-            return _AcceptedInteraction(
+            yield _AcceptedInteraction(
                 principal=principal,
                 session=session,
-                body=body,
-                authorized_farms=authorized_farms,
-                sanitized_input=sanitized_input,
-                public_request_id=public_request_id,
-                recipient_selectors=recipient_selectors,
-                send_intent_requested=send_intent_requested,
-                answer_text=answer_text,
-                send_intent_source_interaction_id=send_intent_source_interaction_id,
+                request=_InteractionRequest(
+                    body=body,
+                    authorized_farms=authorized_farms,
+                    sanitized_input=sanitized_input,
+                    public_request_id=public_request_id,
+                    recipient_selectors=recipient_selectors,
+                    send_intent_requested=send_intent_requested,
+                    answer_text=answer_text,
+                    send_intent_source_interaction_id=send_intent_source_interaction_id,
+                ),
                 graph=graph,
                 accepted_message=accepted_message,
                 lease=lease,
                 lease_lost=lease_lost,
-                stop_renewal=stop_renewal,
-                heartbeat=heartbeat,
                 running=running,
             )
-        except BaseException:
+        finally:
             await self._release_interaction_lease(session_id, lease, stop_renewal, heartbeat)
-            raise
 
     async def _release_interaction_lease(
         self,
@@ -459,7 +453,9 @@ class SessionApplicationService:
         principal = accepted.principal
         session_id = accepted.session.session_id
         interaction_id = accepted.running.interaction_id
-        memory_input = _memory_input(accepted.body, accepted.sanitized_input, accepted.answer_text)
+        memory_input = _memory_input(
+            accepted.request.body, accepted.request.sanitized_input, accepted.request.answer_text
+        )
         if memory_input is not None:
             with bind_interaction(session_id, interaction_id):
                 await self._update_user_memory(
@@ -478,13 +474,13 @@ class SessionApplicationService:
             summaries=self._summaries,
             user_memory=self._user_memory,
         )
-        correlation_id = current_correlation_id() or accepted.public_request_id
+        correlation_id = current_correlation_id() or accepted.request.public_request_id
         graph_config: dict[str, Any] = {
             "configurable": {
                 "argos_user_id": str(principal.user_id),
                 "argos_firebase_uid": principal.firebase_uid,
                 "argos_authorized_property_ids": tuple(
-                    str(farm_id) for farm_id in accepted.authorized_farms
+                    str(farm_id) for farm_id in accepted.request.authorized_farms
                 ),
                 "argos_request_id": str(current_correlation_id() or interaction_id),
             }
@@ -508,7 +504,7 @@ class SessionApplicationService:
     ) -> dict[str, Any]:
         from app.graph.workflow import executar_fluxo, executar_resposta
 
-        body = accepted.body
+        body = accepted.request.body
         session_id = accepted.session.session_id
         interaction_id = accepted.running.interaction_id
         graph_recorder = (
@@ -534,28 +530,28 @@ class SessionApplicationService:
                         if isinstance(body, MessageCommand):
                             state = await executar_fluxo(
                                 accepted.graph,
-                                accepted.sanitized_input,
+                                accepted.request.sanitized_input,
                                 user_id=str(accepted.principal.user_id),
-                                farm_id=str(accepted.authorized_farms[0]),
+                                farm_id=str(accepted.request.authorized_farms[0]),
                                 session_id=str(session_id),
                                 interaction_id=str(interaction_id),
                                 session_context=context.session_context,
-                                recipient_selectors=accepted.recipient_selectors,
-                                send_intent_requested=accepted.send_intent_requested,
+                                recipient_selectors=accepted.request.recipient_selectors,
+                                send_intent_requested=accepted.request.send_intent_requested,
                                 config=context.graph_config,
                             )
                         else:
                             state = await executar_resposta(
                                 accepted.graph,
-                                accepted.answer_text or accepted.sanitized_input,
+                                accepted.request.answer_text or accepted.request.sanitized_input,
                                 question_id=str(body.question_id),
                                 session_id=str(session_id),
                                 interaction_id=str(interaction_id),
                                 session_context=context.session_context,
-                                recipient_selectors=accepted.recipient_selectors,
-                                send_intent_requested=accepted.send_intent_requested,
+                                recipient_selectors=accepted.request.recipient_selectors,
+                                send_intent_requested=accepted.request.send_intent_requested,
                                 send_intent_source_interaction_id=(
-                                    accepted.send_intent_source_interaction_id
+                                    accepted.request.send_intent_source_interaction_id
                                 ),
                                 config=context.graph_config,
                             )
@@ -585,7 +581,7 @@ class SessionApplicationService:
         response = _response_from_state(
             session_id=session_id,
             interaction_id=interaction_id,
-            public_request_id=accepted.public_request_id,
+            public_request_id=accepted.request.public_request_id,
             state=state,
             now=_utcnow(),
         )

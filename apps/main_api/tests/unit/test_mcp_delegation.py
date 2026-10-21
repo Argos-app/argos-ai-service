@@ -9,11 +9,12 @@ from app.infrastructure.mcp.delegation import (
     McpDelegationTokenIssuer,
 )
 from app.settings import Settings
-from argos_mcp_data.adapters.delegation import DelegationTokenVerifier as DataTokenVerifier
+from argos_mcp_data.adapters.delegation import DATA_AGENT_OPERATIONS
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from packages.observability import bind_correlation, observation_scope
+from packages.security.delegation import DelegationTokenVerifier as DataTokenVerifier
 from packages.security.delegation import DelegationTokenVerifier as PredictionTokenVerifier
 
 
@@ -51,6 +52,7 @@ def test_issued_data_token_matches_mcp_verifier_contract(delegation_keys):
         {"main-key": public_key},
         issuer="argos-main-service",
         audience=data_url,
+        agent_operations=DATA_AGENT_OPERATIONS,
         clock=lambda: 1_800_000_010,
     )
     firebase_uid, property_id, request_id = "firebase-user-123", uuid4(), uuid4()
@@ -91,6 +93,7 @@ def test_analyst_can_delegate_only_property_resolution_to_data_mcp(delegation_ke
         {"main-key": public_key},
         issuer="argos-main-service",
         audience=data_url,
+        agent_operations=DATA_AGENT_OPERATIONS,
     )
 
     token = issuer.issue(

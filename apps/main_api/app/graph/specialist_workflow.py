@@ -1,6 +1,5 @@
 """Coordenação do nó especialista e seus fluxos de execução."""
 
-import logging
 from typing import Any
 
 from app.agent_schemas.inputs import QuestionFormattingRequest, QuestionOption
@@ -12,15 +11,14 @@ from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.graph.report_workflow import persist_farm_report_references, resolve_report_dependencies
 from app.graph.secretary_workflow import process_secretary_flow
 from app.graph.specialist_execution import execute_specialist
+from app.graph.specialist_helpers import unique_sources
 from app.graph.state import AgentState
-from app.graph.workflow import _email_dispatch_recovery_context, unique_sources
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from langchain_core.runnables import RunnableConfig
 
-_LOGGER = logging.getLogger(__name__)
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 
 
@@ -72,16 +70,12 @@ async def run_specialist_workflow(
     errors = list(report_resolution.errors)
     report_refs_by_dependency = report_resolution.refs_by_dependency
     report_artifact_scopes = report_resolution.artifact_scopes
-    called = list(state.get("called_agents", []))
-    failure_reason = None
-
     execution = await execute_specialist(
         state=state,
         task=task,
         dependencies=dependencies,
         blocked=blocked,
-        errors=errors,
-        called=called,
+        report_source_missing="invalid_or_missing_report_artifact" in errors,
         factory=factory,
         agent_id=agent_id,
         report_refs_by_dependency=report_refs_by_dependency,
@@ -91,8 +85,15 @@ async def run_specialist_workflow(
     )
     result = execution.result
     failure_reason = execution.failure_reason
-    called = list(execution.called)
-    errors = list(execution.errors)
+    called = list(state.get("called_agents", []))
+    if not blocked:
+        called.append(agent_id.value)
+    elif "blocked_dependency" not in errors:
+        errors.append("blocked_dependency")
+    if failure_reason and failure_reason not in errors:
+        errors.append(failure_reason)
+    if result.error == "required_external_evidence_missing":
+        errors.append(f"{agent_id.value}_external_evidence_missing")
 
     secretary_flow = await process_secretary_flow(
         state,
@@ -103,7 +104,6 @@ async def run_specialist_workflow(
         email_preparations=email_preparations,
         email_dispatch=email_dispatch,
         config=config,
-        recovery_context_builder=_email_dispatch_recovery_context,
     )
     result = secretary_flow.result
     failure_reason = secretary_flow.failure_reason

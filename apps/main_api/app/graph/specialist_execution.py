@@ -3,24 +3,25 @@
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID
 
 from app.agent_schemas.inputs import DependencyEvidence, DependencyResult, SpecialistInput
-from app.agent_schemas.results import SourceReference, SpecialistResult, SpecialistStatus
+from app.agent_schemas.results import RouteTask, SourceReference, SpecialistResult, SpecialistStatus
+from app.agent_schemas.synthesis import TaskOutcome
 from app.application.execution_limits import ExecutionLimits, current_execution_limits
 from app.application.verified_evidence import verified_evidence_fallback
-from app.graph.state import AgentState
-from app.graph.workflow import (
-    _agent_failure_reason,
-    _history_context,
+from app.graph.specialist_helpers import (
+    agent_failure_reason,
     build_agent_context,
+    history_context,
     unique_sources,
 )
+from app.graph.state import AgentState
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.execution_event_repository import ExecutionEventWriteError
+from langchain_core.runnables import RunnableConfig
 
 _LOGGER = logging.getLogger(__name__)
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
@@ -30,28 +31,24 @@ SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança 
 class SpecialistExecutionResult:
     result: SpecialistResult
     failure_reason: str | None
-    called: tuple[str, ...]
-    errors: tuple[str, ...]
 
 
 async def execute_specialist(
     *,
     state: AgentState,
-    task: Any,
-    dependencies: tuple[Any, ...],
+    task: RouteTask,
+    dependencies: tuple[TaskOutcome, ...],
     blocked: bool,
-    errors: list[str],
-    called: list[str],
+    report_source_missing: bool,
     factory: AgentFactory,
     agent_id: AgentId,
     report_refs_by_dependency: dict[str, tuple[str, ...]],
     report_artifact_scopes: dict[str, dict[str, str]],
     email_preparations: EmailPreparationRepository | None,
-    config: Any,
+    config: RunnableConfig | None,
 ) -> SpecialistExecutionResult:
     failure_reason = None
     if blocked:
-        report_source_missing = "invalid_or_missing_report_artifact" in errors
         result = SpecialistResult(
             agent=task.agent,
             status=SpecialistStatus.UNAVAILABLE,
@@ -67,7 +64,6 @@ async def execute_specialist(
                 else "dependency_unavailable"
             ),
         )
-        errors.append("blocked_dependency")
     else:
         dependency_results = tuple(
             DependencyResult(
@@ -96,14 +92,13 @@ async def execute_specialist(
             depends_on=task.depends_on,
             required_evidence=task.required_evidence,
             dependency_results=dependency_results,
-            session_context=_history_context(state),
+            session_context=history_context(state),
             email_send_authorized=(
                 state.get("send_intent_requested", False)
                 if agent_id == AgentId.SECRETARY
                 else False
             ),
         )
-        called.append(agent_id.value)
         try:
             context = build_agent_context(
                 state,
@@ -166,7 +161,6 @@ async def execute_specialist(
                             "error": "required_external_evidence_missing",
                         }
                     )
-                    errors.append(f"{agent_id.value}_external_evidence_missing")
                 else:
                     source_evidence = tuple(
                         SourceReference(
@@ -184,7 +178,7 @@ async def execute_specialist(
         except ExecutionEventWriteError:
             raise
         except Exception as exc:
-            failure_reason = _agent_failure_reason(agent_id.value, exc)
+            failure_reason = agent_failure_reason(agent_id.value, exc)
             _LOGGER.warning(
                 "agent execution failed: %s",
                 type(exc).__name__,
@@ -239,6 +233,5 @@ async def execute_specialist(
                     ),
                     error=failure_reason,
                 )
-            errors.append(failure_reason)
 
-    return SpecialistExecutionResult(result, failure_reason, called, errors)
+    return SpecialistExecutionResult(result, failure_reason)

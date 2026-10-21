@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from argos_mcp_data.adapters.delegation import DATA_AGENT_OPERATIONS, DelegationTokenVerifier
+from argos_mcp_data.adapters.delegation import DATA_AGENT_OPERATIONS
 from argos_mcp_data.adapters.report_signer import Ed25519LotReportSigner
 from argos_mcp_data.application import AccessPolicy, CattleQueryService, MedicineQueryService
 from argos_mcp_data.infrastructure import (
@@ -23,6 +23,7 @@ from argos_mcp_data.server import (
     register_medicine_tools,
 )
 from argos_mcp_data.settings import Settings
+from packages.security.delegation import DelegationTokenVerifier
 
 
 @dataclass(slots=True)

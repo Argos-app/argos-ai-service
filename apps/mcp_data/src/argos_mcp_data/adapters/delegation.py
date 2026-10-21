@@ -1,7 +1,5 @@
 """HTTP adapter for the shared Ed25519 delegation verifier."""
 
-import time
-from collections.abc import Callable
 from uuid import UUID
 
 from mcp.server.lowlevel.server import request_ctx
@@ -10,7 +8,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from argos_mcp_data.application import AccessPolicy
 from argos_mcp_data.domain import AccessContext, AccessContextError, AuthorizedScope
-from packages.security.delegation import DelegationTokenVerifier as SharedDelegationTokenVerifier
+from packages.security.delegation import DelegationTokenVerifier
 
 _ACCESS_CONTEXT_KEY = "argos_mcp_data_access_context"
 DATA_AGENT_OPERATIONS = {
@@ -18,33 +16,6 @@ DATA_AGENT_OPERATIONS = {
     "doutor": frozenset({"medicine.read"}),
     "analista": frozenset({"cattle.read"}),
 }
-
-
-class DelegationTokenVerifier(SharedDelegationTokenVerifier):
-    """Verificador compartilhado com política de agentes própria do MCP de dados."""
-
-    def __init__(
-        self,
-        trusted_keys: dict[str, str],
-        *,
-        issuer: str,
-        audience: str,
-        agent_operations: dict[str, frozenset[str]] | None = None,
-        max_ttl_seconds: int = 300,
-        clock_skew_seconds: int = 30,
-        clock: Callable[[], float] = time.time,
-    ) -> None:
-        super().__init__(
-            trusted_keys,
-            issuer=issuer,
-            audience=audience,
-            agent_operations=(
-                DATA_AGENT_OPERATIONS if agent_operations is None else agent_operations
-            ),
-            max_ttl_seconds=max_ttl_seconds,
-            clock_skew_seconds=clock_skew_seconds,
-            clock=clock,
-        )
 
 
 def get_access_context() -> AccessContext:
