@@ -44,11 +44,6 @@ class _UserAccessRepository:
         )
 
 
-class _FirebaseAccessTokenStatus:
-    async def is_access_token_revoked(self, firebase_uid: str, issued_at: int) -> bool:
-        return False
-
-
 def _signed_report(private_key, *, user_id: UUID, property_id: UUID) -> LotReportEnvelope:
     now = datetime.now(UTC)
     envelope = LotReportEnvelope(
@@ -279,7 +274,6 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
     try:
         with TestClient(app) as client:
             app.state.user_access_repository = _UserAccessRepository(users)
-            app.state.firebase_identity_authenticator = _FirebaseAccessTokenStatus()
             persistence = app.state.persistence
             agent_factory = _factory(
                 artifacts=persistence.report_artifacts,
@@ -416,7 +410,6 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
         restarted_app = create_app(settings)
         with TestClient(restarted_app) as restarted_client:
             restarted_app.state.user_access_repository = _UserAccessRepository(users)
-            restarted_app.state.firebase_identity_authenticator = _FirebaseAccessTokenStatus()
             replay_after_restart = restarted_client.post(
                 f"/v1/sessions/{session_id}/interactions",
                 headers=headers,
