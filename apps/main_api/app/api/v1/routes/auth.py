@@ -20,7 +20,7 @@ def _bearer_token(authorization: str | None) -> str:
     if scheme.casefold() != "bearer" or not separator or not token.strip():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bearer Firebase ID token obrigatório",
+            detail="Bearer token obrigatório",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token.strip()
@@ -51,7 +51,6 @@ async def authenticate_firebase(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Autenticação Firebase não configurada",
         )
-
     try:
         result = await authenticator.authenticate(token)
     except InvalidFirebaseIdToken as exc:

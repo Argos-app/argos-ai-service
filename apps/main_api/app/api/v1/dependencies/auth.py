@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.application.identity import ActorContext
 from app.domain.user_access import UserAccess
 from app.infrastructure.access_tokens import AccessTokenClaims, InvalidAccessToken
-from app.infrastructure.firebase_auth import FirebaseVerificationUnavailable
 from app.settings import Settings
 from packages.observability import bind_user_id
 
@@ -128,36 +127,8 @@ async def get_principal(request: Request) -> AsyncIterator[Principal]:
 
 
 async def _principal_from_access_token(request: Request, token: str) -> Principal:
-    """Valida JWT, revogação Firebase e cadastro atual antes de criar o Principal."""
+    """Valida JWT e cadastro atual antes de criar o Principal."""
     claims = _verify_access_token(request, token)
-    firebase_authenticator = getattr(request.app.state, "firebase_identity_authenticator", None)
-    if firebase_authenticator is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Verificação de revogação não configurada",
-        )
-    try:
-        token_revoked = await firebase_authenticator.is_access_token_revoked(
-            claims.firebase_uid,
-            claims.issued_at,
-        )
-    except FirebaseVerificationUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Não foi possível verificar a revogação no Firebase",
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Não foi possível verificar a revogação no Firebase",
-        ) from exc
-    if token_revoked:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bearer revogado",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
     repository = getattr(request.app.state, "user_access_repository", None)
     if repository is None:
         raise HTTPException(

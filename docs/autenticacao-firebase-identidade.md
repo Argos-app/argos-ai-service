@@ -90,18 +90,20 @@ usuário autenticado. São elegíveis as propriedades ativas em que
 maior/igual à data corrente. O próprio cadastro do usuário e sua permissão
 também precisam estar ativos, e `blocked_until` não pode estar no futuro.
 
-O serviço deve obter essa autorização a partir do UUID interno do usuário e
-revalidá-la nas chamadas protegidas. O JWT identifica o usuário; não torna
-autoridade uma cópia desatualizada das fazendas. Um usuário habilitado sem
-fazendas vigentes não pode iniciar uma sessão da IA, que exige ao menos uma
-fazenda.
+O serviço obtém essa autorização por `app_user.firebase_uid` e confirma que o
+UUID interno retornado corresponde ao `sub` do JWT em cada chamada protegida. O
+JWT identifica o usuário; não torna autoridade uma cópia desatualizada das
+fazendas. Um usuário habilitado sem fazendas vigentes não pode iniciar uma
+sessão da IA, que exige ao menos uma fazenda.
 
 O catálogo versionado contém os códigos `ADMIN`, `GERENTE`, `PECUARISTA`,
-`APLICADOR` e `SISTEMA`. `SISTEMA` é descrito como usuário técnico que não faz
-login e não deve ser tratado como usuário humano habilitado. O rótulo de `ADMIN`
-“acesso total” não cria uma exceção implícita para fazendas: o acesso da IA
-continua seguindo a regra de proprietário ou vínculo acima, até que exista uma
-regra de negócio explícita e validada para acesso global.
+`APLICADOR` e `SISTEMA`. O serviço de IA não restringe a autenticação pelo
+código do papel: inclusive `SISTEMA` pode autenticar quando possui identidade
+Firebase vinculada, cadastro ativo, ausência de bloqueio, permissão cadastral
+ativa e fazendas autorizadas. Todos os papéis seguem essas mesmas verificações.
+O rótulo de `ADMIN` “acesso total” não cria uma exceção implícita para fazendas:
+o acesso da IA continua seguindo a regra de proprietário ou vínculo acima, até
+que exista uma regra de negócio explícita e validada para acesso global.
 
 ## Compatibilidade da implementação
 
@@ -118,10 +120,10 @@ de service account montado como secret) ou de Application Default Credentials no
 ambiente. Com Firebase habilitado, `MAIN_API_AUTH_DATABASE_URL` também é
 obrigatório. `FirebaseAdminIdTokenVerifier` valida assinatura, validade e
 projeto do Firebase ID token e solicita ao Admin SDK a verificação de revogação
-e conta desativada. `FirebaseIdentityAuthenticator` extrai UID, e-mail opcional
-e `email_verified`, e busca `app_user.firebase_uid` exclusivamente pelo UID.
-E-mail ausente ou não verificado nunca é usado para localizar ou associar um
-cadastro.
+e conta desativada na troca. `FirebaseIdentityAuthenticator` extrai UID, e-mail
+opcional e `email_verified`, e busca `app_user.firebase_uid` exclusivamente pelo
+UID. E-mail ausente ou não verificado nunca é usado para localizar ou associar
+um cadastro.
 
 `POST /v1/auth/firebase` recebe o Firebase ID token no header Bearer, sem corpo,
 e devolve somente `{ "access_token": "..." }`. O Firebase autentica a
@@ -148,17 +150,58 @@ vínculos, e resolve o UUID interno do cadastro na mesma consulta. O UUID
 resolvido permanece no escopo interno do MCP de dados para assinar a origem de
 relatórios; ele não é transportado na delegação.
 
-Em cada chamada protegida, o Firebase Admin consulta a conta pelo UID e compara
-`iat` do JWT com `tokens_valid_after_timestamp`. Se a conta foi desativada,
-removida ou teve os tokens revogados após a emissão, o JWT é rejeitado. Falha de
-comunicação com Firebase resulta em indisponibilidade (503), sem liberar a rota.
-Essa checagem faz uma chamada externa ao Firebase por requisição autenticada.
+A revogação de um Firebase ID token é conferida com `check_revoked=True` na
+próxima chamada a `POST /v1/auth/firebase`. JWTs próprios já emitidos não fazem
+consulta ao Firebase em cada chamada e podem continuar válidos até seu `exp`,
+com janela máxima de cinco minutos pela configuração limitada de TTL. O cliente
+encerra sua sessão local descartando o JWT; tokens já emitidos permanecem
+válidos até expirar. O cadastro, bloqueio e acesso a fazendas continuam sendo
+revalidados no PostgreSQL em cada chamada protegida.
+
+Tokens próprios inválidos ou expirados retornam 401. Usuário ausente ou com
+Firebase UID divergente retorna 401. Cadastro inativo, bloqueado, permissão
+inativa ou ausência de fazendas retorna 403. Falha de Firebase durante a troca
+ou do PostgreSQL retorna 503 sem liberar acesso.
 
 As rotas `/v1/` não aceitam JWTs do backend de identidade. O `AUTH_MODE=stub`
 continua disponível somente para desenvolvimento local; fora dele, Firebase,
 PostgreSQL read-only e a chave privada Ed25519 do emissor são obrigatórios. A
 validade padrão do JWT próprio é cinco minutos; o cliente renova obtendo um
 Firebase ID token atualizado e chamando novamente a rota de troca.
+
+## Testes automatizados de autenticação
+
+A suíte unitária cobre a validação Firebase na fronteira do Admin SDK com
+revogação habilitada, associação exclusiva por UID, e-mail ausente ou não
+verificado, troca HTTP por JWT, expiração e nova troca, situação cadastral,
+revalidação de fazendas e falhas das dependências. Os cenários cadastrais usam o
+mesmo UUID e UID do JWT para distinguir corretamente rejeições de identidade
+(401) de rejeições de autorização (403). O papel `SISTEMA` também é testado como
+habilitado quando atende às mesmas regras dos demais papéis.
+
+O SDK Firebase e o banco são simulados nesses testes; eles não comprovam as
+credenciais nem a disponibilidade de uma instalação real. Execute:
+
+```powershell
+.venv\Scripts\pytest.exe apps/main_api/tests/unit/test_auth.py apps/main_api/tests/unit/test_access_tokens.py apps/main_api/tests/unit/test_firebase_auth.py apps/main_api/tests/unit/test_firebase_auth_route.py apps/main_api/tests/unit/test_postgres_user_access.py apps/main_api/tests/unit/test_routes.py -q
+```
+
+`tests/integration/test_auth_postgres.py`, dentro de `apps/main_api`, executa o
+SELECT real em um schema temporário de um PostgreSQL de testes. A fixture cria e
+remove apenas esse schema, com uma versão mínima das quatro tabelas e suas
+colunas usadas na consulta. Ela valida isolamento por UID, fazendas próprias,
+vínculos, limites inclusivos de vigência, inatividade, bloqueio e remoção de
+acesso entre consultas. Não substitui a conferência das migrations implantadas.
+Configure uma conexão com permissão de criar schemas em um banco **descartável
+de testes**, instale `asyncpg` e execute:
+
+```powershell
+$env:MAIN_API_TEST_AUTH_DATABASE_URL = "postgresql://test_user:test_password@localhost:54329/test_database"
+.venv\Scripts\pytest.exe apps/main_api/tests/integration/test_auth_postgres.py -q
+```
+
+Sem essa variável, os testes de integração são explicitamente ignorados; isso
+não deve ser interpretado como validação do PostgreSQL real.
 
 ## Critérios para concluir a confirmação do ambiente
 
