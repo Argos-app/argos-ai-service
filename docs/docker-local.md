@@ -10,6 +10,17 @@ modelos suportados; uma combinação não suportada falha na configuração, sem
 enviar parâmetros indevidos. A opção é compartilhada pelos agentes do Principal;
 embeddings não usam thinking.
 
+No Principal, o roteador, os especialistas e o formatador de perguntas pedem
+saída estruturada pela estratégia de chamada de ferramenta do LangGraph. O
+endpoint deve aceitar chamadas de ferramenta; para agentes que também têm
+ferramentas MCP/A2A, deve aceitar as duas classes de ferramentas na mesma
+chamada. O formatador não expõe ferramentas de negócio. O bootstrap verifica se
+o LangChain consegue vincular ferramentas localmente, mas não faz uma chamada ao
+provider; valide a compatibilidade real em homologação. Não passe o schema
+diretamente como `response_format` nesse endpoint sem verificar o perfil e o
+suporte à saída JSON Schema: a seleção nativa automática não troca para chamada
+de ferramenta quando uma requisição nativa falha.
+
 `MAIN_API_EXECUTION_TIMEOUT_SECONDS=300` define o prazo total de uma interação.
 O timeout de cada chamada, o orçamento de chamadas e a validade das preparações
 continuam sendo limites independentes. Aumentar o prazo não transforma uma falha

@@ -197,9 +197,12 @@ def test_build_agent_factory_registers_question_formatter_without_tools(monkeypa
     factory.create(AgentId.QUESTION_FORMATTER)
 
     formatter_call = next(
-        call for call in calls if call.get("response_format") is QuestionFormatterResult
+        call for call in calls if "Formatador de Perguntas" in call["system_prompt"]
     )
     assert formatter_call["tools"] == []
+    assert isinstance(formatter_call["response_format"], ToolStrategy)
+    assert formatter_call["response_format"].schema is QuestionFormatterResult
+    assert formatter_call["response_format"].handle_errors is False
     assert "Formatador de Perguntas" in formatter_call["system_prompt"]
 
 

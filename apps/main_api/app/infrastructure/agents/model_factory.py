@@ -11,7 +11,7 @@ from packages.model_options import thinking_options
 
 
 class ModelRuntimeConfigurationError(RuntimeError):
-    """O provider não oferece as capacidades exigidas pelos agentes registrados."""
+    """O objeto LangChain não permite configurar os recursos exigidos pelos agentes."""
 
 
 MODEL_POLICY_SETTINGS = {
@@ -31,8 +31,18 @@ def validate_model_capabilities(
     models: Mapping[ModelPolicyId, Any],
     *,
     registry=DEFAULT_AGENT_REGISTRY,
+    simulated: bool | None = None,
 ) -> None:
-    """Garante suporte a saída estruturada e ferramentas antes de servir tráfego."""
+    """Confere localmente se os modelos dos agentes com ToolStrategy aceitam bind_tools.
+
+    A validação é local: ela não chama o provider e não confirma que o endpoint
+    aceita a chamada de ferramenta durante uma requisição real.
+    """
+    if simulated is None:
+        simulated = any(
+            getattr(model, "_llm_type", None) == "argos_simulated" for model in models.values()
+        )
+
     for agent_id in AgentId:
         definition = registry.get(agent_id)
         model = models.get(definition.model_policy)
@@ -40,31 +50,26 @@ def validate_model_capabilities(
             raise ModelRuntimeConfigurationError(
                 f"modelo ausente para a política {definition.model_policy.value}"
             )
-        structured_output = getattr(model, "with_structured_output", None)
-        if not callable(structured_output):
+        uses_tool_strategy = (
+            bool(definition.tool_slots)
+            or agent_id in {AgentId.ROUTER, AgentId.QUESTION_FORMATTER}
+            or (simulated and agent_id in {AgentId.ORCHESTRATOR, AgentId.JUDGE})
+        )
+        if not uses_tool_strategy:
+            continue
+
+        bind_tools = getattr(model, "bind_tools", None)
+        if not callable(bind_tools):
             raise ModelRuntimeConfigurationError(
-                f"modelo de {agent_id.value} não oferece saída estruturada"
+                f"modelo de {agent_id.value} não permite vincular ferramentas"
             )
         try:
-            if structured_output(definition.output_schema) is None:
-                raise ValueError("provider não criou runnable estruturado")
+            if bind_tools(()) is None:
+                raise ValueError("LangChain não criou modelo vinculado a ferramentas")
         except Exception as exc:
             raise ModelRuntimeConfigurationError(
-                f"modelo de {agent_id.value} não aceita o schema registrado"
+                f"LangChain não consegue vincular ferramentas ao modelo de {agent_id.value}"
             ) from exc
-        if definition.tool_slots or agent_id is AgentId.ORCHESTRATOR:
-            bind_tools = getattr(model, "bind_tools", None)
-            if not callable(bind_tools):
-                raise ModelRuntimeConfigurationError(
-                    f"modelo de {agent_id.value} não oferece saída estruturada por ferramentas"
-                )
-            try:
-                if bind_tools(()) is None:
-                    raise ValueError("provider não criou modelo com ferramentas")
-            except Exception as exc:
-                raise ModelRuntimeConfigurationError(
-                    f"modelo de {agent_id.value} não aceita saída estruturada por ferramentas"
-                ) from exc
 
 
 def create_configured_models(
@@ -87,7 +92,7 @@ def create_configured_models(
 
         simulated_model = SimulatedChatModel()
         models = {policy: simulated_model for policy in ModelPolicyId}
-        validate_model_capabilities(models)
+        validate_model_capabilities(models, simulated=True)
         return models, None
     if all(value is None for value in model_names.values()):
         return None, "model_runtime_not_configured"

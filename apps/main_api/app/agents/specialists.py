@@ -124,7 +124,9 @@ def build_agent_factory(
     documental_a2a_client: DocumentA2AClient | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
-    validate_model_capabilities(models, registry=registry)
+    orchestrator_model = models.get(ModelPolicyId.ORCHESTRATOR)
+    simulated_runtime = getattr(orchestrator_model, "_llm_type", None) == "argos_simulated"
+    validate_model_capabilities(models, registry=registry, simulated=simulated_runtime)
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
     if mcp_clients is not None:
         overrides.update(
@@ -231,9 +233,6 @@ def build_agent_factory(
         response_format=ToolStrategy(SpecialistResult, handle_errors=False),
     )
 
-    simulated_runtime = (
-        getattr(models[ModelPolicyId.ORCHESTRATOR], "_llm_type", None) == "argos_simulated"
-    )
     orchestrator_options = (
         {"response_format": ToolStrategy(OrchestratorResult, handle_errors=False)}
         if simulated_runtime
@@ -270,7 +269,9 @@ def build_agent_factory(
         model=models[ModelPolicyId.QUESTION_FORMATTER],
         tools=[],
         system_prompt=QUESTION_FORMATTER_SYSTEM_PROMPT,
-        response_format=QuestionFormatterResult,
+        # Fix the strategy explicitly: the configured NVIDIA-compatible endpoint
+        # has failed with provider-native JSON Schema, while tool calling works.
+        response_format=ToolStrategy(QuestionFormatterResult, handle_errors=False),
     )
 
     return LangChainAgentFactory(

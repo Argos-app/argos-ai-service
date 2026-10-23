@@ -532,13 +532,17 @@ def test_document_a2a_timeout_is_loaded_from_environment(monkeypatch):
     assert Settings.from_env().document_a2a_timeout_seconds == 50
 
 
-def test_model_factory_rejects_models_without_structured_output():
-    class NoStructuredOutput:
-        def bind_tools(self, _tools):
-            return self
+@pytest.mark.parametrize(
+    "policy",
+    [ModelPolicyId.ROUTER, ModelPolicyId.QUESTION_FORMATTER],
+)
+def test_model_factory_rejects_tool_strategy_agent_without_tool_binding(policy):
+    class NoToolBinding:
+        pass
 
-    models = {policy: NoStructuredOutput() for policy in ModelPolicyId}
-    with pytest.raises(ModelRuntimeConfigurationError, match="saída estruturada"):
+    models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
+    models[policy] = NoToolBinding()
+    with pytest.raises(ModelRuntimeConfigurationError, match="vincular ferramentas"):
         validate_model_capabilities(models)
 
 
@@ -549,7 +553,7 @@ def test_model_factory_rejects_specialist_without_tool_support():
 
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
     models[ModelPolicyId.FARM] = NoToolBinding()
-    with pytest.raises(ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"):
+    with pytest.raises(ModelRuntimeConfigurationError, match="vincular ferramentas"):
         validate_model_capabilities(models)
 
 
@@ -561,16 +565,16 @@ def test_model_factory_rejects_orchestrator_without_tool_support():
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
     models[ModelPolicyId.ORCHESTRATOR] = NativeStructuredOnly()
 
-    with pytest.raises(ModelRuntimeConfigurationError, match="saída estruturada por ferramentas"):
-        validate_model_capabilities(models)
+    validate_model_capabilities(models)
+    with pytest.raises(ModelRuntimeConfigurationError, match="vincular ferramentas"):
+        validate_model_capabilities(models, simulated=True)
 
 
-def test_model_factory_allows_native_structured_output_for_judge():
-    class NativeStructuredOnly:
-        def with_structured_output(self, _schema):
-            return self
+def test_model_factory_does_not_require_tool_binding_for_provider_judge():
+    class NoToolBinding:
+        pass
 
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
-    models[ModelPolicyId.JUDGE] = NativeStructuredOnly()
+    models[ModelPolicyId.JUDGE] = NoToolBinding()
 
     validate_model_capabilities(models)
