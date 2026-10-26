@@ -11,6 +11,8 @@ from langsmith import agent_address, tracing_context
 
 from packages.observability import correlation_key
 
+from packages.observability import correlation_key
+
 
 def test_langsmith_is_disabled_without_explicit_api_key():
     assert langsmith_module.create_langsmith_tracing(Settings()) is None

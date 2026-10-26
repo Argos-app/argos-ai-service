@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import re
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 from uuid import uuid4
@@ -22,6 +24,7 @@ from app.agent_schemas.results import (
     SpecialistStatus,
 )
 from app.agent_schemas.synthesis import (
+    EmailDispatchEvidence,
     JudgeInput,
     OrchestratorInput,
     OrchestratorResult,
@@ -282,6 +285,18 @@ def order_tasks(plan: RoutePlan) -> tuple[RouteTask, ...]:
         completed.add(ready.task_id)
         pending.remove(ready)
     return tuple(ordered)
+
+
+def _canonicalize_sources(
+    candidate_sources: tuple[SourceReference, ...],
+    trusted_sources: list[SourceReference],
+) -> tuple[SourceReference, ...]:
+    """Aceita somente referências emitidas pelo fluxo e recupera seus metadados confiáveis."""
+    canonical_by_reference = {source.reference: source for source in trusted_sources}
+    requested_references = tuple(dict.fromkeys(source.reference for source in candidate_sources))
+    if any(reference not in canonical_by_reference for reference in requested_references):
+        raise ValueError("unknown_source")
+    return tuple(canonical_by_reference[reference] for reference in requested_references)
 
 
 def _canonicalize_sources(
