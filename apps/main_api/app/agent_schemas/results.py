@@ -1,14 +1,17 @@
 """Schemas tipados para roteamento, respostas especialistas e julgamento."""
 
+from collections.abc import Mapping
 from enum import StrEnum
 
 from app.agent_schemas.inputs import QuestionFormattingRequest
 from app.ports.agent import AgentId
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _AgentOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+    # Model output may contain harmless provider-specific fields; ignore those
+    # while still validating every field used by the application.
+    model_config = ConfigDict(extra="ignore", frozen=True, str_strip_whitespace=True)
 
 
 class SpecialistAgentId(StrEnum):
@@ -45,7 +48,7 @@ class JudgeDecision(StrEnum):
 class SourceReference(_AgentOutput):
     title: str = Field(min_length=1)
     reference: str = Field(min_length=1)
-    excerpt: str | None = None
+    excerpt: str | None = Field(default=None, max_length=48_000)
 
 
 class SpecialistResult(_AgentOutput):
@@ -57,11 +60,91 @@ class SpecialistResult(_AgentOutput):
     suggested_followups: tuple[QuestionFormattingRequest, ...] = ()
     error: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_provider_fields(cls, value):
+        """Normaliza aliases usuais sem relaxar os estados nem as evidências."""
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        if "answer" not in normalized:
+            for alias in ("response", "result", "text", "summary"):
+                candidate = normalized.get(alias)
+                if isinstance(candidate, str):
+                    normalized["answer"] = candidate
+                    break
+        if "sources" not in normalized and "citations" in normalized:
+            normalized["sources"] = normalized["citations"]
+        missing_fields = normalized.get("missing_fields")
+        if isinstance(missing_fields, str):
+            normalized["missing_fields"] = (missing_fields,) if missing_fields.strip() else ()
+        return normalized
+
 
 class JudgeResult(_AgentOutput):
     decision: JudgeDecision
-    reason: str = Field(min_length=1)
+    reason: str = Field(default="Decisão registrada sem justificativa detalhada.", min_length=1)
     unsupported_claims: tuple[str, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_provider_fields(cls, value):
+        """Aceita nomes comuns de veredito sem afrouxar os valores possíveis."""
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        if "decision" not in normalized:
+            for alias in ("verdict", "status", "decision_status"):
+                if alias in normalized:
+                    normalized["decision"] = normalized[alias]
+                    break
+        if "reason" not in normalized:
+            for alias in ("rationale", "feedback", "explanation"):
+                candidate = normalized.get(alias)
+                if isinstance(candidate, str) and candidate.strip():
+                    normalized["reason"] = candidate
+                    break
+        if "unsupported_claims" not in normalized:
+            for alias in ("unsupported", "claims_without_support"):
+                if alias in normalized:
+                    normalized["unsupported_claims"] = normalized[alias]
+                    break
+        unsupported = normalized.get("unsupported_claims")
+        if isinstance(unsupported, str):
+            normalized["unsupported_claims"] = (unsupported,) if unsupported.strip() else ()
+        return normalized
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def normalize_decision(cls, value):
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().casefold().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "approve": JudgeDecision.APPROVED,
+            "approved": JudgeDecision.APPROVED,
+            "accept": JudgeDecision.APPROVED,
+            "accepted": JudgeDecision.APPROVED,
+            "pass": JudgeDecision.APPROVED,
+            "ok": JudgeDecision.APPROVED,
+            "aprovado": JudgeDecision.APPROVED,
+            "aprovada": JudgeDecision.APPROVED,
+            "revise": JudgeDecision.REVISE,
+            "revision": JudgeDecision.REVISE,
+            "needs_revision": JudgeDecision.REVISE,
+            "revisar": JudgeDecision.REVISE,
+            "corrigir": JudgeDecision.REVISE,
+            "reject": JudgeDecision.REJECTED,
+            "rejected": JudgeDecision.REJECTED,
+            "deny": JudgeDecision.REJECTED,
+            "denied": JudgeDecision.REJECTED,
+            "fail": JudgeDecision.REJECTED,
+            "rejeitado": JudgeDecision.REJECTED,
+            "rejeitada": JudgeDecision.REJECTED,
+            "reprovado": JudgeDecision.REJECTED,
+            "reprovada": JudgeDecision.REJECTED,
+        }
+        return aliases.get(normalized, normalized)
 
     @model_validator(mode="after")
     def validate_approval(self) -> JudgeResult:
@@ -79,7 +162,13 @@ class RouteTask(_AgentOutput):
     brief_sanitized: str = Field(min_length=1)
     context_refs: tuple[str, ...] = ()
     depends_on: tuple[str, ...] = ()
-    required_evidence: tuple[str, ...] = ()
+    required_evidence: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Evidence the task must produce. For a new report preparation, use "
+            "signed_report_source for Farm and confirmed_email_preparation for Secretary."
+        ),
+    )
 
 
 class RoutePlan(_AgentOutput):

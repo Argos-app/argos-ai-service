@@ -13,6 +13,7 @@ from app.domain.email_preparations import (
     SendAuthorizationOrigin,
 )
 from app.ports.email_preparation_repository import EmailSendAuthorizationConflictError
+from packages.contracts import DispatchStatus
 
 
 def _document(preparation: EmailPreparation) -> dict[str, Any]:
@@ -142,6 +143,10 @@ def _operation_reference_document(reference: EmailOperationReference) -> dict[st
         "session_id": str(reference.session_id),
         "operation_id": str(reference.operation_id),
         "recorded_at": reference.recorded_at,
+        "last_known_status": (
+            reference.last_known_status.value if reference.last_known_status is not None else None
+        ),
+        "last_known_updated_at": reference.last_known_updated_at,
         "purge_at": reference.recorded_at + timedelta(days=31),
     }
 
@@ -153,6 +158,12 @@ def _operation_reference(document: dict[str, Any]) -> EmailOperationReference:
         session_id=UUID(document["session_id"]),
         operation_id=UUID(document["operation_id"]),
         recorded_at=document["recorded_at"],
+        last_known_status=(
+            DispatchStatus(document["last_known_status"])
+            if document.get("last_known_status")
+            else None
+        ),
+        last_known_updated_at=document.get("last_known_updated_at"),
     )
 
 
@@ -259,6 +270,22 @@ class MongoEmailPreparationRepository:
             }
         )
         return _preparation(document) if document is not None else None
+
+    async def list_prepared_for_session(
+        self, *, principal_user_id: UUID, session_id: UUID, limit: int = 20
+    ) -> tuple[EmailPreparation, ...]:
+        cursor = self._collection.find(
+            {
+                "principal_user_id": str(principal_user_id),
+                "session_id": str(session_id),
+                "prepared_report.status": "prepared",
+            }
+        )
+        if hasattr(cursor, "sort"):
+            cursor = cursor.sort("created_at", -1)
+        if hasattr(cursor, "limit"):
+            cursor = cursor.limit(max(1, min(limit, 100)))
+        return tuple([_preparation(document) async for document in cursor])
 
     async def save(self, preparation: EmailPreparation) -> None:
         await self._collection.replace_one(
@@ -430,7 +457,18 @@ class MongoEmailPreparationRepository:
                 raise EmailSendAuthorizationConflictError(
                     "a autorização já aponta para outra operação"
                 )
-            return stored
+            if reference.last_known_status is not None:
+                await self._operation_references.update_one(
+                    scope,
+                    {
+                        "$set": {
+                            "last_known_status": reference.last_known_status.value,
+                            "last_known_updated_at": reference.last_known_updated_at,
+                        }
+                    },
+                )
+            else:
+                return stored
         else:
             await self._operation_references.update_one(
                 scope,

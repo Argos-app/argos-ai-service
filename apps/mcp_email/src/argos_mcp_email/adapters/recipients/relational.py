@@ -44,6 +44,12 @@ class RelationalRecipientDirectory:
     def __init__(self, executor: SqlExecutor) -> None:
         self._executor = executor
 
+    @staticmethod
+    def _lookup_value(selector: RecipientSelector) -> str:
+        if selector.kind != "name":
+            return selector.value
+        return selector.value.translate(str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "＇": "'"}))
+
     async def resolve(
         self,
         selectors: tuple[RecipientSelector, ...],
@@ -53,7 +59,7 @@ class RelationalRecipientDirectory:
             try:
                 rows = await self._executor.fetch_all(
                     self._QUERY,
-                    selector.value,
+                    self._lookup_value(selector),
                     selector.kind,
                 )
             except Exception as exc:

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
@@ -30,9 +31,15 @@ from packages.observability import (
     OperationPhase,
     ProtocolMetadata,
     ResultMetadata,
+    bind_correlation,
+    bind_interaction,
+    bind_user_id,
+    observation_scope,
 )
 from packages.security.access import DocumentAccessContext
 from packages.security.errors import AccessContextError
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class DocumentA2AExecutor(AgentExecutor):
@@ -55,6 +62,7 @@ class DocumentA2AExecutor(AgentExecutor):
             raise ValueError("o SDK não forneceu IDs de task e contexto")
 
         updater = TaskUpdater(event_queue, task_id, context_id)
+        access_context = context.call_context.state.get(ACCESS_CONTEXT_KEY)
         recorder = (
             OperationRecorder(
                 self._observation_collector,
@@ -66,17 +74,71 @@ class DocumentA2AExecutor(AgentExecutor):
                     name="a2a", operation="task.execute", task_state="working"
                 ),
                 error_origin=ErrorOrigin.PROTOCOL,
+                correlation_id=(
+                    access_context.correlation_id
+                    if isinstance(access_context, DocumentAccessContext)
+                    else None
+                ),
+                parent_observation_id=(
+                    access_context.parent_observation_id
+                    if isinstance(access_context, DocumentAccessContext)
+                    else None
+                ),
+                session_id=(
+                    access_context.session_id
+                    if isinstance(access_context, DocumentAccessContext)
+                    else None
+                ),
+                interaction_id=(
+                    access_context.interaction_id
+                    if isinstance(access_context, DocumentAccessContext)
+                    else None
+                ),
             )
             if self._observation_collector is not None
             else None
         )
         try:
             trace_context = (
-                self._langsmith_tracing.context()
+                self._langsmith_tracing.context(
+                    str(access_context.correlation_id)
+                    if isinstance(access_context, DocumentAccessContext)
+                    and access_context.correlation_id is not None
+                    else None
+                )
                 if self._langsmith_tracing is not None
                 else nullcontext()
             )
-            with trace_context:
+            correlation_scope = (
+                bind_correlation(access_context.correlation_id)
+                if isinstance(access_context, DocumentAccessContext)
+                and access_context.correlation_id is not None
+                else nullcontext()
+            )
+            observation_parent_scope = (
+                observation_scope(recorder.observation_id)
+                if recorder is not None
+                else nullcontext()
+            )
+            user_scope = (
+                bind_user_id(access_context.user_id)
+                if isinstance(access_context, DocumentAccessContext)
+                else nullcontext()
+            )
+            interaction_scope = (
+                bind_interaction(access_context.session_id, access_context.interaction_id)
+                if isinstance(access_context, DocumentAccessContext)
+                and access_context.session_id is not None
+                and access_context.interaction_id is not None
+                else nullcontext()
+            )
+            with (
+                correlation_scope,
+                observation_parent_scope,
+                trace_context,
+                user_scope,
+                interaction_scope,
+            ):
                 await self._execute_task(context, event_queue, updater, recorder)
         except BaseException as exc:
             if recorder is not None:
@@ -159,9 +221,10 @@ class DocumentA2AExecutor(AgentExecutor):
             return
         try:
             response = await self._registry.execute(request, access_context)
-        except Exception:
+        except Exception as exc:
             # Não retornar mensagens internas, tokens, fontes parciais ou exceções
             # do provedor ao chamador do protocolo.
+            _LOGGER.error("document agent execution failed: %s", type(exc).__name__)
             response = DocumentAnswerResponse(
                 request_id=request.request_id,
                 status="unavailable",

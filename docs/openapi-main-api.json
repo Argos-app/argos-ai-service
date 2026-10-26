@@ -1,0 +1,795 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Argos AI Service",
+    "description": "Cada resposta da API versionada inclui o cabeçalho X-Argos-Correlation-ID para diagnóstico.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Live",
+        "operationId": "live_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Live Health Live Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Ready",
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Persistência Mongo indisponível"
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "List Sessions",
+        "operationId": "list_sessions_v1_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  },
+                  "type": "array",
+                  "title": "Response List Sessions V1 Sessions Get"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["sessions"],
+        "summary": "Create Session",
+        "operationId": "create_session_v1_sessions_post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/messages": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "List Session Messages",
+        "operationId": "list_session_messages_v1_sessions__session_id__messages_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMessagesPage"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/interactions": {
+      "post": {
+        "tags": ["interactions"],
+        "summary": "Create Interaction",
+        "operationId": "create_interaction_v1_sessions__session_id__interactions_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/MessageInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnswerInteraction"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "message": "#/components/schemas/MessageInteraction",
+                    "answer": "#/components/schemas/AnswerInteraction"
+                  }
+                },
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionResult"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnswerChoice": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "choice",
+            "title": "Kind"
+          },
+          "option_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Option Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "option_id"],
+        "title": "AnswerChoice"
+      },
+      "AnswerConfirmation": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "confirmation",
+            "title": "Kind"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "confirm"],
+        "title": "AnswerConfirmation"
+      },
+      "AnswerInteraction": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "answer",
+            "title": "Kind"
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interaction Id"
+          },
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id"
+          },
+          "answer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AnswerText"
+              },
+              {
+                "$ref": "#/components/schemas/AnswerChoice"
+              },
+              {
+                "$ref": "#/components/schemas/AnswerConfirmation"
+              }
+            ],
+            "title": "Answer",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "choice": "#/components/schemas/AnswerChoice",
+                "confirmation": "#/components/schemas/AnswerConfirmation",
+                "text": "#/components/schemas/AnswerText"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "interaction_id", "question_id", "answer"],
+        "title": "AnswerInteraction"
+      },
+      "AnswerResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "answer",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "text"],
+        "title": "AnswerResponse"
+      },
+      "AnswerText": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "text",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "text"],
+        "title": "AnswerText"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InteractionResult": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Schema Version",
+            "default": "1"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["completed", "degraded"],
+            "title": "Status",
+            "default": "completed"
+          },
+          "degradation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degradation Reasons"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interaction Id"
+          },
+          "public_request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Public Request Id"
+          },
+          "response": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AnswerResponse"
+              },
+              {
+                "$ref": "#/components/schemas/QuestionResponse"
+              }
+            ],
+            "title": "Response",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "answer": "#/components/schemas/AnswerResponse",
+                "question": "#/components/schemas/QuestionResponse"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "interaction_id", "public_request_id", "response"],
+        "title": "InteractionResult"
+      },
+      "MessageInteraction": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "message",
+            "title": "Kind"
+          },
+          "client_message_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Client Message Id"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "client_message_id", "message"],
+        "title": "MessageInteraction"
+      },
+      "QuestionOption": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "title": "Option Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["option_id", "label"],
+        "title": "QuestionOption"
+      },
+      "QuestionResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "question",
+            "title": "Kind"
+          },
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id"
+          },
+          "input_type": {
+            "type": "string",
+            "enum": ["free_text", "single_choice", "confirmation"],
+            "title": "Input Type"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "reason_code": {
+            "type": "string",
+            "title": "Reason Code"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            },
+            "type": "array",
+            "title": "Options"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "question_id", "input_type", "prompt", "reason_code", "expires_at"],
+        "title": "QuestionResponse"
+      },
+      "Session": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Schema Version",
+            "default": "1"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "farm_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Farm Ids"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "farm_ids", "created_at"],
+        "title": "Session"
+      },
+      "SessionMessage": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Message Id"
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interaction Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Sequence"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"],
+            "title": "Role"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user_input", "assistant_answer", "clarification_question"],
+            "title": "Kind"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 32000,
+            "minLength": 1,
+            "title": "Content"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "question_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Id"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AnswerText"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnswerChoice"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnswerConfirmation"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "choice": "#/components/schemas/AnswerChoice",
+                    "confirmation": "#/components/schemas/AnswerConfirmation",
+                    "text": "#/components/schemas/AnswerText"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AnswerResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/QuestionResponse"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "answer": "#/components/schemas/AnswerResponse",
+                    "question": "#/components/schemas/QuestionResponse"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response"
+          },
+          "redacted": {
+            "type": "boolean",
+            "title": "Redacted",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message_id",
+          "interaction_id",
+          "sequence",
+          "role",
+          "kind",
+          "content",
+          "created_at"
+        ],
+        "title": "SessionMessage",
+        "description": "Mensagem pública, já sanitizada, retornada ao titular da sessão."
+      },
+      "SessionMessagesPage": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Schema Version",
+            "default": "1"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionMessage"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "items", "next_cursor", "has_more"],
+        "title": "SessionMessagesPage",
+        "description": "Página cronológica de mensagens anteriores à fronteira do cursor."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

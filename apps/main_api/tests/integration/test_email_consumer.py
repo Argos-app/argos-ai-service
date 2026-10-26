@@ -155,6 +155,11 @@ def _factory(
         )
 
     async def farm(_input, context):
+        limits = context.get("argos_execution_limits")
+        assert limits is not None
+        limits.record_tool_success(
+            "farm", "resolve_report_lot_report_source", '{"report_source_ready": true}'
+        )
         session_id = UUID(context["session_id"])
         interaction_id = UUID(context["interaction_id"])
         task_id = context["argos_task_id"]
@@ -338,14 +343,28 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             assert agent_factory._agents[AgentId.SECRETARY].result is not None, agent_factory.calls
             secretary_answer = agent_factory._agents[AgentId.SECRETARY].result.answer
             if expected_dispatch:
-                assert "MCP confirmou" in secretary_answer, secretary_answer
+                assert "O provedor aceitou o despacho" in secretary_answer, secretary_answer
+                assert "não confirma a entrega" in secretary_answer, secretary_answer
             assert public_result["response"]["kind"] == "answer"
             public_text = public_result["response"]["text"]
             if expected_dispatch:
-                assert "MCP confirmou o recebimento" in public_text
+                authorization = await mongo[database_name]["ai_email_send_authorizations"].find_one(
+                    {
+                        "principal_user_id": str(user_id),
+                        "session_id": session_id,
+                        "source_interaction_id": public_result["interaction_id"],
+                    }
+                )
+                assert authorization is not None
+                operation_reference = await mongo[database_name][
+                    "ai_email_operation_references"
+                ].find_one({"_id": authorization["_id"]})
+                assert operation_reference is not None
+                assert operation_reference["last_known_status"] == "accepted"
+                assert "O provedor aceitou o despacho" in public_text
                 assert "não confirma a entrega" in public_text
             else:
-                assert "MCP confirmou o recebimento" not in public_text
+                assert "O provedor aceitou o despacho" not in public_text
             assert "matheus@example.test" not in public_text
             assert harness.title not in public_text
             stored_report = await harness.database.prepared_reports.find_one({})

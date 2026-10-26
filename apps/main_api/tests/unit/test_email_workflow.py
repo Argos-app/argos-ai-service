@@ -9,7 +9,12 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from app.application.email_dispatch_workflow import EmailDispatchWorkflow
+from app.agent_schemas.synthesis import EmailDispatchEvidence
+from app.application.email_dispatch_workflow import (
+    EmailDispatchWorkflow,
+    _recipient_selectors_match,
+    _safe_result,
+)
 from app.application.email_workflow import EmailWorkflow, _fingerprint
 from app.domain.email_preparations import (
     EmailOperationReference,
@@ -18,6 +23,10 @@ from app.domain.email_preparations import (
     SendAuthorizationOrigin,
 )
 from app.domain.report_artifacts import ReportArtifact
+from app.infrastructure.persistence.email_preparations import (
+    _operation_reference,
+    _operation_reference_document,
+)
 from app.ports.email_preparation_repository import EmailSendAuthorizationConflictError
 
 from packages.contracts import (
@@ -93,6 +102,16 @@ class _Preparations:
             ),
             None,
         )
+
+    async def list_prepared_for_session(self, *, principal_user_id, session_id, limit=20):
+        values = [
+            item
+            for item in self.records.values()
+            if item.principal_user_id == principal_user_id
+            and item.session_id == session_id
+            and item.prepared_report.status == PreparedReportStatus.PREPARED
+        ]
+        return tuple(values[:limit])
 
     async def save_pending_recipient_resolution(self, resolution):
         self.pending.append(resolution)
@@ -251,7 +270,7 @@ def test_prepare_report_uses_protected_context_persists_full_response_and_reuses
         subject="Sensitive generated subject",
         body="Sensitive generated report body",
         created_at=datetime.now(UTC),
-        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     email_client = _EmailClient(prepared)
     preparations = _Preparations()
@@ -292,6 +311,9 @@ def test_prepare_report_uses_protected_context_persists_full_response_and_reuses
 
     assert result["status"] == "prepared"
     assert result["report_id"] == str(prepared.report_id)
+    assert datetime.fromisoformat(result["expires_at"]) == artifact.envelope.valid_until
+    saved = next(iter(preparations.records.values()))
+    assert saved.prepared_report.expires_at == artifact.envelope.valid_until
     assert repeated["reused"] is True
     assert len(email_client.calls) == 1
     sent = email_client.calls[0][1]["payload"]
@@ -301,7 +323,9 @@ def test_prepare_report_uses_protected_context_persists_full_response_and_reuses
     assert sent["report_title"] == "Relatório do lote L-1"
     assert "ana@example.com" not in json.dumps(result)
     assert "Sensitive generated report body" not in json.dumps(result)
-    assert next(iter(preparations.records.values())).prepared_report == prepared
+    assert saved.prepared_report == prepared.model_copy(
+        update={"expires_at": artifact.envelope.valid_until}
+    )
     assert preparations.authorizations == {}
     assert artifacts.scope[1]["task_id"] == artifact.task_id
 
@@ -514,6 +538,33 @@ def _dispatch_result(report_id, operation_id=None, status=DispatchStatus.ACCEPTE
     )
 
 
+def test_dispatch_result_carries_structured_status_and_recipient_count():
+    report_id = uuid4()
+    result = _dispatch_result(report_id)
+
+    payload = json.loads(_safe_result(result, recipient_count=5))
+
+    assert payload["status"] == "accepted"
+    assert payload["confirmed"] is True
+    assert payload["report_id"] == str(report_id)
+    assert payload["operation_id"] == str(result.operation_id)
+    assert payload["recipient_count"] == 5
+    assert "não confirma a entrega" in payload["message"]
+
+
+def test_recovered_dispatch_result_matches_graph_evidence_contract():
+    result = _dispatch_result(uuid4())
+
+    evidence = EmailDispatchEvidence.model_validate_json(
+        _safe_result(result, recovered=True, status_refresh_failed=True)
+    )
+
+    assert evidence.status == "accepted"
+    assert evidence.confirmed is True
+    assert evidence.recovered is True
+    assert "último estado confirmado" in evidence.message
+
+
 def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
     artifact, property_id = _artifact()
     prepared = PreparedReport(
@@ -561,8 +612,93 @@ def test_dispatch_persists_reference_and_status_uses_stored_operation_id():
         repository.operation_references[authorization.authorization_id].operation_id
         == sent.operation_id
     )
-    assert str(sent.operation_id) not in json.dumps(send_result)
+    assert send_result["operation_id"] == str(sent.operation_id)
     assert "idempotency_key" not in json.dumps(send_result)
+
+
+def test_confirmation_matches_unicode_apostrophe_variant_of_persisted_recipient():
+    recipient = RecipientRef(
+        recipient_id=uuid4(), name="Vinicius D'Oliveira", email="vinicius@example.com"
+    )
+
+    assert _recipient_selectors_match(
+        {"[DESTINATARIO_1]": {"kind": "name", "value": "Vinicius D’Oliveira"}},
+        (recipient,),
+    )
+
+
+def test_explicit_confirmation_sends_the_unique_prepared_report_without_repreparing():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    accepted = _dispatch_result(prepared.report_id)
+
+    def respond(name, arguments):
+        assert name == "send_report"
+        assert arguments["payload"]["report_id"] == str(prepared.report_id)
+        return SimpleNamespace(structuredContent=accepted.model_dump(mode="json"), content=[])
+
+    client = _EmailClient(respond)
+    workflow, repository, original_authorization, config = _authorized_dispatch(
+        artifact, prepared, property_id, client
+    )
+    repository.authorizations.clear()
+    config.update(
+        {
+            "argos_send_intent_requested": True,
+            "recipient_selectors": {"recipient-1": {"kind": "email", "value": "ana@example.com"}},
+        }
+    )
+
+    result = json.loads(asyncio.run(workflow.send(configurable=config)))
+
+    assert result["status"] == "accepted"
+    assert result["report_id"] == str(prepared.report_id)
+    assert [name for name, _, _ in client.calls] == ["send_report"]
+    new_authorization = next(iter(repository.authorizations.values()))
+    assert new_authorization.report_id == prepared.report_id
+    assert new_authorization.preparation_reference == original_authorization.preparation_reference
+
+
+def test_explicit_confirmation_rejects_ambiguous_prepared_reports():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    client = _EmailClient(lambda *_: pytest.fail("não deve enviar com preparação ambígua"))
+    workflow, repository, _, config = _authorized_dispatch(artifact, prepared, property_id, client)
+    repository.authorizations.clear()
+    duplicate = next(iter(repository.records.values()))
+    duplicate_key = (artifact.principal_user_id, artifact.session_id, uuid4(), "duplicate")
+    duplicate_report = prepared.model_copy(update={"report_id": uuid4()})
+    repository.records[duplicate_key] = replace(
+        duplicate, reference=uuid4(), prepared_report=duplicate_report
+    )
+    config.update(
+        {
+            "argos_send_intent_requested": True,
+            "recipient_selectors": {"recipient-1": {"kind": "email", "value": "ana@example.com"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match="única preparação válida"):
+        asyncio.run(workflow.send(configurable=config))
+    assert client.calls == []
 
 
 def test_recover_interaction_outcome_reads_mcp_without_resending():
@@ -603,8 +739,70 @@ def test_recover_interaction_outcome_reads_mcp_without_resending():
 
     summary = asyncio.run(workflow.recover_interaction_outcome(configurable=config))
 
-    assert summary == "O MCP confirmou o recebimento do envio; isso não confirma a entrega."
+    recovered = json.loads(summary)
+    assert recovered["status"] == "accepted"
+    assert recovered["confirmed"] is True
+    assert recovered["operation_id"] == str(sent.operation_id)
+    assert recovered["recipient_count"] == 1
+    assert "não confirma a entrega" in recovered["message"]
     assert [name for name, *_ in client.calls] == ["get_report_status"]
+
+
+def test_operation_reference_round_trips_last_known_provider_status():
+    artifact, _ = _artifact()
+    sent = _dispatch_result(uuid4())
+    reference = EmailOperationReference(
+        authorization_id=uuid4(),
+        principal_user_id=artifact.principal_user_id,
+        session_id=artifact.session_id,
+        operation_id=sent.operation_id,
+        recorded_at=datetime.now(UTC),
+        last_known_status=sent.status,
+        last_known_updated_at=sent.updated_at,
+    )
+
+    restored = _operation_reference(_operation_reference_document(reference))
+
+    assert restored == reference
+
+
+def test_recovery_preserves_last_known_send_result_when_status_lookup_fails():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    sent = _dispatch_result(prepared.report_id)
+
+    def respond(name, _arguments):
+        if name == "send_report":
+            return SimpleNamespace(structuredContent=sent.model_dump(mode="json"), content=[])
+        raise TimeoutError("consulta posterior temporariamente indisponível")
+
+    client = _EmailClient(respond)
+    workflow, _, _, config = _authorized_dispatch(artifact, prepared, property_id, client)
+
+    async def send_and_recover():
+        sent_result = json.loads(await workflow.send(configurable=config))
+        recovered_result = json.loads(
+            await workflow.recover_interaction_outcome(configurable=config)
+        )
+        return sent_result, recovered_result
+
+    sent_result, recovered_result = asyncio.run(send_and_recover())
+
+    assert sent_result["status"] == "accepted"
+    assert recovered_result["status"] == "accepted"
+    assert recovered_result["confirmed"] is True
+    assert "não confirma a entrega" in recovered_result["message"]
+    assert "último estado confirmado" in recovered_result["message"]
+    assert [name for name, *_ in client.calls] == ["send_report", "get_report_status"]
 
 
 def test_lost_send_response_retries_with_same_report_and_idempotency_key():

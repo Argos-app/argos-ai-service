@@ -1,3 +1,3 @@
 """Reutiliza o servidor isolado de e-mail como dependência externa de teste."""
 
-pytest_plugins = ("apps.mcp_email.tests.integration.conftest",)
+from apps.mcp_email.tests.integration.conftest import mcp_harness  # noqa: F401

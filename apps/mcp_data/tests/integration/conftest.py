@@ -1,4 +1,4 @@
-"""Harness descartável para chamadas MCP reais contra o schema SQL remoto."""
+"""Harness descartável para chamadas MCP reais contra o schema local do projeto."""
 
 import asyncio
 import base64
@@ -15,40 +15,29 @@ from uuid import uuid4
 import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parents[4]
-ENGINEERING_REVISION = "2f24af7abd25ab4afda7cb1561f02973db0b19d5"
-ENGINEERING_REPOSITORY = Path(
-    os.getenv("ARGOS_DATA_ENGINEERING_REPO", str(ROOT.parent / "argos-data-engineering"))
-)
 SQL_ADMIN_DSN = "postgresql://mcp_data_test:mcp_data_test_local_only@127.0.0.1:54329/mcp_data_test"
 MONGO_URI = "mongodb://127.0.0.1:27029"
-SCHEMA_MODULES = (
-    "modulos/01_configuracao.sql",
-    "modulos/02_tabelas.sql",
-    "modulos/03_dados_iniciais.sql",
-    "modulos/04_indices.sql",
-    "modulos/05_funcoes.sql",
-    "modulos/06_triggers.sql",
-    "modulos/07_procedures.sql",
-    "modulos/08_views.sql",
-    "modulos/09_data_mart.sql",
+SCHEMA_MODULES = tuple(
+    ROOT / "infrastructure" / "docker" / "postgres" / "init" / f"{index:02d}_{name}.sql"
+    for index, name in enumerate(
+        (
+            "configuracao",
+            "tabelas",
+            "dados_iniciais",
+            "indices",
+            "funcoes",
+            "triggers",
+            "procedures",
+            "views",
+            "data_mart",
+        ),
+        start=1,
+    )
 )
 
 
-def _schema_sql(path: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(ENGINEERING_REPOSITORY), "show", f"{ENGINEERING_REVISION}:{path}"],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError(
-            f"Não foi possível ler {path} no commit remoto fixado {ENGINEERING_REVISION}; "
-            "configure ARGOS_DATA_ENGINEERING_REPO com o clone que contém essa revisão."
-        ) from exc
-    return result.stdout
+def _schema_sql(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def _b64url(value: bytes) -> str:
@@ -103,6 +92,11 @@ class McpDataHarness:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
+        private_key_der = self.private_key.private_bytes(
+            serialization.Encoding.DER,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
         env = dict(os.environ)
         env.update(
             PYTHONPATH=os.pathsep.join((str(ROOT / "apps/mcp_data/src"), str(ROOT))),
@@ -121,6 +115,8 @@ class McpDataHarness:
             MCP_DATA_TRUSTED_DELEGATION_KEYS=json.dumps(
                 {"integration-key": base64.b64encode(public_key).decode("ascii")}
             ),
+            MCP_DATA_REPORT_SIGNING_KEY_ID="integration-key",
+            MCP_DATA_REPORT_SIGNING_PRIVATE_KEY=base64.b64encode(private_key_der).decode("ascii"),
             MCP_DATA_HOST="127.0.0.1",
             MCP_DATA_PORT=str(self.port),
         )

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 
@@ -22,6 +23,7 @@ from packages.observability import (
     OperationKind,
     OperationPhase,
     ProtocolMetadata,
+    current_correlation_id,
 )
 
 MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
@@ -30,6 +32,7 @@ MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
             "list_properties",
             "list_herds",
             "list_lots",
+            "get_lot_report_source",
             "list_exception_animals",
             "list_applications",
             "list_application_animals",
@@ -67,7 +70,12 @@ class McpResponseTooLargeError(RuntimeError):
     """A resposta MCP excedeu o limite configurado para o principal."""
 
 
-def _validate_endpoint(url: str, service_name: str) -> None:
+def _validate_endpoint(
+    url: str,
+    service_name: str,
+    *,
+    allow_local_http: bool = False,
+) -> None:
     try:
         parsed = urlsplit(url)
         hostname = parsed.hostname
@@ -94,7 +102,14 @@ def _validate_endpoint(url: str, service_name: str) -> None:
             )
         except ValueError:
             is_loopback = False
-        if not is_loopback:
+        local_service_hosts = {
+            "data": {"mcp_data", "mcp-data"},
+            "prediction": {"mcp_prediction", "mcp-prediction"},
+            "email": {"mcp_email", "mcp-email"},
+        }
+        if not is_loopback and not (
+            allow_local_http and hostname.casefold() in local_service_hosts[service_name]
+        ):
             raise McpClientConfigurationError(
                 f"o MCP {service_name} deve usar HTTPS fora do loopback"
             )
@@ -112,6 +127,7 @@ class McpToolServerClient:
     allowed_tools: frozenset[str]
     timeout_seconds: float = 10.0
     response_max_bytes: int = 1_000_000
+    allow_local_http: bool = field(default=False, repr=False, compare=False)
     observation_collector: ObservationCollector | None = field(
         default=None, repr=False, compare=False
     )
@@ -119,7 +135,11 @@ class McpToolServerClient:
     def __post_init__(self) -> None:
         if self.service_name not in MCP_TOOL_ALLOWLISTS:
             raise McpClientConfigurationError(f"serviço MCP desconhecido: {self.service_name}")
-        _validate_endpoint(self.url, self.service_name)
+        _validate_endpoint(
+            self.url,
+            self.service_name,
+            allow_local_http=self.allow_local_http,
+        )
         if not self.service_token.strip():
             raise McpClientConfigurationError(f"token do MCP {self.service_name} está vazio")
         if (
@@ -136,17 +156,33 @@ class McpToolServerClient:
         from mcp.client.streamable_http import streamable_http_client
 
         headers = {"Authorization": f"Bearer {self.service_token}"}
-        delegation_headers = [
-            value
-            for name, value in (request_headers or {}).items()
-            if name.casefold() == "x-argos-delegation"
-        ]
-        if len(delegation_headers) > 1 or any(not value.strip() for value in delegation_headers):
-            raise ValueError("delegação ausente ou duplicada na chamada MCP")
+        supported_headers = {"x-argos-delegation", "x-argos-correlation-id"}
+        seen_headers: set[str] = set()
         for name, value in (request_headers or {}).items():
-            if name.casefold() != "x-argos-delegation" or not value.strip():
-                raise ValueError("somente o header de delegação pode variar por chamada MCP")
-            headers["X-Argos-Delegation"] = value
+            normalized_name = name.casefold()
+            if normalized_name not in supported_headers or not value.strip():
+                raise ValueError("header variável não permitido na chamada MCP")
+            if normalized_name in seen_headers:
+                raise ValueError("header duplicado na chamada MCP")
+            seen_headers.add(normalized_name)
+            if normalized_name == "x-argos-correlation-id":
+                try:
+                    parsed_correlation_id = UUID(value)
+                except (TypeError, ValueError, AttributeError) as exc:
+                    raise ValueError("correlation ID inválido na chamada MCP") from exc
+                if str(parsed_correlation_id) != value.lower():
+                    raise ValueError("correlation ID deve usar formato UUID canônico")
+                active_correlation_id = current_correlation_id()
+                if active_correlation_id and parsed_correlation_id != active_correlation_id:
+                    raise ValueError("correlation ID diverge do contexto da chamada")
+            headers[
+                "X-Argos-Delegation"
+                if normalized_name == "x-argos-delegation"
+                else "X-Argos-Correlation-ID"
+            ] = value
+        correlation_id = current_correlation_id()
+        if correlation_id is not None:
+            headers.setdefault("X-Argos-Correlation-ID", str(correlation_id))
 
         options = {
             "operation_kind": OperationKind.MCP,
@@ -246,7 +282,13 @@ class McpToolServerClient:
                 raise TypeError("arguments deve ser um objeto")
 
             try:
-                async with self._session(request_headers) as session:
+                propagated_headers = dict(request_headers or {})
+                correlation_id = current_correlation_id()
+                if correlation_id is not None and not any(
+                    name.casefold() == "x-argos-correlation-id" for name in propagated_headers
+                ):
+                    propagated_headers["X-Argos-Correlation-ID"] = str(correlation_id)
+                async with self._session(propagated_headers) as session:
                     result = await session.call_tool(name, dict(arguments))
             except McpConnectionError:
                 raise
@@ -336,5 +378,6 @@ def create_mcp_clients(settings: Settings) -> McpClients:
             allowed_tools=MCP_TOOL_ALLOWLISTS[service_name],
             timeout_seconds=settings.mcp_timeout_seconds,
             response_max_bytes=settings.mcp_response_max_bytes,
+            allow_local_http=settings.app_env == "local",
         )
     return McpClients(**clients)

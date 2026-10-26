@@ -1,8 +1,10 @@
 from datetime import UTC, date, datetime
+from hashlib import sha256
 from uuid import UUID, uuid4
 
 import pytest
 from argos_mcp_email.application import PrepareReport
+from argos_mcp_email.domain import ReportAttachmentRecord
 from argos_mcp_email.ports.report_renderer import RenderedReport
 
 from packages.contracts import (
@@ -118,7 +120,19 @@ async def test_prepares_and_persists_report_when_all_recipients_resolve():
 
     assert result.status == PreparedReportStatus.PREPARED
     assert result.body == "BOI-FELIZ: pronto"
+    attachment = result.attachments[0]
+    assert attachment.filename.endswith(".txt")
+    assert attachment.size_bytes == len(result.body.encode("utf-8"))
+    assert attachment.sha256 == sha256(result.body.encode("utf-8")).hexdigest()
     assert len(repository.saved) == 1
+    assert repository.saved[0].attachments == (
+        ReportAttachmentRecord(
+            filename=attachment.filename,
+            content_type="text/plain",
+            content=result.body.encode("utf-8"),
+            sha256=attachment.sha256,
+        ),
+    )
 
 
 @pytest.mark.asyncio

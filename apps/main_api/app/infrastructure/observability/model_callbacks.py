@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -10,14 +11,18 @@ from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler
 
 from packages.observability import (
+    Billing,
+    CancellationState,
     ErrorOrigin,
     ObservationCollector,
     ObservationLevel,
+    ObservationStatus,
     OperationKind,
     OperationPhase,
     Usage,
     UsageAvailability,
     UsageSource,
+    billing_with_fallback,
 )
 
 from .recording import OperationRecorder
@@ -203,6 +208,18 @@ def _usage_from_message(message: Any, llm_output: Any) -> Usage:
     )
 
 
+def _billing_from_message(message: Any, llm_output: Any, usage: Usage) -> Billing | None:
+    return billing_with_fallback(
+        {
+            "llm_output": llm_output,
+            "usage_metadata": getattr(message, "usage_metadata", None),
+            "response_metadata": getattr(message, "response_metadata", None),
+        },
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
+
+
 def _returned_model(response: Any, message: Any) -> str | None:
     metadata = _mapping(getattr(message, "response_metadata", None)) or {}
     llm_output = _mapping(getattr(response, "llm_output", None)) or {}
@@ -257,9 +274,13 @@ class ModelUsageCallback(AsyncCallbackHandler):
             return
         message = self._first_message(response)
         try:
+            usage = _usage_from_message(message, getattr(response, "llm_output", None))
             recorder.finish(
                 model_returned=_returned_model(response, message),
-                usage=_usage_from_message(message, getattr(response, "llm_output", None)),
+                usage=usage,
+                billing=_billing_from_message(
+                    message, getattr(response, "llm_output", None), usage
+                ),
             )
         except Exception:
             recorder.finish(usage=Usage(availability=UsageAvailability.ABSENT))
@@ -276,9 +297,32 @@ class ModelUsageCallback(AsyncCallbackHandler):
         if recorder is not None:
             recorder.finish(
                 error=error,
+                status=(
+                    ObservationStatus.CANCELLED
+                    if isinstance(error, asyncio.CancelledError)
+                    else ObservationStatus.FAILED
+                ),
+                cancellation_state=(
+                    CancellationState.OBSERVED
+                    if isinstance(error, asyncio.CancelledError)
+                    else None
+                ),
                 error_origin=ErrorOrigin.PROVIDER,
                 usage=Usage(availability=UsageAvailability.ABSENT),
             )
+
+    def finish_pending(self, error: BaseException) -> None:
+        """Close provider observations when cancellation bypasses LangChain callbacks."""
+        cancelled = isinstance(error, asyncio.CancelledError)
+        for run_id, recorder in tuple(self._recorders.items()):
+            recorder.finish(
+                error=error,
+                status=(ObservationStatus.CANCELLED if cancelled else ObservationStatus.FAILED),
+                cancellation_state=(CancellationState.OBSERVED if cancelled else None),
+                error_origin=ErrorOrigin.APPLICATION if cancelled else ErrorOrigin.PROVIDER,
+                usage=Usage(availability=UsageAvailability.ABSENT),
+            )
+            self._recorders.pop(run_id, None)
 
     def _start(
         self,

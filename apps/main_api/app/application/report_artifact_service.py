@@ -1,5 +1,6 @@
 """Validação contextual de origens assinadas de relatório."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID
@@ -21,6 +22,7 @@ def validate_report_source(
     principal_user_id: UUID,
     lot_id: UUID,
     authorized_property_ids: tuple[UUID, ...],
+    signature_checker: Callable[[bytes, str, str], bool] | None = None,
     now: datetime | None = None,
 ) -> LotReportEnvelope:
     """Valida claims, escopo, validade e hash antes de qualquer uso da origem."""
@@ -53,4 +55,8 @@ def validate_report_source(
     expected_hash = f"sha256:{sha256(canonical).hexdigest()}"
     if envelope.payload_hash != expected_hash:
         raise ReportSourceValidationError("hash do envelope não corresponde ao conteúdo")
+    if signature_checker is not None and not signature_checker(
+        canonical, envelope.signature, envelope.signature_key_id
+    ):
+        raise ReportSourceValidationError("assinatura da origem inválida")
     return envelope

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.infrastructure.observability.mongo_repository import (
@@ -79,6 +79,8 @@ def _observation(
     status: ObservationStatus = ObservationStatus.STARTED,
     operation_id: str | None = None,
     operation_name: str = "model.generate",
+    session_id: UUID | None = None,
+    interaction_id: UUID | None = None,
 ) -> Observation:
     started = datetime(2026, 10, 12, 12, 0, 0, tzinfo=UTC)
     terminal = status != ObservationStatus.STARTED
@@ -96,6 +98,8 @@ def _observation(
         duration_ms=37.0 if terminal else None,
         updated_at=ended or started,
         status=status,
+        session_id=session_id,
+        interaction_id=interaction_id,
         error=(
             {
                 "type": "timeout_error",
@@ -110,6 +114,17 @@ def _observation(
     )
 
 
+def test_document_for_persists_session_and_interaction_join_keys():
+    session_id, interaction_id = uuid4(), uuid4()
+    document, _ = MongoObservationRepository.document_for(
+        _observation(session_id=session_id, interaction_id=interaction_id)
+    )
+
+    assert document["schema_version"] == "2"
+    assert document["session_id"] == str(session_id)
+    assert document["interaction_id"] == str(interaction_id)
+
+
 @pytest.mark.asyncio
 async def test_repository_indexes_only_for_period_and_incremental_extraction():
     collection = FakeCollection()
@@ -118,6 +133,9 @@ async def test_repository_indexes_only_for_period_and_incremental_extraction():
     await repository.ensure_indexes()
 
     assert collection.indexes == [
+        ([("correlation_id", 1), ("started_at", 1)], "ix_observability_correlation_started"),
+        ([("interaction_id", 1), ("started_at", 1)], "ix_observability_interaction_started"),
+        ([("session_id", 1), ("started_at", 1)], "ix_observability_session_started"),
         ([("started_at", 1), ("_id", 1)], "ix_observability_started_id"),
         ([("updated_at", 1), ("_id", 1)], "ix_observability_updated_id"),
     ]
@@ -181,13 +199,17 @@ async def test_replayed_start_does_not_regress_terminal_and_conflict_is_reported
 
 def test_bson_document_preserves_dates_decimal_and_size():
     observation = _observation(status=ObservationStatus.SUCCEEDED)
+    correlation_id = uuid4()
+    parent_observation_id = uuid4()
     observation = observation.model_copy(
         update={
             "billing": Billing(
                 reported_cost=Decimal("0.0123"),
                 currency="USD",
                 cost_source="provider",
-            )
+            ),
+            "correlation_id": correlation_id,
+            "parent_observation_id": parent_observation_id,
         }
     )
 
@@ -198,7 +220,29 @@ def test_bson_document_preserves_dates_decimal_and_size():
     decoded_document = BSON(decoded).decode()
     assert isinstance(decoded_document["started_at"], datetime)
     assert isinstance(decoded_document["billing"]["reported_cost"], Decimal128)
+    assert decoded_document["correlation_id"] == str(correlation_id)
+    assert decoded_document["parent_observation_id"] == str(parent_observation_id)
     assert "expires_at" not in document
+
+
+def test_bson_document_persists_configured_rate_in_existing_billing_shape():
+    observation = _observation(status=ObservationStatus.SUCCEEDED).model_copy(
+        update={
+            "billing": Billing(
+                reported_cost=Decimal("0.001"),
+                currency="USD",
+                cost_source="configured_rate",
+            )
+        }
+    )
+
+    document, _ = MongoObservationRepository.document_for(observation)
+    billing = document["billing"]
+
+    assert set(billing) == {"reported_cost", "currency", "cost_source"}
+    assert isinstance(billing["reported_cost"], Decimal128)
+    assert billing["currency"] == "USD"
+    assert billing["cost_source"] == "configured_rate"
 
 
 @pytest.mark.asyncio

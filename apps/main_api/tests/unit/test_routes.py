@@ -12,6 +12,9 @@ from pydantic import ValidationError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 app = import_module("app.main").app
+ApplicationError = import_module("app.application.errors").ApplicationError
+ApplicationErrorCode = import_module("app.application.errors").ApplicationErrorCode
+create_app = import_module("app.main").create_app
 MessageInteraction = import_module("app.api.v1.models.interactions").MessageInteraction
 QuestionResponse = import_module("app.api.v1.models.interactions").QuestionResponse
 
@@ -19,9 +22,35 @@ QuestionResponse = import_module("app.api.v1.models.interactions").QuestionRespo
 client = TestClient(app)
 
 
+class _FakeChatModel:
+    def with_structured_output(self, _schema):
+        return self
+
+    def bind_tools(self, _tools):
+        return self
+
+
+def _fake_models():
+    ModelPolicyId = import_module("app.agents.registry").ModelPolicyId
+    return {policy: _FakeChatModel() for policy in ModelPolicyId}
+
+
 def test_health_and_readiness() -> None:
     assert client.get("/health/live").json() == {"status": "ok"}
     assert client.get("/health/ready").status_code == 503
+
+
+def test_application_errors_keep_the_public_http_error_shape() -> None:
+    application = create_app(agent_graph=object(), models=_fake_models())
+
+    @application.get("/application-error-contract")
+    async def raise_application_error():
+        raise ApplicationError(ApplicationErrorCode.CONFLICT, "Conflito de teste")
+
+    response = TestClient(application).get("/application-error-contract")
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Conflito de teste"}
 
 
 def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -> None:
@@ -30,6 +59,7 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
 
     class Runtime:
         persistence = object()
+        user_usage_counter = None
         database = type("Database", (), {"command": lambda self, name: _ping()})()
 
         async def close(self):
@@ -54,14 +84,27 @@ def test_readiness_requires_authentication_keys_and_graph_runtime(monkeypatch) -
     with TestClient(
         main_module.create_app(
             Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            checkpointer=runtime_checkpointer,
         )
-    ) as ready:
-        assert ready.get("/health/ready").json() == {"status": "ok"}
+    ) as models_missing:
+        response = models_missing.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["reason"] == "model_runtime_not_configured"
+
+    with TestClient(
+        main_module.create_app(
+            Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            models=_fake_models(),
+            agent_graph=object(),
+        )
+    ) as configured:
+        assert configured.get("/health/ready").json() == {"status": "ok"}
 
     runtime_checkpointer = None
     with TestClient(
         main_module.create_app(
             Settings(mongo_uri="mongodb://test", auth_trusted_public_keys=(("kid", "key"),)),
+            models=_fake_models(),
         )
     ) as no_runtime:
         response = no_runtime.get("/health/ready")
@@ -78,6 +121,13 @@ def test_planned_routes_are_present() -> None:
         ("/v1/sessions/{session_id}/interactions", "post"),
     }
     assert all(method in paths[path] for path, method in expected)
+    assert app.openapi()["components"]["schemas"]["InteractionResult"]["properties"]["status"][
+        "enum"
+    ] == ["completed", "degraded"]
+    assert (
+        "degradation_reasons"
+        in app.openapi()["components"]["schemas"]["InteractionResult"]["properties"]
+    )
     assert "/v1/sessions/{session_id}/answers" not in paths
     assert "/v1/sessions/{session_id}" not in paths
     assert "/v1/sessions/{session_id}/interactions/{interaction_id}" not in paths

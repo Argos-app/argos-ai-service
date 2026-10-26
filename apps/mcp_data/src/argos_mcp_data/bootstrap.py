@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from argos_mcp_data.adapters.delegation import DelegationTokenVerifier
+from argos_mcp_data.adapters.report_signer import Ed25519LotReportSigner
 from argos_mcp_data.application import AccessPolicy, CattleQueryService, MedicineQueryService
 from argos_mcp_data.infrastructure import (
     AsyncpgSqlReader,
@@ -82,6 +83,11 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
     sql_reader = AsyncpgSqlReader(sql_pool)
     try:
         access_policy = AccessPolicy(PostgresAccessDirectory(sql_reader))
+        report_signer = Ed25519LotReportSigner(
+            key_id=configured.report_signing_key_id,
+            private_key_base64=configured.report_signing_private_key,
+            ttl_seconds=configured.report_envelope_ttl_seconds,
+        )
         mongo_reader = ReadOnlyMongoReader(database)
         document_repository = MongoCattleDocumentRepository(
             mongo_reader,
@@ -93,6 +99,7 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
             PostgresCattleRepository(sql_reader),
             document_repository,
             PostgresCattleAggregateRepository(sql_reader),
+            report_signer,
         )
         register_cattle_tools(server, cattle_queries)
         medicine_queries = MedicineQueryService(

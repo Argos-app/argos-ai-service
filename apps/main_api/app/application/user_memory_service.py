@@ -31,8 +31,12 @@ _DELETE_COMMAND = re.compile(
 )
 _NEGATED_DELETE = re.compile(r"\b(?:nao|nunca)\b.{0,32}\b(?:quero|peco|desejo)\b")
 _NEGATED_IMPERATIVE = re.compile(r"\b(?:nao|nunca)(?:\s+\w+){0,4}\s*$")
-_TONE_MARKERS = re.compile(r"\b(?:tom|estilo|linguagem|forma de falar|jeito de falar)\b")
+_TONE_MARKERS = re.compile(
+    r"\b(?:tom|estilo|linguagem|forma de falar|jeito de falar|respostas?|explicacoes?)\b"
+)
+_TONE_DECLARATION = re.compile(r"\b(?:prefiro|gosto|quero|peco|sempre|use|responda)\b")
 _GOAL_MARKERS = re.compile(r"\b(?:objetivo|meta|proposito|finalidade)\b")
+_PERSONAL_GOAL = re.compile(r"\b(?:meu|minha)\s+(?:objetivo|meta|proposito|finalidade)\b")
 _ALL_MEMORY_MARKERS = re.compile(r"\b(?:memoria|perfil|preferencias)\b")
 
 
@@ -59,7 +63,10 @@ class UserMemoryService:
         current = await self._repository.get(user_id)
         explicit_deletions = _explicit_deletions(safe_input)
         change = UserMemoryChange()
-        if self._extractor_provider is not None:
+        if self._extractor_provider is not None and _should_extract_memory(
+            safe_input,
+            explicit_deletions=explicit_deletions,
+        ):
             try:
                 extractor = self._extractor_provider()
                 if extractor is not None:
@@ -122,6 +129,26 @@ def _explicit_deletions(text: str) -> UserMemoryChange:
             if has_goal
             else UserMemoryFieldChange()
         ),
+    )
+
+
+def _should_extract_memory(text: str, *, explicit_deletions: UserMemoryChange) -> bool:
+    """Só chama o modelo quando a mensagem pode alterar memória duradoura."""
+    normalized = _normalize(text)
+    has_positive_tone = bool(
+        _TONE_MARKERS.search(normalized) and _TONE_DECLARATION.search(normalized)
+    )
+    has_positive_goal = bool(_PERSONAL_GOAL.search(normalized))
+    has_positive_memory = bool(
+        _ALL_MEMORY_MARKERS.search(normalized)
+        and re.search(r"\b(?:prefiro|quero|registre|lembre|considere)\b", normalized)
+    )
+    if has_positive_tone or has_positive_goal or has_positive_memory:
+        return True
+    return (
+        explicit_deletions.tone.action != MemoryFieldAction.DELETE
+        and explicit_deletions.general_goal.action != MemoryFieldAction.DELETE
+        and bool(_GOAL_MARKERS.search(normalized) or _TONE_MARKERS.search(normalized))
     )
 
 

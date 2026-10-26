@@ -80,7 +80,7 @@ class DocumentCorpusSynchronizer:
         rebuild_all = old_manifest is None or old_manifest.corpus_revision != self._revision(
             tuple(old_documents.values()) if old_manifest else ()
         )
-        if old_manifest is not None:
+        if old_manifest is not None and not rebuild_all:
             if not await self._index_writer.generation_exists(old_manifest.corpus_revision):
                 raise CorpusSynchronizationError(
                     "a geração declarada pelo manifesto não existe no Qdrant"

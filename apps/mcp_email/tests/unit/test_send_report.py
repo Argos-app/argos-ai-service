@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,7 @@ from argos_mcp_email.domain import (
     DispatchRecord,
     DispatchState,
     PreparedReportRecord,
+    ReportAttachmentRecord,
     ReportNotFoundError,
     ResolvedRecipient,
 )
@@ -147,6 +149,30 @@ async def test_sends_prepared_report_and_persists_accepted_state():
 
 
 @pytest.mark.asyncio
+async def test_sends_the_persisted_report_attachment_to_the_provider():
+    content = b"Relatorio sintetico de homologacao"
+    attachment = ReportAttachmentRecord(
+        filename="relatorio.txt",
+        content_type="text/plain",
+        content=content,
+        sha256=sha256(content).hexdigest(),
+    )
+    report = replace(prepared_report(), attachments=(attachment,))
+    dispatch = FakeDispatchRepository()
+    provider = FakeProvider(ProviderSendResult(accepted=True))
+
+    await use_case(report, dispatch, provider).execute(
+        SendReportRequest(
+            report_id=report.report_id,
+            requested_by=REQUESTER,
+            idempotency_key="send-with-attachment",
+        )
+    )
+
+    assert provider.calls[0]["attachments"] == (attachment,)
+
+
+@pytest.mark.asyncio
 async def test_provider_exception_becomes_unknown_without_retry():
     report = prepared_report()
     dispatch = FakeDispatchRepository()
@@ -160,6 +186,35 @@ async def test_provider_exception_becomes_unknown_without_retry():
 
     assert result.status == DispatchStatus.UNKNOWN
     assert result.error_code == "provider_result_unknown"
+
+
+@pytest.mark.parametrize("state", [DispatchState.PENDING, DispatchState.UNKNOWN])
+@pytest.mark.asyncio
+async def test_replay_of_pending_or_unknown_operation_never_calls_provider(state):
+    report = prepared_report()
+    existing = DispatchRecord(
+        operation_id=uuid4(),
+        report_id=report.report_id,
+        requested_by=REQUESTER,
+        idempotency_key="ambiguous-operation",
+        state=state,
+        provider_message_id=None,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    dispatch = FakeDispatchRepository(existing=existing)
+    provider = FakeProvider(ProviderSendResult(accepted=True, provider_message_id="unexpected"))
+
+    result = await use_case(report, dispatch, provider).execute(
+        SendReportRequest(
+            report_id=report.report_id,
+            requested_by=REQUESTER,
+            idempotency_key="ambiguous-operation",
+        )
+    )
+
+    assert result.status == DispatchStatus(state.value)
+    assert provider.calls == []
 
 
 @pytest.mark.asyncio

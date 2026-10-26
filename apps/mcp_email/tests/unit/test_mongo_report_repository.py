@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
@@ -6,6 +7,7 @@ from argos_mcp_email.adapters.storage.mongo_reports import MongoReportRepository
 from argos_mcp_email.domain import (
     PreparedReportRecord,
     ReportAlreadyExistsError,
+    ReportAttachmentRecord,
     ResolvedRecipient,
 )
 
@@ -40,6 +42,14 @@ def report() -> PreparedReportRecord:
         source_payload_hash="sha256:abc",
         created_at=now,
         expires_at=now + timedelta(hours=1),
+        attachments=(
+            ReportAttachmentRecord(
+                filename="relatorio.txt",
+                content_type="text/plain",
+                content=b"relatorio sintetico",
+                sha256=sha256(b"relatorio sintetico").hexdigest(),
+            ),
+        ),
     )
 
 

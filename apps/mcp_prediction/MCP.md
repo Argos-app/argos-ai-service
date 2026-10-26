@@ -1,5 +1,8 @@
 # MCP de predição
 
+Guia vigente da interface MCP Streamable HTTP. Schemas das tools e contratos
+tipados do código são normativos.
+
 Servidor MCP read-only que estima o consumo histórico sazonal de medicamentos
 para o agente Analista. O cálculo usa aplicações registradas em uma janela de
 365 ou 366 dias e a média diária de cada mês do ano para estimar um horizonte de
@@ -101,6 +104,16 @@ automaticamente. Configure os valores fora do repositório:
 `unknown` é intencionalmente seguro: sem declarar a origem pelo serviço, a
 resposta não contém estimativa numérica. Não use `synthetic` para rotular dados
 reais, nem `recorded` para fixtures.
+
+## Diagnóstico e correlação
+
+O principal envia `X-Argos-Correlation-ID` e transmite `correlation_id` e
+`parent_observation_id` em claims opcionais protegidos pela delegação Ed25519.
+O servidor valida os UUIDs, mas
+não grava uma collection própria de observações; a observação de chamada MCP
+fica no principal. Portanto, ausência de registro não prova que não houve
+consulta e desconhecido não é consumo zero. Os IDs não fazem parte do payload
+da ferramenta. Veja [operação de observabilidade](../../docs/operacao-observabilidade.md).
 
 ## Execução local
 

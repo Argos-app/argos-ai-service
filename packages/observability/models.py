@@ -167,16 +167,16 @@ class Usage(_ObservabilityModel):
 
 
 class Billing(_ObservabilityModel):
-    reported_cost: Annotated[Decimal, Field(ge=0, max_digits=20, decimal_places=10)] | None = None
+    reported_cost: Annotated[Decimal, Field(ge=0, max_digits=34, decimal_places=20)] | None = None
     currency: Annotated[StrictStr, Field(pattern=r"^[A-Z]{3}$")] | None = None
-    cost_source: Literal["provider"] | None = None
+    cost_source: Literal["provider", "configured_rate"] | None = None
     service_tier: Annotated[StrictStr, Field(min_length=1, max_length=80)] | None = None
     price_reference: Annotated[StrictStr, Field(min_length=1, max_length=120)] | None = None
 
     @model_validator(mode="after")
     def validate_reported_cost(self) -> Billing:
         if self.reported_cost is not None and not all((self.currency, self.cost_source)):
-            raise ValueError("custo informado exige moeda e origem provider")
+            raise ValueError("custo informado exige moeda e origem")
         if self.reported_cost is None and (
             self.currency is not None or self.cost_source is not None
         ):
@@ -199,7 +199,11 @@ class Observation(_ObservabilityModel):
     """
 
     id: str = Field(alias="_id", min_length=36, max_length=36)
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["1", "2"] = "2"
+    correlation_id: UUID | None = None
+    parent_observation_id: UUID | None = None
+    session_id: UUID | None = None
+    interaction_id: UUID | None = None
     service: BoundedName
     environment: BoundedName
     service_version: Annotated[StrictStr, Field(min_length=1, max_length=120)] | None = None

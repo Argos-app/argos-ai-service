@@ -136,6 +136,7 @@ class PostgresCattleRepository(CattleReadRepository):
     async def list_lots(self, scope: AuthorizedScope, request: ListLotsRequest) -> Page[LotRecord]:
         filters = _BoundFilters(scope)
         optional = (
+            ("l.id = ?", request.lot_id),
             ("l.herd_id = ?", request.herd_id),
             ("position(lower(?) in lower(l.lot_code)) > 0", request.lot_code),
             ("l.category = ?", request.category),
@@ -156,7 +157,8 @@ class PostgresCattleRepository(CattleReadRepository):
             values=filters.values,
             sql=f"""
                 SELECT l.id AS lot_id, p.id AS property_id, p.name AS property_name,
-                       h.id AS herd_id, h.herd_name, l.lot_code, l.category,
+                       h.id AS herd_id, h.herd_name, h.breed AS herd_breed,
+                       l.lot_code, l.category,
                        l.is_exception_lot, l.exception_reason, l.head_count,
                        l.slaughter_release_date, l.fit_for_slaughter,
                        l.open_date, l.close_date, l.active

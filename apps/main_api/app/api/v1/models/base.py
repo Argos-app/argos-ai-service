@@ -1,7 +1,5 @@
-"""Base comum dos contratos HTTP."""
+"""Alias de compatibilidade para o modelo estrito da aplicação."""
 
-from pydantic import BaseModel, ConfigDict
+from app.application.contracts.base import ApplicationModel
 
-
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+StrictModel = ApplicationModel

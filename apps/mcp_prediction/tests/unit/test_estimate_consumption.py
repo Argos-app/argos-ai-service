@@ -11,6 +11,8 @@ from argos_mcp_prediction.application import EstimateMedicineConsumption
 from argos_mcp_prediction.domain import (
     ConsumptionGroup,
     ConsumptionUnit,
+    CoverageRecord,
+    CoverageState,
     MonthlyConsumptionRecord,
 )
 from argos_mcp_prediction.domain.errors import (
@@ -25,6 +27,20 @@ from packages.security.access_policy import AccessPolicy
 from packages.security.errors import AccessDeniedError
 
 pytestmark = pytest.mark.asyncio
+
+
+class ConfirmedCoverageRepository:
+    async def get_coverage(self, scope, *, start, end):
+        return tuple(
+            CoverageRecord(
+                property_id,
+                CoverageState.CONFIRMED,
+                start=start,
+                end=end,
+                source="validated-test-fixture",
+            )
+            for property_id in scope.property_ids
+        )
 
 
 @pytest.fixture
@@ -51,11 +67,11 @@ def scenario():
         MonthlyConsumptionRecord(group, 1, Decimal("310"), 31, 62),
     )
 
-    def service(origin=DataOrigin.RECORDED):
+    def service(origin=DataOrigin.RECORDED, coverage_repository=None):
         return EstimateMedicineConsumption(
             access_policy=AccessPolicy(directory),
             consumption_repository=repository,
-            coverage_repository=UnknownCoverageRepository(),
+            coverage_repository=coverage_repository or UnknownCoverageRepository(),
             data_origin=origin,
         )
 
@@ -68,16 +84,17 @@ def request(names=("ivermectina",), **filters):
     )
 
 
-async def test_resolved_name_produces_labeled_estimate_without_coverage_confirmation(scenario):
+async def test_unconfirmed_coverage_keeps_observations_but_suppresses_estimate(scenario):
     context, directory, repository, group, service = scenario
     response = await service().execute(context, request())
-    assert response.status == "estimated"
+    assert response.status == "insufficient_data"
     assert response.coverage[0].status == "unknown"
-    assert response.items[0].estimated_quantity == 10
+    assert response.items[0].estimated_quantity is None
     assert response.items[0].medicine_id == group.medicine_id
     assert response.items[0].medicine_name == "Marca de teste"
     assert response.items[0].active_ingredient == "Ivermectina"
     assert response.items[0].historical_quantity == 310
+    assert len(response.items[0].monthly_history) == 1
     scope = repository.aggregate_monthly.await_args.args[0]
     assert scope.property_ids == context.authorized_property_ids
     assert repository.aggregate_monthly.await_args.kwargs["medicine_names"] == ("ivermectina",)
@@ -105,7 +122,9 @@ async def test_multiple_medicines_matching_one_ingredient_remain_separate(scenar
     repository.aggregate_monthly.return_value += (
         MonthlyConsumptionRecord(other, 1, Decimal("62"), 2, 4),
     )
-    response = await service().execute(context, request())
+    response = await service(coverage_repository=ConfirmedCoverageRepository()).execute(
+        context, request()
+    )
     assert response.status == "estimated"
     assert len(response.items) == 2
     assert {item.unit for item in response.items} == {"ml", "mg"}
@@ -176,9 +195,10 @@ async def test_database_inconsistency_and_source_failure_are_distinct(scenario):
 
 async def test_unknown_data_origin_blocks_numbers_and_synthetic_origin_is_simulation(scenario):
     context, _, _, _, service = scenario
-    unknown = await service(DataOrigin.UNKNOWN).execute(context, request())
+    confirmed = ConfirmedCoverageRepository()
+    unknown = await service(DataOrigin.UNKNOWN, confirmed).execute(context, request())
     assert unknown.status == "insufficient_data"
     assert unknown.items[0].estimated_quantity is None
-    synthetic = await service(DataOrigin.SYNTHETIC).execute(context, request())
+    synthetic = await service(DataOrigin.SYNTHETIC, confirmed).execute(context, request())
     assert synthetic.status == "estimated"
     assert synthetic.mode == "simulation"

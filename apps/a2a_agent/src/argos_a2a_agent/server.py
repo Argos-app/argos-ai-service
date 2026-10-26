@@ -101,7 +101,7 @@ def create_a2a_server(
     sincronização sem anunciar uma capacidade indisponível.
     """
 
-    settings.validate_runtime(require_providers=False)
+    settings.validate_runtime(require_providers=False, require_permission_sql=False)
     try:
         from starlette.applications import Starlette
         from starlette.middleware import Middleware
@@ -116,6 +116,11 @@ def create_a2a_server(
         return JSONResponse({"status": "ok"})
 
     async def ready(request: Any) -> Any:
+        if agent_registry is None:
+            return JSONResponse(
+                {"status": "unavailable", "reason": "agent_runtime_not_configured"},
+                status_code=503,
+            )
         try:
             await readiness_check()
         except Exception:
@@ -141,6 +146,7 @@ def create_a2a_server(
             raise RuntimeError("instale a2a-sdk[http-server] para publicar o endpoint A2A") from exc
 
         card = create_agent_card(settings.a2a_endpoint_url)
+        # Task recovery after process restart is not part of the current contract.
         handler = DefaultRequestHandler(
             agent_executor=DocumentA2AExecutor(
                 agent_registry,

@@ -123,7 +123,9 @@ class A2AHarness:
             "Authorization": f"Bearer {SERVICE_TOKEN}",
             "X-Argos-Delegation": delegation or self.delegation(user_id=user_id),
         }
-        http = httpx.AsyncClient(headers=headers, timeout=5)
+        # O servidor tem prazo de tarefa de 30 s; o cliente precisa permitir
+        # esse prazo mais uma margem para serialização e transporte locais.
+        http = httpx.AsyncClient(headers=headers, timeout=35)
         card = create_agent_card(self.endpoint)
         client = await create_client(
             card,

@@ -16,6 +16,7 @@ class _MedicinePageRequest(_MedicineModel):
     medicine_id: UUID | None = None
     brand_name: str | None = Field(default=None, min_length=1, max_length=80)
     active_ingredient: str | None = Field(default=None, min_length=1, max_length=80)
+    search: str | None = Field(default=None, min_length=1, max_length=80)
     therapeutic_category: str | None = Field(default=None, min_length=1, max_length=40)
     needs_prescription: bool | None = None
     active: bool | None = True

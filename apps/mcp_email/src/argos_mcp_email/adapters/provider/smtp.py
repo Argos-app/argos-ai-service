@@ -2,10 +2,12 @@
 
 import asyncio
 import smtplib
+import ssl
 from collections.abc import Callable
 from email.message import EmailMessage
 from email.utils import make_msgid
 
+from argos_mcp_email.domain import ReportAttachmentRecord
 from argos_mcp_email.ports.mail_provider import ProviderSendResult
 from packages.contracts import RecipientRef
 
@@ -41,6 +43,7 @@ class SmtpMailProvider:
         recipients: tuple[RecipientRef, ...],
         subject: str,
         body: str,
+        attachments: tuple[ReportAttachmentRecord, ...] = (),
     ) -> ProviderSendResult:
         message_id = make_msgid()
         try:
@@ -50,6 +53,7 @@ class SmtpMailProvider:
                 recipients,
                 subject,
                 body,
+                attachments,
                 message_id,
             )
         except (smtplib.SMTPConnectError, smtplib.SMTPServerDisconnected, TimeoutError) as exc:
@@ -77,6 +81,7 @@ class SmtpMailProvider:
         recipients: tuple[RecipientRef, ...],
         subject: str,
         body: str,
+        attachments: tuple[ReportAttachmentRecord, ...],
         message_id: str,
     ) -> dict[str, tuple[int, bytes]]:
         message = EmailMessage()
@@ -85,10 +90,19 @@ class SmtpMailProvider:
         message["Subject"] = subject
         message["Message-ID"] = message_id
         message.set_content(body)
+        for attachment in attachments:
+            maintype, subtype = attachment.content_type.split("/", maxsplit=1)
+            message.add_attachment(
+                attachment.content,
+                maintype=maintype,
+                subtype=subtype,
+                filename=attachment.filename,
+                cte="base64",
+            )
 
         with self._smtp_factory(self._host, self._port, timeout=30) as smtp:
             if self._use_tls:
-                smtp.starttls()
+                smtp.starttls(context=ssl.create_default_context())
             if self._username and self._password:
                 smtp.login(self._username, self._password)
             return smtp.send_message(message)

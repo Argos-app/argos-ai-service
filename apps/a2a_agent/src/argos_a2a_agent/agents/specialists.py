@@ -56,6 +56,8 @@ from packages.security.access import DocumentAccessContext
 
 Clock = Callable[[], datetime]
 _CITATION_MARKER = re.compile(r"\[\[(ev_[0-9a-f]{24})\]\]")
+_MAX_FALLBACK_EVIDENCE_ITEMS = 3
+_MAX_FALLBACK_EVIDENCE_CHARS = 6_000
 
 
 class _DocumentSpecialist:
@@ -186,11 +188,16 @@ class _DocumentSpecialist:
                 limitations=("Nenhuma evidência atual e compatível foi encontrada.",),
             )
 
-        draft = await self._generate(
-            request,
-            system_prompt=self.system_prompt,
-            evidence=evidence,
-        )
+        try:
+            draft = await self._generate(
+                request,
+                system_prompt=self.system_prompt,
+                evidence=evidence,
+            )
+        except DocumentAnswerGenerationError:
+            draft = _uninterpreted_evidence_answer(evidence)
+        if draft.status == DocumentAnswerStatus.ABSTAIN:
+            draft = _uninterpreted_evidence_answer(evidence) or draft
         return await self._response_from_draft(
             request,
             context,
@@ -542,12 +549,17 @@ class MixedDocumentAgent(_DocumentSpecialist):
                 limitations=limitations,
             )
 
-        draft = await self._generate(
-            request,
-            system_prompt=self.system_prompt,
-            evidence=evidence,
-            specialist_answers=tuple(summaries),
-        )
+        try:
+            draft = await self._generate(
+                request,
+                system_prompt=self.system_prompt,
+                evidence=evidence,
+                specialist_answers=tuple(summaries),
+            )
+        except DocumentAnswerGenerationError:
+            draft = _uninterpreted_evidence_answer(evidence)
+        if draft.status == DocumentAnswerStatus.ABSTAIN:
+            draft = _uninterpreted_evidence_answer(evidence) or draft
         return await self._response_from_draft(
             request,
             context,
@@ -569,3 +581,45 @@ def _evidence(source: DocumentSourceReference) -> AgentEvidence:
     )
     evidence_id = "ev_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
     return AgentEvidence(evidence_id=evidence_id, source=source)
+
+
+def _uninterpreted_evidence_answer(
+    evidence: Sequence[AgentEvidence],
+) -> GeneratedDocumentAnswer | None:
+    """Preserve retrieved excerpts when the provider cannot return a cited synthesis."""
+    selected = evidence[:_MAX_FALLBACK_EVIDENCE_ITEMS]
+    blocks: list[str] = []
+    citations: list[str] = []
+    remaining = _MAX_FALLBACK_EVIDENCE_CHARS
+    for item in selected:
+        source = item.source
+        excerpt = source.excerpt.strip()
+        if not excerpt or remaining <= 0:
+            continue
+        page_label = (
+            f"p. {source.page_from}"
+            if source.page_from == source.page_to
+            else f"pp. {source.page_from}–{source.page_to}"
+        )
+        prefix = f"{source.title} ({page_label}): "
+        marker = f" [[{item.evidence_id}]]"
+        block = f"{prefix}{excerpt[: max(0, remaining - len(prefix) - len(marker))]}{marker}"
+        if len(block) <= len(prefix) + len(marker):
+            break
+        blocks.append(block)
+        citations.append(item.evidence_id)
+        remaining -= len(block)
+    if not blocks:
+        return None
+    return GeneratedDocumentAnswer(
+        answer=(
+            "A síntese do modelo não foi validada. Estes são trechos recuperados diretamente "
+            "do corpus, sem interpretação adicional:\n\n" + "\n\n".join(blocks)
+        ),
+        status=DocumentAnswerStatus.PARTIAL,
+        cited_evidence_ids=tuple(citations),
+        limitations=(
+            "A geração estruturada falhou; os trechos citados são evidência textual, "
+            "não uma resposta interpretada à pergunta.",
+        ),
+    )

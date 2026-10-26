@@ -13,6 +13,7 @@ from argos_mcp_data.adapters.delegation import DelegationTokenVerifier as DataTo
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from packages.observability import bind_correlation, observation_scope
 from packages.security.delegation import DelegationTokenVerifier as PredictionTokenVerifier
 
 
@@ -53,15 +54,17 @@ def test_issued_data_token_matches_mcp_verifier_contract(delegation_keys):
         clock=lambda: 1_800_000_010,
     )
     user_id, property_id, request_id = uuid4(), uuid4(), uuid4()
+    correlation_id, parent_observation_id = uuid4(), uuid4()
 
-    token = issuer.issue(
-        service="data",
-        user_id=user_id,
-        authorized_property_ids=(property_id,),
-        agent="fazenda",
-        operation="cattle.read",
-        request_id=request_id,
-    )
+    with bind_correlation(correlation_id), observation_scope(parent_observation_id):
+        token = issuer.issue(
+            service="data",
+            user_id=user_id,
+            authorized_property_ids=(property_id,),
+            agent="fazenda",
+            operation="cattle.read",
+            request_id=request_id,
+        )
 
     context = verifier.verify(token)
     assert context.user_id == user_id
@@ -69,7 +72,39 @@ def test_issued_data_token_matches_mcp_verifier_contract(delegation_keys):
     assert context.agent_id == "fazenda"
     assert context.operations == frozenset({"cattle.read"})
     assert context.request_id == str(request_id)
+    assert context.correlation_id == correlation_id
+    assert context.parent_observation_id == parent_observation_id
     assert (context.expires_at - context.issued_at).total_seconds() == 240
+
+
+def test_analyst_can_delegate_only_property_resolution_to_data_mcp(delegation_keys):
+    private_key, public_key = delegation_keys
+    data_url = "https://data.example/mcp"
+    issuer = McpDelegationTokenIssuer(
+        Settings(
+            mcp_data_url=data_url,
+            mcp_delegation_key_id="main-key",
+            mcp_delegation_private_key=private_key,
+        )
+    )
+    verifier = DataTokenVerifier(
+        {"main-key": public_key},
+        issuer="argos-main-service",
+        audience=data_url,
+    )
+
+    token = issuer.issue(
+        service="data",
+        user_id=uuid4(),
+        authorized_property_ids=(uuid4(),),
+        agent="analista",
+        operation="cattle.read",
+        request_id=uuid4(),
+    )
+
+    context = verifier.verify(token)
+    assert context.agent_id == "analista"
+    assert context.operations == frozenset({"cattle.read"})
 
 
 def test_issued_prediction_token_matches_shared_verifier_contract(delegation_keys):

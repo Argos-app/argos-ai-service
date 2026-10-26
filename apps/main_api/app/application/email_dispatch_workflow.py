@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.application.email_workflow import _fingerprint, _payload
+from app.application.operation_observation import observe_operation
 from app.application.report_artifact_service import validate_report_source
-from app.domain.email_preparations import EmailOperationReference
-from app.infrastructure.observability.recording import observe_operation
+from app.domain.email_preparations import (
+    EmailOperationReference,
+    EmailSendAuthorization,
+    SendAuthorizationOrigin,
+)
 from app.ports.email_preparation_repository import EmailPreparationRepository
+from app.ports.email_tool_client import EmailToolClient
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from packages.contracts import (
     DispatchStatus,
     PreparedReportStatus,
+    RecipientRef,
     ReportStatusRequest,
     ReportStatusResult,
     SendReportRequest,
@@ -30,21 +37,67 @@ from packages.observability import (
     ResultMetadata,
 )
 
+_LOGGER = logging.getLogger(__name__)
 
-def _safe_result(result: SendReportResult, *, recovered: bool = False) -> str:
+
+def _recipient_selectors_match(
+    selectors: dict[str, Any], recipients: tuple[RecipientRef, ...]
+) -> bool:
+    def normalize(value: str) -> str:
+        apostrophes = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "＇": "'"})
+        return value.strip().translate(apostrophes).casefold()
+
+    if len(selectors) != len(recipients):
+        return False
+    unmatched = set(range(len(recipients)))
+    for selector in selectors.values():
+        if not isinstance(selector, dict):
+            return False
+        kind = selector.get("kind")
+        value = selector.get("value")
+        if kind not in {"name", "email"} or not isinstance(value, str):
+            return False
+        normalized = normalize(value)
+        matches = [
+            index
+            for index in unmatched
+            if normalized
+            == normalize(recipients[index].name if kind == "name" else recipients[index].email)
+        ]
+        if len(matches) != 1:
+            return False
+        unmatched.remove(matches[0])
+    return not unmatched
+
+
+def _safe_result(
+    result: SendReportResult,
+    *,
+    recovered: bool = False,
+    recipient_count: int | None = None,
+    status_refresh_failed: bool = False,
+) -> str:
     labels = {
         DispatchStatus.PENDING: "O envio está em processamento.",
-        DispatchStatus.ACCEPTED: "O MCP confirmou o recebimento do envio.",
-        DispatchStatus.PARTIAL: "O MCP confirmou um envio parcial.",
+        DispatchStatus.ACCEPTED: ("O provedor aceitou o despacho; isso não confirma a entrega."),
+        DispatchStatus.PARTIAL: (
+            "O MCP confirmou um despacho parcial; a entrega não está confirmada."
+        ),
         DispatchStatus.FAILED: "O MCP confirmou que o envio falhou.",
         DispatchStatus.UNKNOWN: "O estado do envio ainda não foi confirmado.",
     }
+    message = labels[result.status]
+    if status_refresh_failed:
+        message += " A consulta posterior ao MCP falhou; este é o último estado confirmado."
     return json.dumps(
         {
             "status": result.status.value,
+            "confirmed": result.status != DispatchStatus.UNKNOWN,
+            "operation_id": str(result.operation_id),
             "report_id": str(result.report_id),
+            "recipient_count": recipient_count,
             "recovered": recovered,
-            "message": labels[result.status],
+            "message": message,
         },
         ensure_ascii=False,
     )
@@ -55,7 +108,7 @@ def _safe_unconfirmed() -> str:
         {
             "status": DispatchStatus.UNKNOWN.value,
             "confirmed": False,
-            "message": "O resultado do envio não foi confirmado; não solicite outro envio.",
+            "message": "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado.",
         },
         ensure_ascii=False,
     )
@@ -67,7 +120,7 @@ class EmailDispatchWorkflow:
     def __init__(
         self,
         *,
-        email_client: Any,
+        email_client: EmailToolClient,
         preparations: EmailPreparationRepository,
         report_artifacts: ReportArtifactRepository,
         observation_collector: ObservationCollector | None = None,
@@ -109,7 +162,12 @@ class EmailDispatchWorkflow:
             source_interaction_id=source_interaction_id,
         )
         if authorization is None:
-            raise ValueError("não há autorização persistida para este pedido de envio")
+            authorization = await self._authorize_prepared_confirmation(
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+                source_interaction_id=source_interaction_id,
+                configurable=configurable,
+            )
 
         operation_reference = await self._preparations.get_send_operation_reference(
             authorization_id=authorization.authorization_id,
@@ -179,9 +237,91 @@ class EmailDispatchWorkflow:
                 session_id=session_id,
                 operation_id=result.operation_id,
                 recorded_at=datetime.now(UTC),
+                last_known_status=result.status,
+                last_known_updated_at=result.updated_at,
             )
         )
-        return _safe_result(result)
+        return _safe_result(result, recipient_count=len(prepared.recipients))
+
+    async def _authorize_prepared_confirmation(
+        self,
+        *,
+        principal_user_id: UUID,
+        session_id: UUID,
+        source_interaction_id: UUID,
+        configurable: dict[str, Any],
+    ) -> EmailSendAuthorization:
+        if configurable.get("argos_send_intent_requested") is not True:
+            raise ValueError("não há autorização explícita para este envio")
+
+        try:
+            selectors = configurable["recipient_selectors"]
+            property_ids = tuple(
+                UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("destinatários ou escopo autorizado ausentes") from exc
+        if not isinstance(selectors, dict) or not selectors or not property_ids:
+            raise ValueError("destinatários ou escopo autorizado ausentes")
+
+        preparations = await self._preparations.list_prepared_for_session(
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            limit=100,
+        )
+        now = datetime.now(UTC)
+        candidates = tuple(
+            item
+            for item in preparations
+            if item.prepared_report.status == PreparedReportStatus.PREPARED
+            and now < item.prepared_report.expires_at
+        )
+        if len(candidates) != 1:
+            raise ValueError("não existe uma única preparação válida para confirmar nesta sessão")
+        preparation = candidates[0]
+        prepared = preparation.prepared_report
+        if not _recipient_selectors_match(selectors, prepared.recipients):
+            raise ValueError("destinatários confirmados não correspondem à preparação")
+
+        existing_authorizations = await self._preparations.list_send_authorizations(
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            limit=100,
+        )
+        if any(item.report_id == prepared.report_id for item in existing_authorizations):
+            raise ValueError("a preparação já tem uma autorização de envio")
+
+        artifact = await self._report_artifacts.get_owned(
+            reference=preparation.report_artifact_ref,
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+        )
+        validate_report_source(
+            artifact.envelope,
+            principal_user_id=principal_user_id,
+            lot_id=artifact.envelope.report.requested_lot.lot_id,
+            authorized_property_ids=property_ids,
+            now=now,
+        )
+
+        authorization = EmailSendAuthorization(
+            authorization_id=uuid4(),
+            principal_user_id=principal_user_id,
+            session_id=session_id,
+            source_interaction_id=source_interaction_id,
+            preparation_reference=preparation.reference,
+            report_id=prepared.report_id,
+            request_fingerprint=preparation.request_fingerprint,
+            prepared_fingerprint=_fingerprint(prepared.model_dump(mode="json")),
+            recipients_fingerprint=_fingerprint(
+                [recipient.model_dump(mode="json") for recipient in prepared.recipients]
+            ),
+            origin=SendAuthorizationOrigin.EXPLICIT_REQUEST,
+            idempotency_key=str(uuid4()),
+            authorized_at=now,
+            expires_at=prepared.expires_at,
+        )
+        return await self._preparations.reserve_send_authorization(authorization)
 
     async def status(self, *, authorization_id: UUID | None, configurable: dict[str, Any]) -> str:
         return await self._observe_workflow(
@@ -245,7 +385,7 @@ class EmailDispatchWorkflow:
         )
 
     async def _recover_interaction_outcome(self, *, configurable: dict[str, Any]) -> str | None:
-        """Return a deterministic public summary for a send linked to this request.
+        """Return structured, authoritative dispatch evidence for this request.
 
         This only reads the authorization/reference already persisted by the main API and asks
         the MCP for its current status. It never initiates or retries a dispatch.
@@ -269,27 +409,13 @@ class EmailDispatchWorkflow:
             )
             if reference is None:
                 return None
-            result = json.loads(
-                await self._refresh_status(authorization, reference, principal_user_id)
+            return await self._refresh_status(authorization, reference, principal_user_id)
+        except Exception as exc:
+            _LOGGER.warning(
+                "email dispatch recovery could not load authorization or operation reference",
+                extra={"failure_type": type(exc).__name__},
             )
-        except Exception:
-            return "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado."
-
-        summaries = {
-            DispatchStatus.PENDING.value: "O envio está em processamento.",
-            DispatchStatus.ACCEPTED.value: (
-                "O MCP confirmou o recebimento do envio; isso não confirma a entrega."
-            ),
-            DispatchStatus.PARTIAL.value: "O MCP confirmou um envio parcial.",
-            DispatchStatus.FAILED.value: "O MCP confirmou que o envio falhou.",
-            DispatchStatus.UNKNOWN.value: (
-                "O MCP ainda não confirmou o estado do envio; nenhum novo envio foi solicitado."
-            ),
-        }
-        return summaries.get(
-            result.get("status"),
-            "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado.",
-        )
+            return _safe_unconfirmed()
 
     async def _observe_workflow(self, name, operation, *, recovered=False, **kwargs):
         if self._observation_collector is None:
@@ -379,9 +505,66 @@ class EmailDispatchWorkflow:
             )
             result = ReportStatusResult.model_validate(_payload(response))
             self._validate_result(result, authorization.report_id)
-        except Exception:
+        except Exception as exc:
+            _LOGGER.warning(
+                "email dispatch status lookup failed; using last known provider result",
+                extra={"failure_type": type(exc).__name__},
+            )
+            if operation_reference.last_known_status is not None:
+                last_known = SendReportResult(
+                    operation_id=operation_reference.operation_id,
+                    report_id=authorization.report_id,
+                    status=operation_reference.last_known_status,
+                    created_at=operation_reference.recorded_at,
+                    updated_at=(
+                        operation_reference.last_known_updated_at or operation_reference.recorded_at
+                    ),
+                )
+                return _safe_result(
+                    last_known,
+                    recovered=True,
+                    status_refresh_failed=True,
+                )
             return _safe_unconfirmed()
-        return _safe_result(result, recovered=True)
+        recipient_count = None
+        try:
+            preparation = await self._preparations.get_by_reference(
+                reference=authorization.preparation_reference,
+                principal_user_id=principal_user_id,
+                session_id=authorization.session_id,
+            )
+            if preparation is not None:
+                recipient_count = len(preparation.prepared_report.recipients)
+        except Exception:
+            # Status remains authoritative even when the optional count cannot
+            # be recovered from the preparation repository.
+            pass
+        if (
+            result.status != operation_reference.last_known_status
+            or result.updated_at != operation_reference.last_known_updated_at
+        ):
+            try:
+                await self._preparations.save_send_operation_reference(
+                    EmailOperationReference(
+                        authorization_id=operation_reference.authorization_id,
+                        principal_user_id=operation_reference.principal_user_id,
+                        session_id=operation_reference.session_id,
+                        operation_id=operation_reference.operation_id,
+                        recorded_at=operation_reference.recorded_at,
+                        last_known_status=result.status,
+                        last_known_updated_at=result.updated_at,
+                    )
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "email dispatch status could not be stored as last known result",
+                    extra={"failure_type": type(exc).__name__},
+                )
+        return _safe_result(
+            result,
+            recovered=True,
+            recipient_count=recipient_count,
+        )
 
     @staticmethod
     def _validate_result(result: SendReportResult, report_id: UUID) -> None:

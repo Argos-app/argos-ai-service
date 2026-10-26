@@ -75,6 +75,7 @@ class SendReport:
                 recipients=recipients,
                 subject=report.subject,
                 body=report.body,
+                attachments=report.attachments,
             )
             target_state = (
                 DispatchState.UNKNOWN

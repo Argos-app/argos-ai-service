@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 SummaryGeneratorProvider = Callable[[], SessionSummaryGenerator | None]
 TERMINAL_STATUSES = {
     InteractionStatus.COMPLETED,
+    InteractionStatus.DEGRADED,
     InteractionStatus.FAILED,
 }
 

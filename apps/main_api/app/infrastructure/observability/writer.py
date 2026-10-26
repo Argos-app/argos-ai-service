@@ -17,8 +17,10 @@ from pymongo.errors import (
     WTimeoutError,
 )
 
+from packages.observability.context import current_user_id
 from packages.observability.models import Observation
 from packages.observability.ports import SubmissionResult
+from packages.observability.redis_user_usage import RedisUserUsageCounter
 from packages.observability.sanitization import sanitize_observation
 
 from .mongo_repository import MongoObservationRepository, ObservationConflictError
@@ -31,6 +33,7 @@ _TRANSIENT_MONGO_ERRORS = (AutoReconnect, ConnectionFailure, NotPrimaryError, WT
 class _QueuedDocument:
     document: dict[str, Any]
     size_bytes: int
+    user_id: str | None
 
 
 class MongoObservationWriter:
@@ -40,6 +43,7 @@ class MongoObservationWriter:
         self,
         repository: MongoObservationRepository,
         *,
+        user_usage_counter: RedisUserUsageCounter | None = None,
         max_items: int = 2_048,
         max_bytes: int = 8 * 1024 * 1024,
         max_document_bytes: int = 16 * 1024,
@@ -68,6 +72,7 @@ class MongoObservationWriter:
             raise ValueError("limites de lote ou documento excedem a fila")
 
         self._repository = repository
+        self._user_usage_counter = user_usage_counter
         self._max_items = max_items
         self._max_bytes = max_bytes
         self._max_document_bytes = max_document_bytes
@@ -110,7 +115,14 @@ class MongoObservationWriter:
         ):
             return SubmissionResult.QUEUE_FULL
 
-        self._queue.append(_QueuedDocument(document=document, size_bytes=size_bytes))
+        current_user = current_user_id()
+        self._queue.append(
+            _QueuedDocument(
+                document=document,
+                size_bytes=size_bytes,
+                user_id=str(current_user) if current_user is not None else None,
+            )
+        )
         self._pending_items += 1
         self._pending_bytes += size_bytes
         self._available.set()
@@ -186,13 +198,26 @@ class MongoObservationWriter:
         groups: dict[str, list[_QueuedDocument]] = {}
         for item in batch:
             groups.setdefault(item.document["_id"], []).append(item)
-        await asyncio.gather(*(self._write_group(items) for items in groups.values()))
+            await asyncio.gather(*(self._write_group(items) for items in groups.values()))
 
     async def _write_group(self, items: list[_QueuedDocument]) -> None:
         for item in items:
-            await self._write_with_retry(item.document)
+            await self._write_with_retry(item.document, item.user_id)
 
-    async def _write_with_retry(self, document: dict[str, Any]) -> None:
+    async def _write_with_retry(self, document: dict[str, Any], user_id: str | None) -> None:
+        if self._user_usage_counter is not None:
+            try:
+                if (
+                    document.get("operation_kind") in {"model", "embedding"}
+                    and document.get("status") != "started"
+                ):
+                    await self._user_usage_counter.record_model_usage(
+                        user_id,
+                        document.get("usage"),
+                        observation_id=document.get("_id"),
+                    )
+            except Exception:
+                self._report("redis_user_usage_write_failed")
         for attempt in range(1, self._max_attempts + 1):
             try:
                 await self._repository.write_document(document)

@@ -12,6 +12,7 @@ from argos_a2a_agent.domain import (
     DocumentChunk,
     DocumentMetadata,
     IndexedDocumentChunk,
+    IndexWriteError,
     ManifestStoreError,
     SourceDocument,
     SourceDocumentListing,
@@ -141,6 +142,7 @@ class FakeIndexWriter:
         self.discarded = []
         self.unpublished = []
         self.fail_publish_after_switch = False
+        self.incompatible_generations = set()
 
     async def upsert_chunks(self, corpus_revision, chunks):
         self.upserted.append((corpus_revision, tuple(chunks)))
@@ -167,6 +169,8 @@ class FakeIndexWriter:
             raise RuntimeError("simulated timeout after alias switch")
 
     async def generation_exists(self, corpus_revision):
+        if corpus_revision in self.incompatible_generations:
+            raise IndexWriteError("generation is incompatible with current vector settings")
         return corpus_revision in self.generations
 
     async def is_published(self, corpus_revision):
@@ -297,13 +301,18 @@ def test_processing_fingerprint_change_rebuilds_all_current_documents() -> None:
     synchronizer = make_synchronizer(
         source, manifests, processor, writer, fingerprint=OTHER_FINGERPRINT
     )
+    old_revision = manifests.manifest.corpus_revision
+    writer.incompatible_generations.add(old_revision)
 
     result = run_immediate(synchronizer.ensure_current())
 
     assert result.updated
+    assert result.corpus_revision != old_revision
     assert set(result.changed_document_ids) == {item[0].document_id for item in pairs}
     assert set(processor.document_ids) == {item[0].document_id for item in pairs}
     assert writer.copied == []
+    assert old_revision in writer.generations
+    assert writer.active_revision == result.corpus_revision
 
 
 def test_incomplete_listing_does_not_touch_manifest_or_index() -> None:

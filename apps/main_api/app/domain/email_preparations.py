@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from packages.contracts import PreparedReport, RecipientSelector
+from packages.contracts import DispatchStatus, PreparedReport, RecipientSelector
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,13 +83,15 @@ class EmailSendAuthorization:
 
 @dataclass(frozen=True, slots=True)
 class EmailOperationReference:
-    """Referência local mínima à operação canônica que pertence ao MCP."""
+    """Referência local e último resultado conhecido da operação canônica do MCP."""
 
     authorization_id: UUID
     principal_user_id: UUID
     session_id: UUID
     operation_id: UUID
     recorded_at: datetime
+    last_known_status: DispatchStatus | None = None
+    last_known_updated_at: datetime | None = None
 
 
 class EmailPreparationNotFoundError(LookupError):

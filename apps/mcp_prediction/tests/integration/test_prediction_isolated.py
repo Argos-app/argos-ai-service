@@ -2,7 +2,7 @@
 
 import json
 from datetime import timedelta
-from decimal import Context, Decimal, localcontext
+from decimal import Decimal
 
 import pytest
 
@@ -14,7 +14,7 @@ def _response(result):
     return result.structuredContent or json.loads(result.content[0].text)
 
 
-async def test_real_tool_calculates_annual_history_with_unknown_coverage(prediction_harness):
+async def test_real_tool_suppresses_estimate_when_coverage_is_unknown(prediction_harness):
     import asyncpg
 
     harness = prediction_harness
@@ -38,12 +38,12 @@ async def test_real_tool_calculates_annual_history_with_unknown_coverage(predict
             )
         )
 
-    assert result["status"] == "estimated"
+    assert result["status"] == "insufficient_data"
     assert result["mode"] == "simulation"
     assert result["data_origin"] == "synthetic"
     assert result["property_ids"] == [str(harness.property_a)]
     assert result["coverage"][0]["status"] == "unknown"
-    assert any("completude do histórico" in item for item in result["limitations"])
+    assert any("cobertura histórica confirmada" in item for item in result["limitations"])
     assert len(result["items"]) == 1
     item = result["items"][0]
     assert item["property_id"] == str(harness.property_a)
@@ -57,8 +57,8 @@ async def test_real_tool_calculates_annual_history_with_unknown_coverage(predict
         for entry in item["monthly_history"]
         if entry["month"] == (harness.as_of + timedelta(days=1)).month
     )
-    with localcontext(Context(prec=50)):
-        assert Decimal(item["estimated_quantity"]) == Decimal(10) / month["calendar_days"]
+    assert item["estimated_quantity"] is None
+    assert Decimal(month["quantity"]) > 0
 
     admin = await asyncpg.connect(harness.database_dsn)
     try:

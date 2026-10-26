@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.infrastructure.mcp.client import McpToolServerClient
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
 from app.ports.data_client import (
-    DataReportSourceUnavailable,
     ReportLotCandidate,
     ReportLotResolution,
 )
@@ -136,13 +135,44 @@ class McpDataClient:
         self,
         *,
         lot_id: UUID,
+        property_id: UUID,
         principal_user_id: UUID,
         authorized_property_ids: Sequence[UUID],
+        request_id: UUID,
     ) -> LotReportEnvelope:
-        del lot_id, principal_user_id, authorized_property_ids
-        raise DataReportSourceUnavailable(
-            "O MCP de dados ainda não publica uma origem LotReportEnvelope assinada."
+        properties = tuple(dict.fromkeys(UUID(str(value)) for value in authorized_property_ids))
+        if property_id not in properties:
+            raise ValueError("propriedade solicitada está fora do escopo autorizado")
+        headers = self._issuer.headers_for_call(
+            service="data",
+            user_id=principal_user_id,
+            authorized_property_ids=properties,
+            agent="fazenda",
+            operation="report.read",
+            request_id=request_id,
         )
+        result = await self._client.call_tool(
+            "get_lot_report_source",
+            {
+                "payload": {
+                    "lot_id": str(lot_id),
+                    "property_id": str(property_id),
+                }
+            },
+            request_headers=headers,
+        )
+        try:
+            envelope = LotReportEnvelope.model_validate(_response_payload(result))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MCP de dados retornou envelope de relatório inválido") from exc
+        if (
+            envelope.principal_user_id != principal_user_id
+            or envelope.report.requested_lot.lot_id != lot_id
+            or envelope.report.requested_lot.property_id != property_id
+            or property_id not in envelope.authorized_property_ids
+        ):
+            raise ValueError("MCP de dados retornou relatório fora da identidade ou escopo")
+        return envelope
 
 
 def _response_payload(result: Any) -> Any:
@@ -155,11 +185,11 @@ def _response_payload(result: Any) -> Any:
         if isinstance(getattr(block, "text", None), str)
     ]
     if len(text_blocks) != 1:
-        raise ValueError("resposta list_lots ausente ou ambígua")
+        raise ValueError("resposta MCP ausente ou ambígua")
     try:
         return json.loads(text_blocks[0])
     except json.JSONDecodeError as exc:
-        raise ValueError("resposta list_lots não contém JSON válido") from exc
+        raise ValueError("resposta MCP não contém JSON válido") from exc
 
 
 __all__ = ["McpDataClient"]

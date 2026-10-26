@@ -83,6 +83,9 @@ async def test_mongo_writer_persists_one_attempt_and_updates_it_idempotently():
         assert stored["duration_ms"] == 25.0
         assert await collection.count_documents({}) == 1
         indexes = await collection.index_information()
+        assert "ix_observability_correlation_started" in indexes
+        assert "ix_observability_interaction_started" in indexes
+        assert "ix_observability_session_started" in indexes
         assert "ix_observability_started_id" in indexes
         assert "ix_observability_updated_id" in indexes
         assert all("expireAfterSeconds" not in index for index in indexes.values())
