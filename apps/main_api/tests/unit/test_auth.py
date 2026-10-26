@@ -2,12 +2,14 @@ import base64
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from app.api.v1.dependencies.auth import (
     _principal_from_access_token,
     _verify_access_token,
+    get_principal,
     to_actor_context,
 )
 from app.domain.user_access import UserAccess, UserFarm
@@ -173,8 +175,6 @@ async def test_principal_rejects_reassociated_uid_with_different_internal_id() -
 
 @pytest.mark.asyncio
 async def test_principal_returns_503_on_database_failure() -> None:
-    from unittest.mock import AsyncMock
-
     codec = _codec()
     user = _user()
     token = codec.issue(user.user_id, user.firebase_uid)
@@ -207,3 +207,35 @@ async def test_expired_block_allows_same_identity() -> None:
     token = codec.issue(user.user_id, user.firebase_uid)
     principal = await _principal_from_access_token(_principal_request(codec, token, user), token)
     assert principal.user_id == user.user_id
+
+
+@pytest.mark.asyncio
+async def test_redis_receives_identity_from_current_user_record() -> None:
+    codec = _codec()
+    user = _user()
+    token = codec.issue(user.user_id, user.firebase_uid)
+    current = replace(user, name="Nome atualizado", email="atualizado@example.test")
+    request = _principal_request(codec, token, current)
+    counter = AsyncMock()
+    request.app.state.user_usage_counter = counter
+
+    principals = [principal async for principal in get_principal(request)]
+
+    assert principals[0].name == current.name
+    counter.increment_call.assert_awaited_once_with(
+        user.user_id, name=current.name, email=current.email
+    )
+
+
+@pytest.mark.asyncio
+async def test_redis_failure_does_not_block_authenticated_request() -> None:
+    codec = _codec()
+    user = _user()
+    request = _principal_request(codec, codec.issue(user.user_id, user.firebase_uid), user)
+    counter = AsyncMock()
+    counter.increment_call.side_effect = TimeoutError("Redis unavailable")
+    request.app.state.user_usage_counter = counter
+
+    principals = [principal async for principal in get_principal(request)]
+
+    assert principals[0].user_id == user.user_id

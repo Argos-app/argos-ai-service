@@ -359,3 +359,9 @@ Para subir a integração em um cluster Kubernetes local, consulte
 [docs/kubernetes-local.md](docs/kubernetes-local.md). O estado e os resultados
 de homologação integrada estão em
 [docs/resultado-homologacao-local.md](docs/resultado-homologacao-local.md).
+
+O deploy pelo código-fonte no Render está preparado em
+[docs/deploy-render.md](docs/deploy-render.md): `develop` atualiza HM e `main`
+atualiza produção após a CI, com cinco serviços independentes por ambiente e
+reimplantação dos consumidores quando `packages/` muda. A ativação depende da
+configuração inicial dos serviços e secrets descrita no guia.

@@ -97,7 +97,9 @@ async def get_principal(request: Request) -> AsyncIterator[Principal]:
     counter = getattr(request.app.state, "user_usage_counter", None)
     if counter is not None:
         try:
-            await counter.increment_call(principal.user_id)
+            await counter.increment_call(
+                principal.user_id, name=principal.name, email=principal.email
+            )
         except Exception:
             _LOGGER.warning("Redis user call counter increment failed")
     with bind_user_id(principal.user_id):

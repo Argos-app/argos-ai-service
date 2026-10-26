@@ -163,7 +163,7 @@ jobs:
               shell: bash
               run: |
                   mkdir -p reports
-                  pytest apps packages -m "not integration" --junitxml=reports/pytest.xml --cov=apps --cov=packages --cov-report=xml:reports/coverage.xml
+                  pytest tests apps packages -m "not integration" --junitxml=reports/pytest.xml --cov=apps --cov=packages --cov-report=xml:reports/coverage.xml
 
             - name: Publish test reports
               if: always()

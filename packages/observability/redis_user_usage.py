@@ -18,9 +18,16 @@ class RedisUserUsageCounter:
     def key_for(self, user_id: str | UUID) -> str:
         return f"{self._key_prefix}:{UUID(str(user_id))}"
 
-    async def increment_call(self, user_id: str | UUID) -> None:
+    async def increment_call(
+        self, user_id: str | UUID, *, name: str | None = None, email: str | None = None
+    ) -> None:
         key = self.key_for(user_id)
+        identity = {
+            field: value for field, value in (("name", name), ("email", email)) if value is not None
+        }
         async with self._client.pipeline(transaction=True) as pipeline:
+            if identity:
+                pipeline.hset(key, mapping=identity)
             pipeline.hincrby(key, "calls", 1)
             pipeline.expire(key, _TTL_SECONDS)
             await pipeline.execute()
@@ -63,24 +70,28 @@ class RedisUserUsageCounter:
             _TTL_SECONDS,
         )
 
-    async def list_users(self) -> list[dict[str, int | str]]:
-        rows: list[dict[str, int | str]] = []
+    async def list_users(self) -> list[dict[str, int | str | None]]:
+        rows: list[dict[str, int | str | None]] = []
         async for raw_key in self._client.scan_iter(match=f"{self._key_prefix}:*"):
             key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
             if ":_seen:" in key:
                 continue
             raw = await self._client.hgetall(key)
             values = {
-                (field.decode() if isinstance(field, bytes) else field): int(value)
+                (field.decode() if isinstance(field, bytes) else field): (
+                    value.decode() if isinstance(value, bytes) else value
+                )
                 for field, value in raw.items()
             }
             rows.append(
                 {
                     "user_id": key.removeprefix(f"{self._key_prefix}:"),
-                    "calls": values.get("calls", 0),
-                    "tokens": values.get("tokens", 0),
-                    "model_calls": values.get("model_calls", 0),
-                    "unknown_token_calls": values.get("unknown_token_calls", 0),
+                    "name": values.get("name"),
+                    "email": values.get("email"),
+                    "calls": int(values.get("calls", 0)),
+                    "tokens": int(values.get("tokens", 0)),
+                    "model_calls": int(values.get("model_calls", 0)),
+                    "unknown_token_calls": int(values.get("unknown_token_calls", 0)),
                 }
             )
         rows.sort(key=lambda row: (int(row["tokens"]), int(row["calls"])), reverse=True)
