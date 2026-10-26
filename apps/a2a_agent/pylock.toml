@@ -289,14 +289,14 @@ sha256 = "4a4668bbbe7116feb4abbd0f54e64a4adcf4b8f648f19ffa0848ad0f6606a9bf"
 
 [[packages]]
 name = "langsmith"
-version = "0.14.8"
+version = "0.14.12"
 
 [[packages.wheels]]
-name = "langsmith-0.14.8-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/67/a8/5bfbcf7704f48331372ec36212a1e0e6bcb83eb967829d760fbdbf386616/langsmith-0.14.8-py3-none-any.whl"
+name = "langsmith-0.14.12-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/c6/6c/33e2de8d8d809895263e4f24ef7619e5535e3ece7de863ffbe49c1b7a60d/langsmith-0.14.12-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "bda7ec3d74bc5af3244c90920e924efcf99a700638860bf87d0231bfdb4f4ce4"
+sha256 = "9dafba7f615afa77204dc8afbb9c803e4ba1b55e96249f12c8f9aafb23fae6d0"
 
 [[packages]]
 name = "motor"
@@ -465,14 +465,14 @@ sha256 = "75c038d39e23b38b968fd7c61060c8611859c51e411d52f7b97be49bf8bf0d10"
 
 [[packages]]
 name = "pypdf"
-version = "6.20.1"
+version = "6.21.2"
 
 [[packages.wheels]]
-name = "pypdf-6.20.1-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/71/f8/4cbd09988b4b158260b7e0df38bf16f19e998bf0e257a18661a8da04280e/pypdf-6.20.1-py3-none-any.whl"
+name = "pypdf-6.21.2-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/1b/4d/c9d2d67f204eff463237a1a8f5e25a6923b7b1043982b91fcaf104c8ef60/pypdf-6.21.2-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "aa5a55ddcffdc5e5ab291d5decb23f6383f4e56f8e3263dc39af41fff03885ad"
+sha256 = "1d44d1a3a200f25062adff0085b02040e4646431ac2ccac22e42679e91466084"
 
 [[packages]]
 name = "python-dotenv"

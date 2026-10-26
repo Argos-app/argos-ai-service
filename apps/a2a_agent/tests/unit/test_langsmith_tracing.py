@@ -7,6 +7,7 @@ from pathlib import Path
 
 from argos_a2a_agent.adapters.observability import langsmith as langsmith_module
 from argos_a2a_agent.settings import Settings
+from langsmith import agent_address, tracing_context
 
 from packages.observability import correlation_key
 
@@ -15,7 +16,12 @@ def test_langsmith_is_disabled_without_explicit_api_key():
     assert langsmith_module.create_langsmith_tracing(Settings()) is None
 
 
-def test_langsmith_context_enables_configured_client_and_project(monkeypatch):
+def test_installed_langsmith_context_accepts_agent_address():
+    with tracing_context(enabled=True, address=agent_address("a2a-test", "local")):
+        pass
+
+
+def test_langsmith_context_enables_configured_agent_environment(monkeypatch):
     client_arguments = {}
     context_arguments = {}
 
@@ -37,7 +43,8 @@ def test_langsmith_context_enables_configured_client_and_project(monkeypatch):
     tracing = langsmith_module.create_langsmith_tracing(
         Settings(
             langsmith_api_key="test-key",
-            langsmith_project="a2a-test",
+            langsmith_agent_id="a2a-test",
+            langsmith_agent_environment="local",
             langsmith_workspace_id="workspace-id",
         )
     )
@@ -61,7 +68,7 @@ def test_langsmith_context_enables_configured_client_and_project(monkeypatch):
     assert context_arguments == {
         "enabled": True,
         "client": tracing.client,
-        "project_name": "a2a-test",
+        "address": agent_address("a2a-test", "local"),
         "metadata": {
             "argos_correlation_id": "corr-123",
             "argos_correlation_key": correlation_key("corr-123"),
@@ -74,6 +81,13 @@ def test_langsmith_workspace_id_is_loaded_from_environment(monkeypatch):
     monkeypatch.setenv("A2A_LANGSMITH_WORKSPACE_ID", "workspace-id")
 
     assert Settings.from_env().langsmith_workspace_id == "workspace-id"
+
+
+def test_langsmith_agent_environment_uses_local_app_env(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.delenv("A2A_LANGSMITH_AGENT_ENVIRONMENT", raising=False)
+
+    assert Settings.from_env().langsmith_agent_environment == "local"
 
 
 def test_a2a_capture_content_requires_explicit_api_key():

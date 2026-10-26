@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,16 @@ from app.settings import Settings
 
 def test_langsmith_is_disabled_without_explicit_api_key():
     assert langsmith_module.create_langsmith_tracing(Settings()) is None
+
+
+def test_installed_langchain_tracer_accepts_agent_address():
+    from langchain_core.tracers import LangChainTracer
+    from langsmith import agent_address
+
+    expected_address = agent_address("test-agent", "local")
+    callback = LangChainTracer(client=object(), address=expected_address)
+
+    assert callback.address == expected_address
 
 
 def test_langsmith_client_hides_content_and_anonymizes_non_email_sensitive_values(monkeypatch):
@@ -33,7 +44,8 @@ def test_langsmith_client_hides_content_and_anonymizes_non_email_sensitive_value
     tracing = langsmith_module.create_langsmith_tracing(
         Settings(
             langsmith_api_key="test-key",
-            langsmith_project="test-project",
+            langsmith_agent_id="test-agent",
+            langsmith_agent_environment="local",
             langsmith_workspace_id="workspace-id",
         )
     )
@@ -43,7 +55,9 @@ def test_langsmith_client_hides_content_and_anonymizes_non_email_sensitive_value
     assert client_arguments["workspace_id"] == "workspace-id"
     assert client_arguments["hide_inputs"] is True
     assert client_arguments["hide_outputs"] is True
-    assert tracing.callback.arguments["project_name"] == "test-project"
+    expected_address = import_module("langsmith.address").agent_address("test-agent", "local")
+    assert tracing.callback.arguments["address"] == expected_address
+    assert "project_name" not in tracing.callback.arguments
     anonymized = client_arguments["anonymizer"](
         {
             "input": "Bearer token-value user@example.com 123.456.789-00",
@@ -98,6 +112,22 @@ def test_langsmith_workspace_id_is_loaded_from_environment(monkeypatch):
     monkeypatch.setenv("MAIN_API_LANGSMITH_WORKSPACE_ID", "workspace-id")
 
     assert Settings.from_env().langsmith_workspace_id == "workspace-id"
+
+
+@pytest.mark.parametrize(
+    ("app_env", "expected"),
+    [
+        ("local", "local"),
+        ("development", "development"),
+        ("staging", "staging"),
+        ("production", "production"),
+    ],
+)
+def test_langsmith_agent_environment_follows_app_environment(monkeypatch, app_env, expected):
+    monkeypatch.setenv("APP_ENV", app_env)
+    monkeypatch.delenv("MAIN_API_LANGSMITH_AGENT_ENVIRONMENT", raising=False)
+
+    assert Settings.from_env().langsmith_agent_environment == expected
 
 
 def test_langsmith_run_includes_provider_billing_as_trace_metadata():

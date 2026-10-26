@@ -42,10 +42,11 @@ def attach_provider_billing(
 @dataclass(slots=True)
 class LangSmithTracing:
     client: Any
-    project: str
+    agent_id: str
+    agent_environment: str
 
     def context(self, correlation_id: str | None = None) -> AbstractContextManager[Any]:
-        from langsmith import tracing_context
+        from langsmith import agent_address, tracing_context
 
         metadata = (
             {
@@ -58,7 +59,7 @@ class LangSmithTracing:
         return tracing_context(
             enabled=True,
             client=self.client,
-            project_name=self.project,
+            address=agent_address(self.agent_id, self.agent_environment),
             metadata=metadata,
         )
 
@@ -142,7 +143,11 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
             hide_outputs=not settings.langsmith_capture_content,
             anonymizer=anonymizer,
         )
-        return LangSmithTracing(client=client, project=settings.langsmith_project)
+        return LangSmithTracing(
+            client=client,
+            agent_id=settings.langsmith_agent_id,
+            agent_environment=settings.langsmith_agent_environment,
+        )
     except Exception:
         if client is not None:
             client.close()

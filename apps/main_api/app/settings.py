@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field, fields
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
+from packages.observability.langsmith_environment import resolve_langsmith_agent_environment
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -136,7 +137,8 @@ class Settings:
     execution_max_tool_calls: int = 12
     execution_timeout_seconds: float = 300.0
     langsmith_api_key: str | None = field(default=None, repr=False)
-    langsmith_project: str = "argos-ai-service"
+    langsmith_agent_id: str = "argos-ai-service"
+    langsmith_agent_environment: str = "production"
     langsmith_endpoint: str | None = None
     langsmith_capture_content: bool = False
     langsmith_workspace_id: str | None = None
@@ -252,7 +254,11 @@ class Settings:
             execution_max_tool_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "12")),
             execution_timeout_seconds=float(os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "300")),
             langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
-            langsmith_project=os.getenv("MAIN_API_LANGSMITH_PROJECT", "argos-ai-service"),
+            langsmith_agent_id=os.getenv("MAIN_API_LANGSMITH_AGENT_ID", "argos-ai-service"),
+            langsmith_agent_environment=resolve_langsmith_agent_environment(
+                os.getenv("MAIN_API_LANGSMITH_AGENT_ENVIRONMENT"),
+                os.getenv("APP_ENV", "production"),
+            ),
             langsmith_endpoint=os.getenv("MAIN_API_LANGSMITH_ENDPOINT") or None,
             langsmith_workspace_id=os.getenv("MAIN_API_LANGSMITH_WORKSPACE_ID") or None,
             langsmith_capture_content=_environment_bool("MAIN_API_LANGSMITH_CAPTURE_CONTENT"),
@@ -317,7 +323,6 @@ class Settings:
             or not 1 <= self.execution_max_model_calls <= 100
             or not 1 <= self.execution_max_tool_calls <= 100
             or not 1 <= self.execution_timeout_seconds <= 300
-            or not self.langsmith_project.strip()
         ):
             raise ValueError("limites e timeouts devem ser positivos")
         if self.model_mode not in {"provider", "simulated"}:
@@ -353,6 +358,15 @@ class Settings:
                 )
         if self.langsmith_capture_content and not self.langsmith_api_key:
             raise ValueError("MAIN_API_LANGSMITH_CAPTURE_CONTENT exige MAIN_API_LANGSMITH_API_KEY")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", self.langsmith_agent_id):
+            raise ValueError("MAIN_API_LANGSMITH_AGENT_ID deve ser um identificador DNS válido")
+        if self.langsmith_agent_environment not in {
+            "local",
+            "development",
+            "staging",
+            "production",
+        }:
+            raise ValueError("MAIN_API_LANGSMITH_AGENT_ENVIRONMENT inválido")
         if self.langsmith_endpoint is not None:
             from urllib.parse import urlsplit
 
