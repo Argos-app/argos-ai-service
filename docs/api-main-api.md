@@ -38,13 +38,14 @@ diagnóstico.
 
 ## Rotas
 
-| Método e caminho                              | Uso                                                | Corpo ou parâmetros                                    | Resposta de sucesso       |
-| --------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------ | ------------------------- |
-| `POST /v1/auth/firebase`                      | Troca o Firebase ID token por um JWT da IA         | Sem corpo; Bearer com Firebase ID token                | `200` com `access_token`  |
-| `POST /v1/sessions`                           | Cria uma sessão com as fazendas autorizadas atuais | Sem corpo                                              | `201 Session`             |
-| `GET /v1/sessions`                            | Lista as sessões do usuário autenticado            | Sem parâmetros                                         | `200 Session[]`           |
-| `POST /v1/sessions/{session_id}/interactions` | Envia mensagem ou resposta a uma pergunta          | `MessageInteraction` ou `AnswerInteraction`            | `200 InteractionResult`   |
-| `GET /v1/sessions/{session_id}/messages`      | Lê o histórico público paginado                    | `limit` de 1 a 100, padrão 50; `cursor` opaco opcional | `200 SessionMessagesPage` |
+| Método e caminho                                            | Uso                                                | Corpo ou parâmetros                                    | Resposta de sucesso              |
+| ----------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------ | -------------------------------- |
+| `POST /v1/auth/firebase`                                    | Troca o Firebase ID token por um JWT da IA         | Sem corpo; Bearer com Firebase ID token                | `200` com `access_token`         |
+| `POST /v1/sessions`                                         | Cria uma sessão com as fazendas autorizadas atuais | Sem corpo                                              | `201 Session`                    |
+| `GET /v1/sessions`                                          | Lista as sessões do usuário autenticado            | Sem parâmetros                                         | `200 Session[]`                  |
+| `POST /v1/sessions/{session_id}/interactions/async`         | Aceita uma interação para processamento assíncrono | O mesmo `MessageInteraction` ou `AnswerInteraction`    | `202 InteractionAccepted`        |
+| `GET /v1/sessions/{session_id}/interactions/{operation_id}` | Consulta estado e resultado da interação           | `operation_id` retornado pelo POST assíncrono          | `200 InteractionOperationStatus` |
+| `GET /v1/sessions/{session_id}/messages`                    | Lê o histórico público paginado                    | `limit` de 1 a 100, padrão 50; `cursor` opaco opcional | `200 SessionMessagesPage`        |
 
 As rotas de sessões exigem o JWT próprio. O histórico valida titularidade e
 acesso atual às fazendas; não executa agentes, modelos ou ferramentas.
@@ -54,15 +55,42 @@ acesso atual às fazendas; não executa agentes, modelos ou ferramentas.
 Exemplo de mensagem:
 
 ```http
-POST /v1/sessions/00000000-0000-0000-0000-000000000001/interactions
+POST /v1/sessions/00000000-0000-0000-0000-000000000001/interactions/async
 Authorization: Bearer <JWT próprio da IA>
 Content-Type: application/json
 
 {"kind":"message","client_message_id":"00000000-0000-0000-0000-000000000002","message":"Resuma o lote L-10"}
 ```
 
-O resultado preserva a resposta estruturada existente (`answer` ou `question`) e
-inclui o estado da execução e o horário da mensagem do assistente:
+O POST responde imediatamente com `202 Accepted` e um identificador para
+consulta:
+
+```json
+{
+	"operation_id": "00000000-0000-4000-8000-000000000001",
+	"status": "accepted",
+	"poll_after_ms": 1000
+}
+```
+
+`created_at` é o horário UTC da mensagem do assistente correspondente no
+histórico. Em repetição idempotente de uma interação antiga, a API recupera o
+horário registrado em `interaction.updated_at`.
+
+O app móvel usa o POST `/async` para não manter uma conexão HTTP aberta durante
+a execução dos modelos e ferramentas. A resposta `202` contém `operation_id`,
+`status: "accepted"` e `poll_after_ms`. O cliente consulta o GET de status nesse
+intervalo até receber `completed`, `degraded` ou `failed`. Quando há um
+resultado, ele aparece em `result` e mantém integralmente o mesmo
+`InteractionResult`, inclusive perguntas estruturadas e respostas `text`,
+`choice` e `confirmation`. Erros anteriores à aceitação continuam usando as
+respostas HTTP de erro existentes. Se o processo for interrompido, o status
+passa a `interrupted` quando o lease de processamento expirar; o serviço não
+reexecuta essa interação automaticamente. Todas as novas interações usam o
+contrato assíncrono.
+
+O `InteractionResult` mostrado abaixo é o resultado retornado dentro de `result`
+na consulta de status, e mantém o contrato estruturado existente:
 
 ```json
 {
@@ -80,9 +108,35 @@ inclui o estado da execução e o horário da mensagem do assistente:
 }
 ```
 
-`created_at` é o horário UTC da mensagem do assistente correspondente no
-histórico. Em repetição idempotente de uma interação antiga, a API recupera o
-horário registrado em `interaction.updated_at`.
+Enquanto processa, o GET retorna somente o estado:
+
+```json
+{ "operation_id": "00000000-0000-4000-8000-000000000001", "status": "running" }
+```
+
+Ao concluir, o mesmo recurso inclui a resposta estruturada existente dentro de
+`result`:
+
+```json
+{
+	"operation_id": "00000000-0000-4000-8000-000000000001",
+	"status": "completed",
+	"result": {
+		"schema_version": "1",
+		"status": "completed",
+		"degradation_reasons": [],
+		"created_at": "2026-10-25T12:00:00Z",
+		"session_id": "00000000-0000-4000-8000-000000000002",
+		"interaction_id": "00000000-0000-4000-8000-000000000001",
+		"public_request_id": "00000000-0000-4000-8000-000000000003",
+		"response": { "kind": "answer", "text": "Consulta concluída." }
+	}
+}
+```
+
+O endpoint de status exige o JWT próprio, confere a titularidade da sessão e
+revalida acesso às fazendas. Se o acesso à sessão for parcial, o resultado não é
+exposto; o app deve atualizar o histórico, que aplica a ocultação existente.
 
 `status` é `completed` ou `degraded`. O estado degradado indica falha em uma ou
 mais etapas necessárias; `degradation_reasons` contém códigos técnicos

@@ -96,9 +96,7 @@ from datetime import datetime, timedelta
 from pymongo import ASCENDING, MongoClient
 
 client = MongoClient(os.environ["BI_OBSERVABILITY_MONGO_URI"], tz_aware=True)
-collection = client[os.environ["BI_OBSERVABILITY_DATABASE"]][
-    "ai_observations"
-]
+collection = client[os.environ["BI_OBSERVABILITY_DATABASE"]]["ai_observations"]
 
 
 def read_page(

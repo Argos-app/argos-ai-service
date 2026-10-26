@@ -84,7 +84,9 @@ LangSmith.
 
 O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
 para registrar o despacho do agente A2A e a chamada de geração de resposta no
-projeto definido por `A2A_LANGSMITH_PROJECT`. Entradas e saídas permanecem
+Agent definido por `A2A_LANGSMITH_AGENT_ID`, no ambiente derivado de `APP_ENV`
+ou sobrescrito por `A2A_LANGSMITH_AGENT_ENVIRONMENT`. Use o mesmo Agent ID entre
+ambientes e habilite Agent addressing no workspace. Entradas e saídas permanecem
 ocultas por padrão; `A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita a captura de
 perguntas, trechos e respostas. Com essa opção ativa, UUIDs, CPFs, CNPJs,
 telefones e tokens Bearer são anonimizados antes do envio; e-mails permanecem

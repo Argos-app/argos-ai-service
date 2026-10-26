@@ -29,9 +29,7 @@ import os
 from pymongo import ASCENDING, MongoClient
 
 client = MongoClient(os.environ["MAIN_API_MONGO_URI"], tz_aware=True)
-collection = client[os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai")][
-    "ai_observations"
-]
+collection = client[os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai")]["ai_observations"]
 correlation_id = "UUID recebido no header X-Argos-Correlation-ID"
 for item in collection.find({"correlation_id": correlation_id}).sort(
     [("started_at", ASCENDING), ("_id", ASCENDING)]

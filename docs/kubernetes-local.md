@@ -56,6 +56,16 @@ Os PVs `hostPath` desta configuração são estáticos e esperam um cluster de n
 único. O nome `argos-local` identifica o cluster Kind do exemplo. Não aplique
 estes PVs em um cluster compartilhado.
 
+Os PVs usam `persistentVolumeReclaimPolicy: Retain`. Remover somente o namespace
+`argos-local` deixa os PVs em estado `Released`; os PVCs recriados não os
+associam automaticamente e os diretórios do nó ainda podem conter os dados da
+execução anterior. Antes de reaplicar neste caso, confira `kubectl get pv` e
+decida se precisa preservar os dados. Para um ambiente realmente descartável,
+recrie o cluster local inteiro. No Kind,
+`kind delete cluster --name argos-local`; no Kubernetes do Docker Desktop,
+remova o cluster pela interface. Não apague PVs ou diretórios `hostPath` sem
+decidir que os dados podem ser descartados.
+
 ## Secrets locais e imagens
 
 O `.env` da raiz é a fonte oficial da configuração local. Gere-o uma vez se
@@ -129,7 +139,10 @@ dependências e a porta do próprio processo; API principal também consulta
 `/health/ready` e A2A consulta essa rota com o token interno. Isso torna uma
 dependência indisponível visível como Pod não pronto, mas não substitui um teste
 de transação de negócio completo. Startup/liveness verificam que o processo está
-respondendo, para que uma falha de dependência não provoque reinícios em ciclo.
+respondendo. Como o Kubernetes inicia os Pods em paralelo, serviços que falhem
+ao conectar às dependências durante o bootstrap podem reiniciar até Mongo,
+PostgreSQL e os demais serviços estarem disponíveis; o rollout ordenado abaixo
+aguarda as dependências antes de validar cada aplicação.
 
 Confira o replica set e os dados inicializados em PostgreSQL:
 

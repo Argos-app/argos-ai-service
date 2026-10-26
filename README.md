@@ -111,7 +111,10 @@ destinatários, mas amplia a exposição de PII. Avalie acesso, retenção e pol
 do provider antes de usar dados pessoais reais. A chave deve ficar no
 gerenciador de secrets do ambiente. Para chaves de escopo organizacional,
 configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` com o ID do workspace
-LangSmith. `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e
+LangSmith. `MAIN_API_LANGSMITH_AGENT_ID` identifica o Agent e
+`MAIN_API_LANGSMITH_AGENT_ENVIRONMENT` seleciona `local`, `development`,
+`staging` ou `production`; vazio deriva o valor de `APP_ENV`. Use o mesmo Agent
+ID entre ambientes. O workspace precisa ter Agent addressing habilitado.
 `MAIN_API_LANGSMITH_ENDPOINT` permite apontar para uma instância aprovada. O
 Mongo continua armazenando apenas os eventos brutos sanitizados existentes;
 conteúdo de trace é armazenado separadamente pelo LangSmith. A coleta local no
@@ -136,15 +139,17 @@ e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações
 feedback podem ser feitos sobre traces na plataforma; esta integração não define
 critérios automáticos de qualidade.
 
-As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
-`POST /v1/sessions/{session_id}/interactions` e
-`GET /v1/sessions/{session_id}/messages`. A consulta de mensagens não chama o
-LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
-(padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
-público. O POST de interação retorna `created_at` da mensagem do assistente,
-além de `status` e `degradation_reasons`; o GET do histórico também retorna os
-metadados de degradação disponíveis nas mensagens visíveis do assistente, para
-que o aplicativo preserve o aviso de resposta parcial ao reabrir a conversa.
+As rotas disponíveis incluem `POST /v1/sessions`, `GET /v1/sessions`,
+`POST /v1/sessions/{session_id}/interactions/async` e
+`GET /v1/sessions/{session_id}/interactions/{operation_id}` para consultar o
+processamento assíncrono, além de `GET /v1/sessions/{session_id}/messages`. A
+consulta de mensagens não chama o LLM, valida o titular, usa cursor estável e
+aceita páginas de 1 a 100 itens (padrão 50). Eventos internos de agentes e tools
+não são incluídos no histórico público. O resultado consultado pelo GET de
+status contém `created_at`, `status` e `degradation_reasons`; o GET do histórico
+também retorna os metadados de degradação disponíveis nas mensagens visíveis do
+assistente, para que o aplicativo preserve o aviso de resposta parcial ao
+reabrir a conversa.
 
 O contrato OpenAPI e exemplos de autenticação, erros e correlação estão em
 [`docs/api-main-api.md`](docs/api-main-api.md) e
@@ -184,8 +189,11 @@ registrados separadamente. Sem `MAIN_API_LANGSMITH_API_KEY`, nada é enviado.
 Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
 habilita prompts, respostas e argumentos de ferramentas após aprovação. E-mails
 permanecem sem anonimização; UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
-anonimizados antes do envio. O projeto é selecionado por
-`MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
+anonimizados antes do envio. O destino usa o Agent ID definido por
+`MAIN_API_LANGSMITH_AGENT_ID` e o ambiente derivado de `APP_ENV` ou definido em
+`MAIN_API_LANGSMITH_AGENT_ENVIRONMENT`. Use o mesmo Agent ID entre ambientes
+para alternar entre Local, Development, Staging e Production. O workspace deve
+ter Agent addressing habilitado. O endpoint HTTPS opcional é configurado por
 `MAIN_API_LANGSMITH_ENDPOINT`. Para chaves de escopo organizacional, configure
 `MAIN_API_LANGSMITH_WORKSPACE_ID`. O serviço A2A possui configuração própria;
 IDs assinados de correlação e pai permitem relacionar a observação de chamada do

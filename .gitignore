@@ -96,6 +96,7 @@ Thumbs.db
 !docs/api-main-api.md
 !docs/dicionario-mongodb-bi.md
 !docs/observabilidade-extracao-mongo.md
+!docs/estruturas-collections-mongodb.md
 !docs/operacao-observabilidade.md
 !docs/plano-observabilidade-dados-brutos.md
 !docs/resultado-homologacao-local.md
