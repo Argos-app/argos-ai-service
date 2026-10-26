@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit

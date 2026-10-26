@@ -1,8 +1,6 @@
 import asyncio
 import logging
 import re
-from collections.abc import Mapping
-from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 from uuid import uuid4
@@ -24,7 +22,6 @@ from app.agent_schemas.results import (
     SpecialistStatus,
 )
 from app.agent_schemas.synthesis import (
-    EmailDispatchEvidence,
     JudgeInput,
     OrchestratorInput,
     OrchestratorResult,
