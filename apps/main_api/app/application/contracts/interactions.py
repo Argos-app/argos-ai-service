@@ -95,3 +95,11 @@ class InteractionOutcome(ApplicationModel):
     interaction_id: UUID
     public_request_id: UUID
     response: ApplicationResponse
+
+
+class InteractionOperation(ApplicationModel):
+    """Estado consultável de uma interação enviada pelo fluxo assíncrono."""
+
+    operation_id: UUID
+    status: Literal["accepted", "running", "completed", "degraded", "failed", "interrupted"]
+    result: InteractionOutcome | None = None

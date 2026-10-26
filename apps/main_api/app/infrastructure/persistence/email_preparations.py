@@ -1,5 +1,6 @@
 """Persistência Mongo das respostas completas de preparação de relatório."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -374,6 +375,67 @@ class MongoEmailPreparationRepository:
         if not _same_authorization(stored, authorization):
             raise EmailSendAuthorizationConflictError(
                 "a interação já está vinculada a outra preparação ou autorização"
+            )
+        return stored
+
+    async def confirm_send_authorization(
+        self,
+        *,
+        principal_user_id: UUID,
+        session_id: UUID,
+        source_interaction_id: UUID,
+        question_id: UUID,
+        question_expires_at: datetime,
+        now: datetime,
+    ) -> EmailSendAuthorization | None:
+        if self._send_authorizations is None:
+            raise RuntimeError("armazenamento de autorizações de envio indisponível")
+        scope = {
+            "principal_user_id": str(principal_user_id),
+            "session_id": str(session_id),
+            "source_interaction_id": str(source_interaction_id),
+        }
+        stored_document = await self._send_authorizations.find_one(scope)
+        if stored_document is None:
+            return None
+        stored = _send_authorization(stored_document)
+        if stored.origin == SendAuthorizationOrigin.CONFIRMED_QUESTION:
+            if (
+                stored.question_id == question_id
+                and stored.question_expires_at == question_expires_at
+            ):
+                return stored
+            raise EmailSendAuthorizationConflictError(
+                "a solicitação já foi confirmada por outra pergunta"
+            )
+        if stored.origin != SendAuthorizationOrigin.EXPLICIT_REQUEST:
+            raise EmailSendAuthorizationConflictError(
+                "origem da autorização não pode ser confirmada"
+            )
+        if now >= question_expires_at or now >= stored.expires_at:
+            raise EmailSendAuthorizationConflictError("a pergunta ou preparação expirou")
+
+        confirmed = replace(
+            stored,
+            origin=SendAuthorizationOrigin.CONFIRMED_QUESTION,
+            authorized_at=now,
+            expires_at=min(stored.expires_at, question_expires_at),
+            question_id=question_id,
+            question_expires_at=question_expires_at,
+        )
+        document = _send_authorization_document(confirmed)
+        update = {key: value for key, value in document.items() if key != "_id"}
+        await self._send_authorizations.update_one(
+            {**scope, "origin": SendAuthorizationOrigin.EXPLICIT_REQUEST.value},
+            {"$set": update},
+        )
+        stored_document = await self._send_authorizations.find_one(scope)
+        if stored_document is None:
+            raise RuntimeError("autorização confirmada não foi persistida")
+        stored = _send_authorization(stored_document)
+        if not _same_authorization(stored, confirmed):
+            raise EmailSendAuthorizationConflictError(
+                "a autorização foi confirmada por uma pergunta diferente"
             )
         return stored
 

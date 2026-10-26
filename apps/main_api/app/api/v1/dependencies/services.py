@@ -6,7 +6,10 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 
-from app.application.contracts.interactions import InteractionCommand, InteractionOutcome
+from app.application.contracts.interactions import (
+    InteractionCommand,
+    InteractionOperation,
+)
 from app.application.contracts.messages import SessionMessagesPageView
 from app.application.contracts.sessions import SessionView
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
@@ -21,9 +24,13 @@ class SessionService(Protocol):
 
     async def list_sessions(self, principal: ActorContext) -> list[SessionView]: ...
 
-    async def create_interaction(
+    async def submit_interaction(
         self, principal: ActorContext, session_id: UUID, body: InteractionCommand
-    ) -> InteractionOutcome: ...
+    ) -> UUID: ...
+
+    async def get_interaction_operation(
+        self, principal: ActorContext, session_id: UUID, operation_id: UUID
+    ) -> InteractionOperation: ...
 
 
 class MessageHistoryQueryService(Protocol):

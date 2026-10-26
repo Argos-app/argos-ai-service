@@ -8,12 +8,14 @@ from uuid import uuid4
 from app.agent_schemas.inputs import (
     QuestionFormatterInput,
     QuestionFormattingRequest,
+    QuestionOption,
     RouterInput,
     SessionContext,
 )
 from app.agent_schemas.results import (
     JudgeDecision,
     JudgeResult,
+    QuestionFormatterResult,
     RoutePlan,
     RouteTask,
     SourceReference,
@@ -156,6 +158,7 @@ def reset_turn_state() -> dict:
         "email_action_summary": None,
         "email_dispatch_evidence": None,
         "email_preparation_confirmed": False,
+        "email_send_confirmation_report_id": None,
         "sanitized_message": "",
         "route": [],
         "route_plan": None,
@@ -471,7 +474,6 @@ async def no_roteador(
         update["missing_fields"] = fields
         update["clarification_request"] = QuestionFormattingRequest(
             reason_code="MISSING_FIELDS",
-            input_type="free_text",
             question_goal=f"Informe os dados necessários: {', '.join(fields)}.",
         )
     elif not ordered:
@@ -654,10 +656,12 @@ async def no_formatador(
             "errors": [*state.get("errors", []), "missing_question_request"],
             "final_answer": SAFE_ANSWER,
         }
-    if request.reason_code in {"RECIPIENT_AMBIGUOUS", "RECIPIENT_NOT_FOUND"}:
-        # Recipient prompts and options come from the persisted application
-        # workflow; asking a model to rewrite them adds latency and can corrupt
-        # the exact clarification contract.
+    if request.reason_code in {
+        "RECIPIENT_AMBIGUOUS",
+        "RECIPIENT_NOT_FOUND",
+    } or request.input_type in {"single_choice", "confirmation"}:
+        # Business workflows own trusted recipient choices and confirmations.
+        # The formatter creates choices only for general clarifications.
         return {
             "clarification_question": request.question_goal,
             "question_id": state.get("question_id") or str(uuid4()),
@@ -666,12 +670,28 @@ async def no_formatador(
     called = [*state.get("called_agents", []), AgentId.QUESTION_FORMATTER.value]
     try:
         response = await factory.create(AgentId.QUESTION_FORMATTER).run(
-            QuestionFormatterInput(request=request),
+            QuestionFormatterInput(
+                request=request,
+                user_request=(state.get("sanitized_message") or request.question_goal),
+            ),
             context=build_agent_context(state, config=config),
         )
-        question = response.prompt.strip()
+        formatted = QuestionFormatterResult.model_validate(response)
+        question = formatted.prompt.strip()
         if not question:
             raise ValueError("empty_question")
+        if formatted.options:
+            request = request.model_copy(
+                update={
+                    "input_type": "single_choice",
+                    "options": tuple(
+                        QuestionOption(option_id=str(uuid4()), label=label)
+                        for label in formatted.options
+                    ),
+                }
+            )
+        else:
+            request = request.model_copy(update={"input_type": "free_text", "options": ()})
     except ExecutionEventWriteError:
         raise
     except Exception as exc:
@@ -682,14 +702,17 @@ async def no_formatador(
             extra={"agent": AgentId.QUESTION_FORMATTER.value, "failure_reason": failure_reason},
         )
         question = request.question_goal
+        request = request.model_copy(update={"input_type": "free_text", "options": ()})
         return {
             "called_agents": called,
             "errors": [*state.get("errors", []), failure_reason],
+            "clarification_request": request,
             "clarification_question": question,
             "question_id": state.get("question_id") or str(uuid4()),
         }
     return {
         "called_agents": called,
+        "clarification_request": request,
         "clarification_question": question,
         "question_id": state.get("question_id") or str(uuid4()),
     }
@@ -706,37 +729,45 @@ def no_guardrail_pergunta(state: AgentState) -> dict:
 def no_guardrail_saida(state: AgentState) -> dict:
     review = state.get("judge_result")
     draft = state.get("draft_result")
-    email_preparation_failure = _unconfirmed_email_preparation(state)
-    if email_preparation_failure:
-        answer = minimize_pii(email_preparation_failure)
-    elif _all_agent_results_failed_without_evidence(state):
-        answer = _unverified_result_answer(state)
-    elif (
-        review is None
-        or review.decision != JudgeDecision.APPROVED
-        or review.unsupported_claims
-        or draft is None
-    ):
-        answer = SAFE_ANSWER
+    email_dispatch_fallback = _confirmed_email_dispatch_fallback(state)
+    if email_dispatch_fallback:
+        answer = email_dispatch_fallback
     else:
-        answer = minimize_pii(draft.draft_answer)
-        for identifier in build_agent_context(state).values():
-            if isinstance(identifier, str) and identifier:
-                answer = answer.replace(identifier, "[identificador protegido]")
-    answer = _include_email_action_summary(answer, state.get("email_action_summary"))
+        email_preparation_failure = _unconfirmed_email_preparation(state)
+        if email_preparation_failure:
+            answer = minimize_pii(email_preparation_failure)
+        elif _all_agent_results_failed_without_evidence(state):
+            answer = _unverified_result_answer(state)
+        elif (
+            review is None
+            or review.decision != JudgeDecision.APPROVED
+            or review.unsupported_claims
+            or draft is None
+        ):
+            answer = SAFE_ANSWER
+        else:
+            answer = minimize_pii(draft.draft_answer)
+            for identifier in build_agent_context(state).values():
+                if isinstance(identifier, str) and identifier:
+                    answer = answer.replace(identifier, "[identificador protegido]")
+        answer = _include_email_action_summary(answer, state.get("email_action_summary"))
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
 def no_saida_segura(state: AgentState) -> dict:
-    fallback = state.get("final_answer") or (
-        _unverified_result_answer(state)
-        if _all_agent_results_failed_without_evidence(state)
-        else SAFE_ANSWER
-    )
-    answer = _include_email_action_summary(
-        fallback,
-        state.get("email_action_summary"),
-    )
+    email_dispatch_fallback = _confirmed_email_dispatch_fallback(state)
+    if email_dispatch_fallback:
+        answer = email_dispatch_fallback
+    else:
+        fallback = state.get("final_answer") or (
+            _unverified_result_answer(state)
+            if _all_agent_results_failed_without_evidence(state)
+            else SAFE_ANSWER
+        )
+        answer = _include_email_action_summary(
+            fallback,
+            state.get("email_action_summary"),
+        )
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
@@ -744,6 +775,17 @@ def _include_email_action_summary(answer: str, summary: str | None) -> str:
     if not summary:
         return answer
     return f"{answer}\n\nEstado do envio: {summary}"
+
+
+def _confirmed_email_dispatch_fallback(state: AgentState) -> str | None:
+    """Reports a persisted MCP outcome when the model fails after a dispatch."""
+    evidence = state.get("email_dispatch_evidence")
+    if evidence is None or not evidence.confirmed:
+        return None
+    return minimize_pii(
+        "A resposta final da Secretária não foi concluída, mas o MCP confirmou: "
+        f"{evidence.message} Consulte o status do relatório antes de solicitar outro envio."
+    )
 
 
 def _include_confirmed_email_preparation(answer: str | None, state: AgentState) -> str | None:

@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import time
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
@@ -42,6 +43,29 @@ class _UserAccessRepository:
         return next(
             (user for user in self._users.values() if user.firebase_uid == firebase_uid), None
         )
+
+
+def _submit_interaction_and_wait(client, session_id: str, headers: dict, body: dict) -> dict:
+    response = client.post(
+        f"/v1/sessions/{session_id}/interactions/async",
+        headers=headers,
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    operation_id = response.json()["operation_id"]
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        status_response = client.get(
+            f"/v1/sessions/{session_id}/interactions/{operation_id}",
+            headers=headers,
+        )
+        assert status_response.status_code == 200, status_response.text
+        operation = status_response.json()
+        if operation["status"] in {"completed", "degraded"}:
+            return operation["result"]
+        assert operation["status"] not in {"failed", "interrupted"}, operation
+        time.sleep(0.05)
+    raise AssertionError(f"Interação {operation_id} não concluiu dentro do prazo")
 
 
 def _signed_report(private_key, *, user_id: UUID, property_id: UUID) -> LotReportEnvelope:
@@ -311,19 +335,13 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             )
             other_headers = {"Authorization": f"Bearer {other_user_token}"}
             cross_user = client.post(
-                f"/v1/sessions/{session_id}/interactions",
+                f"/v1/sessions/{session_id}/interactions/async",
                 headers=other_headers,
                 json=request_body,
             )
             assert cross_user.status_code == 404
 
-            response = client.post(
-                f"/v1/sessions/{session_id}/interactions",
-                headers=headers,
-                json=request_body,
-            )
-            assert response.status_code == 200, response.text
-            public_result = response.json()
+            public_result = _submit_interaction_and_wait(client, session_id, headers, request_body)
             artifact_document = await mongo[database_name]["ai_report_artifacts"].find_one(
                 {
                     "principal_user_id": str(user_id),
@@ -377,26 +395,21 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
                 assert "O provedor aceitou o despacho" not in public_text
             assert "matheus@example.test" not in public_text
             assert harness.title not in public_text
-            stored_report = await harness.database.prepared_reports.find_one({})
+            stored_report = await harness.database.ai_email_prepared_reports.find_one({})
             assert stored_report is not None
             assert stored_report["body"] not in public_text
 
-            replay = client.post(
-                f"/v1/sessions/{session_id}/interactions",
-                headers=headers,
-                json=request_body,
-            )
-            assert replay.status_code == 200
-            assert replay.json() == public_result
+            replay = _submit_interaction_and_wait(client, session_id, headers, request_body)
+            assert replay == public_result
             altered_replay = client.post(
-                f"/v1/sessions/{session_id}/interactions",
+                f"/v1/sessions/{session_id}/interactions/async",
                 headers=headers,
                 json={**request_body, "message": "Envie este relatório para outro destinatário."},
             )
             assert altered_replay.status_code == 409
             expected_count = int(expected_dispatch)
-            assert await harness.database.email_dispatches.count_documents({}) == expected_count
-            assert await harness.database.prepared_reports.count_documents({}) == 1
+            assert await harness.database.ai_email_dispatches.count_documents({}) == expected_count
+            assert await harness.database.ai_email_prepared_reports.count_documents({}) == 1
 
             stored_action_count = await mongo[database_name][
                 "ai_email_send_authorizations"
@@ -410,15 +423,12 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
         restarted_app = create_app(settings)
         with TestClient(restarted_app) as restarted_client:
             restarted_app.state.user_access_repository = _UserAccessRepository(users)
-            replay_after_restart = restarted_client.post(
-                f"/v1/sessions/{session_id}/interactions",
-                headers=headers,
-                json=request_body,
+            replay_after_restart = _submit_interaction_and_wait(
+                restarted_client, session_id, headers, request_body
             )
-            assert replay_after_restart.status_code == 200
-            assert replay_after_restart.json() == public_result
+            assert replay_after_restart == public_result
         expected_count = int(expected_dispatch)
-        assert await harness.database.email_dispatches.count_documents({}) == expected_count
+        assert await harness.database.ai_email_dispatches.count_documents({}) == expected_count
         assert len(await harness.messages()) == expected_count
     finally:
         await mongo.drop_database(database_name)

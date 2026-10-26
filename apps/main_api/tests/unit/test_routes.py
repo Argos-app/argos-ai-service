@@ -11,6 +11,8 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from app.agent_schemas.results import QuestionFormatterResult
+
 app = import_module("app.main").app
 ApplicationError = import_module("app.application.errors").ApplicationError
 ApplicationErrorCode = import_module("app.application.errors").ApplicationErrorCode
@@ -119,9 +121,16 @@ def test_planned_routes_are_present() -> None:
         ("/v1/sessions", "post"),
         ("/v1/sessions", "get"),
         ("/v1/sessions/{session_id}/messages", "get"),
-        ("/v1/sessions/{session_id}/interactions", "post"),
+        ("/v1/sessions/{session_id}/interactions/async", "post"),
+        ("/v1/sessions/{session_id}/interactions/{operation_id}", "get"),
     }
     assert all(method in paths[path] for path, method in expected)
+    assert "/v1/sessions/{session_id}/interactions" not in paths
+    async_interaction = paths["/v1/sessions/{session_id}/interactions/async"]["post"]
+    assert "202" in async_interaction["responses"]
+    assert async_interaction["responses"]["202"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/InteractionAccepted")
     firebase_auth = paths["/v1/auth/firebase"]["post"]
     assert "requestBody" not in firebase_auth
     assert any(
@@ -143,7 +152,6 @@ def test_planned_routes_are_present() -> None:
     )
     assert "/v1/sessions/{session_id}/answers" not in paths
     assert "/v1/sessions/{session_id}" not in paths
-    assert "/v1/sessions/{session_id}/interactions/{interaction_id}" not in paths
     assert "/v1/sessions/{session_id}/interactions/{interaction_id}/cancel" not in paths
     assert "requestBody" not in paths["/v1/sessions"]["post"]
 
@@ -194,10 +202,24 @@ def test_single_choice_question_requires_unique_options() -> None:
     question["options"] = []
     with pytest.raises(ValidationError):
         QuestionResponse.model_validate(question)
-
     question["options"] = [
         {"option_id": "7d", "label": "Últimos 7 dias"},
         {"option_id": "7d", "label": "Outro rótulo"},
     ]
     with pytest.raises(ValidationError):
         QuestionResponse.model_validate(question)
+
+
+def test_question_formatter_can_return_general_choice_labels_without_ids() -> None:
+    result = QuestionFormatterResult.model_validate(
+        {
+            "prompt": "Qual período você quer consultar?",
+            "options": ["Últimos 7 dias", "Últimos 30 dias"],
+        }
+    )
+    assert result.options == ("Últimos 7 dias", "Últimos 30 dias")
+
+    with pytest.raises(ValidationError):
+        QuestionFormatterResult.model_validate(
+            {"prompt": "Qual período?", "options": ["Últimos 7 dias"]}
+        )

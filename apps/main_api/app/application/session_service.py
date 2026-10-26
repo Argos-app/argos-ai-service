@@ -8,13 +8,13 @@ import json
 import logging
 import re
 from collections.abc import AsyncIterator, Callable, Collection, Coroutine
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from app.agent_schemas.inputs import SessionContext
+from app.agent_schemas.inputs import QuestionFormattingRequest, SessionContext
 from app.application.context_builder import build_session_context
 from app.application.contracts.interactions import (
     AnswerCommand,
@@ -22,6 +22,7 @@ from app.application.contracts.interactions import (
     ChoiceAnswer,
     ConfirmationAnswer,
     InteractionCommand,
+    InteractionOperation,
     InteractionOutcome,
     MessageCommand,
     QuestionOptionResult,
@@ -61,7 +62,7 @@ from app.session_config import (
     SESSION_LEASE_RENEW_SECONDS,
     SESSION_LEASE_SECONDS,
 )
-from packages.contracts import RecipientSelector
+from packages.contracts import PreparedReportStatus, RecipientSelector
 from packages.observability import (
     ErrorOrigin,
     ObservationCollector,
@@ -80,6 +81,7 @@ MemoryExtractorProvider = Callable[[], UserMemoryExtractor | None]
 BackgroundTaskScheduler = Callable[[Coroutine[Any, Any, Any]], None]
 SAFE_ANSWER = "Não tenho informação suficiente para responder com segurança agora."
 logger = logging.getLogger(__name__)
+EMAIL_SEND_CONFIRMATION_REASON = "EMAIL_SEND_CONFIRMATION"
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +94,10 @@ class _InteractionRequest:
     send_intent_requested: bool
     answer_text: str | None
     send_intent_source_interaction_id: str | None
+    send_confirmation: bool = False
+    confirmed_send_question_id: UUID | None = None
+    confirmed_send_report_id: UUID | None = None
+    confirmed_send_question_expires_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,7 +119,7 @@ class _InteractionContext:
 
 
 class SessionApplicationService:
-    """Executa interações e persiste cada transição usando portas injetadas."""
+    """Coordena sessões, interações e persistência pelas portas injetadas."""
 
     def __init__(
         self,
@@ -181,7 +187,8 @@ class SessionApplicationService:
             raise ApplicationError(
                 ApplicationErrorCode.FORBIDDEN, "O usuário não possui fazendas autorizadas"
             )
-        now = _utcnow()
+        # MongoDB stores BSON datetimes at millisecond precision.
+        now = _mongo_utcnow()
         record = SessionRecord(
             session_id=uuid4(),
             user_id=principal.user_id,
@@ -201,14 +208,120 @@ class SessionApplicationService:
             if (response := _session_response(record, principal.farm_ids)) is not None
         ]
 
+    async def get_interaction_operation(
+        self, principal: ActorContext, session_id: UUID, operation_id: UUID
+    ) -> InteractionOperation:
+        session = await self._sessions.get_owned(session_id, principal.user_id)
+        if session is None:
+            raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
+        if not _authorized_farm_ids(session, principal.farm_ids):
+            raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
+        if not _has_full_farm_access(session, principal.farm_ids):
+            raise ApplicationError(
+                ApplicationErrorCode.FORBIDDEN,
+                "A sessão perdeu acesso a uma ou mais fazendas; consulte o histórico ocultado",
+            )
+        interaction = await self._interactions.get_owned(operation_id, principal.user_id)
+        if interaction is None or interaction.session_id != session_id:
+            raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Interação não encontrada")
+
+        if interaction.status in {InteractionStatus.ACCEPTED, InteractionStatus.RUNNING}:
+            lease = session.processing_lease
+            if lease is None or lease.expires_at <= _utcnow():
+                interrupted = replace(
+                    interaction,
+                    status=InteractionStatus.INTERRUPTED,
+                    updated_at=_mongo_utcnow(),
+                    version=interaction.version + 1,
+                )
+                if await self._interactions.save_result(
+                    interrupted, expected_version=interaction.version
+                ):
+                    interaction = interrupted
+                else:
+                    interaction = await self._interactions.get_owned(
+                        operation_id, principal.user_id
+                    )
+                    if interaction is None or interaction.session_id != session_id:
+                        raise ApplicationError(
+                            ApplicationErrorCode.NOT_FOUND, "Interação não encontrada"
+                        )
+
+        result = (
+            InteractionOutcome.model_validate_json(interaction.result_json)
+            if interaction.result_json
+            else None
+        )
+        if result is not None and result.created_at is None:
+            result = result.model_copy(update={"created_at": interaction.updated_at})
+        return InteractionOperation(
+            operation_id=operation_id,
+            status=interaction.status.value,
+            result=result,
+        )
+
     async def create_interaction(
         self,
         principal: ActorContext,
         session_id: UUID,
         body: InteractionCommand,
     ) -> InteractionOutcome:
+        return await self._observe_interaction(
+            self._create_interaction(principal, session_id, body)
+        )
+
+    async def submit_interaction(
+        self,
+        principal: ActorContext,
+        session_id: UUID,
+        body: InteractionCommand,
+    ) -> UUID:
+        """Persiste a aceitação e agenda a execução sem prender a chamada HTTP."""
+        manager: AbstractAsyncContextManager[_AcceptedInteraction | InteractionOutcome] = (
+            self._accept_interaction(principal, session_id, body)
+        )
+        try:
+            accepted = await manager.__aenter__()
+        except ApplicationError as exc:
+            if exc.code is not ApplicationErrorCode.CONFLICT:
+                raise
+            kind, deduplication_key, _, _, input_hash, *_ = _normalize_input(body)
+            existing = await self._interactions.find_by_deduplication_key(
+                session_id,
+                principal.user_id,
+                kind=kind,
+                deduplication_key=deduplication_key,
+            )
+            if (
+                existing is not None
+                and existing.input_hash == input_hash
+                and existing.status in {InteractionStatus.ACCEPTED, InteractionStatus.RUNNING}
+            ):
+                return existing.interaction_id
+            raise
+        if isinstance(accepted, InteractionOutcome):
+            await manager.__aexit__(None, None, None)
+            return accepted.interaction_id
+        if self._background_task_scheduler is None:
+            await manager.__aexit__(None, None, None)
+            raise ApplicationError(
+                ApplicationErrorCode.UNAVAILABLE,
+                "Processamento assíncrono não está configurado",
+            )
+        try:
+            self._background_task_scheduler(
+                self._process_and_release_interaction(manager, accepted)
+            )
+        except BaseException as exc:
+            await manager.__aexit__(type(exc), exc, exc.__traceback__)
+            raise
+        return accepted.running.interaction_id
+
+    async def _observe_interaction(
+        self, interaction: Coroutine[Any, Any, InteractionOutcome]
+    ) -> InteractionOutcome:
         if self._observation_collector is None:
-            return await self._create_interaction(principal, session_id, body)
+            return await interaction
         async with observe_operation(
             self._observation_collector,
             operation_kind=OperationKind.INTERACTION,
@@ -217,7 +330,7 @@ class SessionApplicationService:
             observation_level=ObservationLevel.LOCAL_OPERATION,
             error_origin=ErrorOrigin.APPLICATION,
         ) as recorder:
-            result = await self._create_interaction(principal, session_id, body)
+            result = await interaction
             recorder.finish(
                 result=ResultMetadata(
                     source="application",
@@ -225,6 +338,27 @@ class SessionApplicationService:
                 )
             )
             return result
+
+    async def _process_and_release_interaction(
+        self,
+        manager: AbstractAsyncContextManager[_AcceptedInteraction | InteractionOutcome],
+        accepted: _AcceptedInteraction,
+    ) -> None:
+        try:
+            await self._observe_interaction(self._process_accepted(accepted))
+        except Exception:
+            logger.exception(
+                "assíncrono não conseguiu finalizar interação %s",
+                accepted.running.interaction_id,
+            )
+        finally:
+            try:
+                await manager.__aexit__(None, None, None)
+            except Exception:
+                logger.exception(
+                    "falha ao liberar lease da interação %s",
+                    accepted.running.interaction_id,
+                )
 
     async def _create_interaction(
         self,
@@ -236,25 +370,28 @@ class SessionApplicationService:
             if isinstance(accepted, InteractionOutcome):
                 return accepted
 
+            return await self._process_accepted(accepted)
+
+    async def _process_accepted(self, accepted: _AcceptedInteraction) -> InteractionOutcome:
+        if accepted.lease_lost.is_set():
+            raise ApplicationError(
+                ApplicationErrorCode.CONFLICT,
+                "A posse da sessão foi perdida durante o processamento",
+            )
+        processing = asyncio.create_task(self._process_accepted_interaction(accepted))
+        lease_watch = asyncio.create_task(accepted.lease_lost.wait())
+        try:
+            await asyncio.wait((processing, lease_watch), return_when=asyncio.FIRST_COMPLETED)
             if accepted.lease_lost.is_set():
                 raise ApplicationError(
                     ApplicationErrorCode.CONFLICT,
                     "A posse da sessão foi perdida durante o processamento",
                 )
-            processing = asyncio.create_task(self._process_accepted_interaction(accepted))
-            lease_watch = asyncio.create_task(accepted.lease_lost.wait())
-            try:
-                await asyncio.wait((processing, lease_watch), return_when=asyncio.FIRST_COMPLETED)
-                if accepted.lease_lost.is_set():
-                    raise ApplicationError(
-                        ApplicationErrorCode.CONFLICT,
-                        "A posse da sessão foi perdida durante o processamento",
-                    )
-                return await processing
-            finally:
-                processing.cancel()
-                lease_watch.cancel()
-                await asyncio.gather(processing, lease_watch, return_exceptions=True)
+            return await processing
+        finally:
+            processing.cancel()
+            lease_watch.cancel()
+            await asyncio.gather(processing, lease_watch, return_exceptions=True)
 
     async def _process_accepted_interaction(
         self, accepted: _AcceptedInteraction
@@ -337,17 +474,28 @@ class SessionApplicationService:
 
         answer_text: str | None = None
         send_intent_source_interaction_id: str | None = None
+        send_confirmation = False
+        confirmed_send_question_id: UUID | None = None
+        confirmed_send_report_id: UUID | None = None
+        confirmed_send_question_expires_at: datetime | None = None
         if isinstance(body, AnswerCommand):
             (
                 answer_text,
                 recipient_selectors,
                 send_intent_requested,
                 send_intent_source_interaction_id,
+                send_confirmation,
+                confirmed_send_question_id,
+                confirmed_send_report_id,
+                confirmed_send_question_expires_at,
             ) = await self._validate_answer(
                 session, body, graph, new_recipient_selectors=recipient_selectors
             )
 
-        now = _utcnow()
+        # MongoDB stores BSON datetimes at millisecond precision. Keep every
+        # persisted interaction timestamp at that precision so a fast completion
+        # cannot be rounded to a time before its creation time.
+        now = _mongo_utcnow()
         lease = await self._sessions.acquire_lease(
             session_id,
             principal.user_id,
@@ -427,7 +575,7 @@ class SessionApplicationService:
             running = replace(
                 interaction,
                 status=InteractionStatus.RUNNING,
-                updated_at=_utcnow(),
+                updated_at=_mongo_utcnow(),
                 version=interaction.version + 1,
             )
             if not await self._interactions.save_result(
@@ -448,6 +596,10 @@ class SessionApplicationService:
                     send_intent_requested=send_intent_requested,
                     answer_text=answer_text,
                     send_intent_source_interaction_id=send_intent_source_interaction_id,
+                    send_confirmation=send_confirmation,
+                    confirmed_send_question_id=confirmed_send_question_id,
+                    confirmed_send_report_id=confirmed_send_report_id,
+                    confirmed_send_question_expires_at=confirmed_send_question_expires_at,
                 ),
                 graph=graph,
                 accepted_message=accepted_message,
@@ -508,6 +660,22 @@ class SessionApplicationService:
                 "argos_request_id": str(current_correlation_id() or interaction_id),
             }
         }
+        if accepted.request.confirmed_send_question_id is not None:
+            graph_config["configurable"].update(
+                {
+                    "argos_confirmed_send_question_id": str(
+                        accepted.request.confirmed_send_question_id
+                    ),
+                    "argos_confirmed_send_report_id": str(
+                        accepted.request.confirmed_send_report_id
+                    ),
+                    "argos_confirmed_send_question_expires_at": (
+                        accepted.request.confirmed_send_question_expires_at.isoformat()
+                        if accepted.request.confirmed_send_question_expires_at is not None
+                        else None
+                    ),
+                }
+            )
         if self._langsmith_callback is not None:
             graph_config["callbacks"] = [self._langsmith_callback]
             graph_config["metadata"] = {
@@ -550,7 +718,36 @@ class SessionApplicationService:
             with bind_interaction(session_id, interaction_id):
                 with execution_limits_scope(execution_limits):
                     async with asyncio.timeout(self._execution_timeout_seconds):
-                        if isinstance(body, MessageCommand):
+                        if (
+                            accepted.request.send_confirmation
+                            and isinstance(body, AnswerCommand)
+                            and isinstance(body.answer, ConfirmationAnswer)
+                            and not body.answer.confirm
+                        ):
+                            state = {
+                                "final_answer": "Envio cancelado. Nenhum e-mail foi enviado.",
+                                "errors": [],
+                            }
+                            updater = getattr(accepted.graph, "aupdate_state", None)
+                            if not callable(updater):
+                                raise RuntimeError(
+                                    "o grafo não permite encerrar a confirmação pendente"
+                                )
+                            from app.graph.workflow import build_session_config
+
+                            await updater(
+                                build_session_config(str(session_id), context.graph_config),
+                                {
+                                    "question_id": None,
+                                    "clarification_request": None,
+                                    "clarification_question": None,
+                                    "clarification_expires_at": None,
+                                    "email_send_confirmation_report_id": None,
+                                    "send_intent_requested": False,
+                                    "send_intent_source_interaction_id": None,
+                                },
+                            )
+                        elif isinstance(body, MessageCommand):
                             state = await executar_fluxo(
                                 accepted.graph,
                                 accepted.request.sanitized_input,
@@ -584,7 +781,103 @@ class SessionApplicationService:
             raise
         if graph_recorder is not None:
             graph_recorder.finish()
+        state = await self._attach_send_confirmation(accepted, context, state)
         return state
+
+    async def _attach_send_confirmation(
+        self,
+        accepted: _AcceptedInteraction,
+        context: _InteractionContext,
+        state: dict[str, Any],
+    ) -> dict[str, Any]:
+        if (
+            not accepted.request.send_intent_requested
+            or accepted.request.confirmed_send_question_id is not None
+            or accepted.request.send_confirmation
+            or self._email_preparations is None
+            or state.get("clarification_request") is not None
+        ):
+            return state
+
+        preparations = await self._email_preparations.list_prepared_for_session(
+            principal_user_id=accepted.principal.user_id,
+            session_id=accepted.session.session_id,
+            limit=100,
+        )
+        now = _utcnow()
+        candidates = tuple(
+            preparation
+            for preparation in preparations
+            if preparation.prepared_report.requested_by == accepted.principal.user_id
+            and preparation.prepared_report.status == PreparedReportStatus.PREPARED
+            and now < preparation.prepared_report.expires_at
+        )
+        if accepted.request.recipient_selectors:
+            from app.application.email_dispatch_workflow import _recipient_selectors_match
+
+            candidates = tuple(
+                preparation
+                for preparation in candidates
+                if _recipient_selectors_match(
+                    accepted.request.recipient_selectors,
+                    preparation.prepared_report.recipients,
+                )
+            )
+        if len(candidates) != 1:
+            return state
+
+        preparation = candidates[0]
+        question_expires_at = min(
+            preparation.prepared_report.expires_at,
+            now + timedelta(seconds=CLARIFICATION_TTL_SECONDS),
+        )
+        # The expiry is persisted in both MongoDB and the interaction payload.
+        # Keep them equal after BSON's millisecond precision truncation.
+        question_expires_at = question_expires_at.replace(
+            microsecond=(question_expires_at.microsecond // 1000) * 1000
+        )
+        if question_expires_at <= now:
+            return state
+        recipients = ", ".join(
+            f"{recipient.name} <{recipient.email}>"
+            for recipient in preparation.prepared_report.recipients
+        )
+        subject = preparation.prepared_report.subject or "relatório preparado"
+        prompt = f"Confirma o envio de ‘{subject}’ para {recipients}?"
+        question_id = uuid4()
+        request = QuestionFormattingRequest(
+            reason_code=EMAIL_SEND_CONFIRMATION_REASON,
+            input_type="confirmation",
+            question_goal=prompt,
+        )
+        update = {
+            "clarification_request": request,
+            "clarification_question": prompt,
+            "question_id": str(question_id),
+            "clarification_expires_at": question_expires_at.isoformat(),
+            "email_send_confirmation_report_id": str(preparation.prepared_report.report_id),
+        }
+        task = next(
+            (
+                item
+                for item in state.get("ordered_tasks", ())
+                if getattr(getattr(item, "agent", None), "value", None) == "secretary"
+            ),
+            None,
+        )
+        if task is not None:
+            update["pending_task_id"] = task.task_id
+
+        from app.graph.workflow import build_session_config
+
+        updater = getattr(accepted.graph, "aupdate_state", None)
+        if not callable(updater):
+            raise RuntimeError("o grafo não permite persistir a confirmação pendente")
+        await updater(
+            build_session_config(str(accepted.session.session_id), context.graph_config),
+            update,
+        )
+        return {**state, **update}
 
     async def _finalize_interaction(
         self,
@@ -608,7 +901,7 @@ class SessionApplicationService:
             state=state,
             now=_utcnow(),
         )
-        finished_at = _utcnow()
+        finished_at = _mongo_utcnow()
         completed = replace(
             accepted.running,
             status=(
@@ -803,7 +1096,16 @@ class SessionApplicationService:
         graph: Any,
         *,
         new_recipient_selectors: dict[str, dict[str, str]],
-    ) -> tuple[str, dict[str, dict[str, str]], bool, str | None]:
+    ) -> tuple[
+        str,
+        dict[str, dict[str, str]],
+        bool,
+        str | None,
+        bool,
+        UUID | None,
+        UUID | None,
+        datetime | None,
+    ]:
         source = await self._interactions.get_owned(body.interaction_id, session.user_id)
         if (
             source is None
@@ -932,6 +1234,67 @@ class SessionApplicationService:
                 "A pergunta não corresponde ao estado atual da sessão",
             )
         values = getattr(snapshot, "values", {})
+        send_confirmation = question.reason_code == EMAIL_SEND_CONFIRMATION_REASON
+        confirmed_send_report_id: UUID | None = None
+        confirmed_send_question_expires_at: datetime | None = None
+        if (
+            send_confirmation
+            and isinstance(body.answer, ConfirmationAnswer)
+            and body.answer.confirm
+        ):
+            if not values.get("send_intent_requested"):
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT,
+                    "A solicitação de envio não está mais autorizada",
+                )
+            try:
+                confirmed_send_report_id = UUID(str(values["email_send_confirmation_report_id"]))
+                confirmed_send_question_expires_at = question.expires_at
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT,
+                    "A confirmação não está vinculada a um relatório",
+                ) from exc
+            if self._email_preparations is None:
+                raise ApplicationError(
+                    ApplicationErrorCode.UNAVAILABLE,
+                    "A autorização de envio está indisponível",
+                )
+            try:
+                preparations = await self._email_preparations.list_prepared_for_session(
+                    principal_user_id=session.user_id,
+                    session_id=session.session_id,
+                    limit=100,
+                )
+            except Exception as exc:
+                raise ApplicationError(
+                    ApplicationErrorCode.UNAVAILABLE,
+                    "Não foi possível validar o relatório preparado",
+                ) from exc
+            valid_preparations = tuple(
+                preparation
+                for preparation in preparations
+                if preparation.prepared_report.report_id == confirmed_send_report_id
+                and preparation.prepared_report.requested_by == session.user_id
+                and preparation.prepared_report.status == PreparedReportStatus.PREPARED
+                and now < preparation.prepared_report.expires_at
+            )
+            if len(valid_preparations) != 1:
+                raise ApplicationError(
+                    ApplicationErrorCode.CONFLICT,
+                    "O relatório preparado expirou ou não está mais disponível",
+                )
+            saved_selectors = values.get("recipient_selectors") or {}
+            if saved_selectors:
+                from app.application.email_dispatch_workflow import _recipient_selectors_match
+
+                if not _recipient_selectors_match(
+                    saved_selectors, valid_preparations[0].prepared_report.recipients
+                ):
+                    raise ApplicationError(
+                        ApplicationErrorCode.CONFLICT,
+                        "Os destinatários não correspondem ao relatório preparado",
+                    )
         saved_recipient_selectors = dict(values.get("recipient_selectors") or {})
         if pending_recipient_resolution is not None:
             unresolved = pending_recipient_resolution.unresolved_selector
@@ -958,6 +1321,14 @@ class SessionApplicationService:
             recipient_selectors,
             send_intent_requested,
             source_interaction_id,
+            send_confirmation,
+            body.question_id
+            if send_confirmation
+            and isinstance(body.answer, ConfirmationAnswer)
+            and body.answer.confirm
+            else None,
+            confirmed_send_report_id,
+            confirmed_send_question_expires_at,
         )
 
     async def _renew_lease(
@@ -993,6 +1364,12 @@ class SessionApplicationService:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _mongo_utcnow() -> datetime:
+    """Use MongoDB's millisecond precision for timestamps returned and persisted together."""
+    now = _utcnow()
+    return now.replace(microsecond=(now.microsecond // 1000) * 1000)
 
 
 def _authorized_farm_ids(

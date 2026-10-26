@@ -95,3 +95,15 @@ class InteractionResult(StrictModel):
     interaction_id: UUID
     public_request_id: UUID
     response: ResponseValue
+
+
+class InteractionAccepted(StrictModel):
+    operation_id: UUID
+    status: Literal["accepted"] = "accepted"
+    poll_after_ms: int = 1000
+
+
+class InteractionOperationStatus(StrictModel):
+    operation_id: UUID
+    status: Literal["accepted", "running", "completed", "degraded", "failed", "interrupted"]
+    result: InteractionResult | None = None

@@ -75,6 +75,13 @@ def build_agent_context(
         context["argos_send_intent_source_interaction_id"] = state.get(
             "send_intent_source_interaction_id"
         )
+        for key in (
+            "argos_confirmed_send_question_id",
+            "argos_confirmed_send_report_id",
+            "argos_confirmed_send_question_expires_at",
+        ):
+            if configurable.get(key):
+                context[key] = configurable[key]
     return context
 
 

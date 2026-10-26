@@ -174,7 +174,6 @@ async def run_specialist_workflow(
         update["missing_fields"] = fields
         update["clarification_request"] = QuestionFormattingRequest(
             reason_code="SPECIALIST_NEEDS_INPUT",
-            input_type="free_text",
             question_goal=f"Esclareça: {goal}.",
         )
         update["pending_task_id"] = task.task_id

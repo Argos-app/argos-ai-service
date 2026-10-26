@@ -182,7 +182,8 @@ def create_app(
             try:
                 pending = tuple(getattr(app.state, "background_tasks", ()))
                 if pending:
-                    _, unfinished = await asyncio.wait(pending, timeout=2.0)
+                    shutdown_timeout = max(2.0, configured.execution_timeout_seconds + 5.0)
+                    _, unfinished = await asyncio.wait(pending, timeout=shutdown_timeout)
                     for task in unfinished:
                         task.cancel()
                     if unfinished:
