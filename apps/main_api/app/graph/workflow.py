@@ -296,6 +296,18 @@ def _canonicalize_sources(
     return tuple(canonical_by_reference[reference] for reference in requested_references)
 
 
+def _canonicalize_sources(
+    candidate_sources: tuple[SourceReference, ...],
+    trusted_sources: list[SourceReference],
+) -> tuple[SourceReference, ...]:
+    """Aceita somente referências emitidas pelo fluxo e recupera seus metadados confiáveis."""
+    canonical_by_reference = {source.reference: source for source in trusted_sources}
+    requested_references = tuple(dict.fromkeys(source.reference for source in candidate_sources))
+    if any(reference not in canonical_by_reference for reference in requested_references):
+        raise ValueError("unknown_source")
+    return tuple(canonical_by_reference[reference] for reference in requested_references)
+
+
 def no_guardrail_entrada(state: AgentState) -> dict:
     messages = state.get("messages", [])
     message = messages[-1] if messages else None

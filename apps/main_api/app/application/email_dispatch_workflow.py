@@ -114,20 +114,6 @@ def _safe_unconfirmed() -> str:
     )
 
 
-def _safe_confirmation_required(report_id: UUID | None = None) -> str:
-    return json.dumps(
-        {
-            "status": "confirmation_required",
-            "confirmed": False,
-            "report_id": str(report_id) if report_id is not None else None,
-            "message": (
-                "O relatório aguarda confirmação estruturada do usuário; nenhum e-mail foi enviado."
-            ),
-        },
-        ensure_ascii=False,
-    )
-
-
 class EmailDispatchWorkflow:
     """Aplica identidade, autorização, escopo e idempotência fora do agente."""
 
@@ -191,32 +177,24 @@ class EmailDispatchWorkflow:
             authorization is not None
             and authorization.origin == SendAuthorizationOrigin.EXPLICIT_REQUEST
         ):
-            if confirmed_question is None:
-                return _safe_confirmation_required(authorization.report_id)
-            question_id, report_id, question_expires_at = confirmed_question
-            if authorization.report_id != report_id:
-                raise ValueError("a confirmação não corresponde ao relatório reservado")
-            authorization = await self._preparations.confirm_send_authorization(
-                principal_user_id=principal_user_id,
-                session_id=session_id,
-                source_interaction_id=source_interaction_id,
-                question_id=question_id,
-                question_expires_at=question_expires_at,
-                now=datetime.now(UTC),
-            )
-            if authorization is None:
-                raise ValueError("a autorização pendente não está mais disponível")
-        elif authorization is None:
-            if confirmed_question is None:
-                # Reserve the explicit request, but do not let it initiate delivery.
-                authorization = await self._authorize_prepared_confirmation(
+            if configurable.get("argos_send_intent_requested") is not True:
+                raise ValueError("não há autorização explícita para este envio")
+            if confirmed_question is not None:
+                question_id, report_id, question_expires_at = confirmed_question
+                if authorization.report_id != report_id:
+                    raise ValueError("a confirmação não corresponde ao relatório reservado")
+                authorization = await self._preparations.confirm_send_authorization(
                     principal_user_id=principal_user_id,
                     session_id=session_id,
                     source_interaction_id=source_interaction_id,
-                    configurable=configurable,
+                    question_id=question_id,
+                    question_expires_at=question_expires_at,
+                    now=datetime.now(UTC),
                 )
-                return _safe_confirmation_required(authorization.report_id)
-            authorization = await self._authorize_prepared_confirmation(
+                if authorization is None:
+                    raise ValueError("a autorização pendente não está mais disponível")
+        elif authorization is None:
+            authorization = await self._authorize_prepared_send(
                 principal_user_id=principal_user_id,
                 session_id=session_id,
                 source_interaction_id=source_interaction_id,
@@ -305,7 +283,7 @@ class EmailDispatchWorkflow:
         )
         return _safe_result(result, recipient_count=len(prepared.recipients))
 
-    async def _authorize_prepared_confirmation(
+    async def _authorize_prepared_send(
         self,
         *,
         principal_user_id: UUID,

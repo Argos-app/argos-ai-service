@@ -158,6 +158,19 @@ class Settings:
             raise ValueError(
                 "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve mapear IDs para chaves Base64"
             )
+        raw_report_keys = os.getenv("MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS", "{}")
+        try:
+            report_keys = json.loads(raw_report_keys)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve ser JSON"
+            ) from exc
+        if not isinstance(report_keys, dict) or not all(
+            isinstance(key, str) and isinstance(value, str) for key, value in report_keys.items()
+        ):
+            raise ValueError(
+                "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve mapear IDs para chaves Base64"
+            )
 
         return cls(
             app_env=os.getenv("APP_ENV", "production").strip().casefold(),
