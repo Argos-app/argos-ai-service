@@ -90,7 +90,20 @@ class InteractionResult(StrictModel):
     schema_version: Literal["1"] = "1"
     status: Literal["completed", "degraded"] = "completed"
     degradation_reasons: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
     session_id: UUID
     interaction_id: UUID
     public_request_id: UUID
     response: ResponseValue
+
+
+class InteractionAccepted(StrictModel):
+    operation_id: UUID
+    status: Literal["accepted"] = "accepted"
+    poll_after_ms: int = 1000
+
+
+class InteractionOperationStatus(StrictModel):
+    operation_id: UUID
+    status: Literal["accepted", "running", "completed", "degraded", "failed", "interrupted"]
+    result: InteractionResult | None = None

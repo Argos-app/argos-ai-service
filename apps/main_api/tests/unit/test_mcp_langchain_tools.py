@@ -58,6 +58,7 @@ async def test_farm_tool_sends_delegation_for_fixed_agent_operation():
         config={
             "configurable": {
                 "argos_user_id": str(user_id),
+                "argos_firebase_uid": "firebase-user-123",
                 "argos_authorized_property_ids": (str(property_id),),
                 "argos_request_id": str(request_id),
             }
@@ -68,7 +69,7 @@ async def test_farm_tool_sends_delegation_for_fixed_agent_operation():
     assert issuer.calls == [
         {
             "service": "data",
-            "user_id": str(user_id),
+            "firebase_uid": "firebase-user-123",
             "authorized_property_ids": (str(property_id),),
             "agent": "fazenda",
             "operation": "cattle.read",
@@ -88,6 +89,7 @@ async def test_doctor_tools_use_doctor_identity_and_medicine_operation():
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_authorized_property_ids": (str(uuid4()),),
             "argos_request_id": str(uuid4()),
         }
@@ -108,6 +110,7 @@ async def test_lot_tool_exposes_and_sends_the_exact_mcp_contract():
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_authorized_property_ids": (str(property_id),),
             "argos_request_id": str(uuid4()),
         }
@@ -145,6 +148,7 @@ async def test_medicine_tools_forward_search_and_use_contract_filters():
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_authorized_property_ids": (str(property_id),),
             "argos_request_id": str(uuid4()),
         }
@@ -170,6 +174,7 @@ async def test_tool_argument_aliases_are_normalized_before_mcp_call():
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_authorized_property_ids": (str(property_id),),
             "argos_request_id": str(uuid4()),
         }
@@ -211,6 +216,7 @@ async def test_prediction_tool_uses_contract_names_and_defaults_a_closed_date():
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_authorized_property_ids": (str(property_id),),
             "argos_request_id": str(uuid4()),
         }
@@ -246,6 +252,7 @@ async def test_analyst_can_resolve_a_named_property_before_prediction():
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "argos_authorized_property_ids": (str(uuid4()),),
             "argos_request_id": str(uuid4()),
         }
@@ -298,6 +305,7 @@ async def test_email_action_tools_take_identity_and_send_details_only_from_runti
     config = {
         "configurable": {
             "argos_user_id": str(uuid4()),
+            "argos_firebase_uid": "firebase-user-123",
             "session_id": str(uuid4()),
             "argos_send_intent_source_interaction_id": str(uuid4()),
         }

@@ -9,11 +9,12 @@ from app.infrastructure.mcp.delegation import (
     McpDelegationTokenIssuer,
 )
 from app.settings import Settings
-from argos_mcp_data.adapters.delegation import DelegationTokenVerifier as DataTokenVerifier
+from argos_mcp_data.adapters.delegation import DATA_AGENT_OPERATIONS
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from packages.observability import bind_correlation, observation_scope
+from packages.security.delegation import DelegationTokenVerifier as DataTokenVerifier
 from packages.security.delegation import DelegationTokenVerifier as PredictionTokenVerifier
 
 
@@ -51,15 +52,16 @@ def test_issued_data_token_matches_mcp_verifier_contract(delegation_keys):
         {"main-key": public_key},
         issuer="argos-main-service",
         audience=data_url,
+        agent_operations=DATA_AGENT_OPERATIONS,
         clock=lambda: 1_800_000_010,
     )
-    user_id, property_id, request_id = uuid4(), uuid4(), uuid4()
+    firebase_uid, property_id, request_id = "firebase-user-123", uuid4(), uuid4()
     correlation_id, parent_observation_id = uuid4(), uuid4()
 
     with bind_correlation(correlation_id), observation_scope(parent_observation_id):
         token = issuer.issue(
             service="data",
-            user_id=user_id,
+            firebase_uid=firebase_uid,
             authorized_property_ids=(property_id,),
             agent="fazenda",
             operation="cattle.read",
@@ -67,7 +69,7 @@ def test_issued_data_token_matches_mcp_verifier_contract(delegation_keys):
         )
 
     context = verifier.verify(token)
-    assert context.user_id == user_id
+    assert context.firebase_uid == firebase_uid
     assert context.authorized_property_ids == (property_id,)
     assert context.agent_id == "fazenda"
     assert context.operations == frozenset({"cattle.read"})
@@ -91,11 +93,12 @@ def test_analyst_can_delegate_only_property_resolution_to_data_mcp(delegation_ke
         {"main-key": public_key},
         issuer="argos-main-service",
         audience=data_url,
+        agent_operations=DATA_AGENT_OPERATIONS,
     )
 
     token = issuer.issue(
         service="data",
-        user_id=uuid4(),
+        firebase_uid="firebase-user-123",
         authorized_property_ids=(uuid4(),),
         agent="analista",
         operation="cattle.read",
@@ -128,7 +131,7 @@ def test_issued_prediction_token_matches_shared_verifier_contract(delegation_key
 
     token = issuer.issue(
         service="prediction",
-        user_id=uuid4(),
+        firebase_uid="firebase-user-123",
         authorized_property_ids=(uuid4(),),
         agent="analista",
         operation="prediction.read",
@@ -153,7 +156,7 @@ def test_issuer_rejects_operation_outside_static_agent_policy(delegation_keys):
     with pytest.raises(DelegationRequestError):
         issuer.issue(
             service="prediction",
-            user_id=uuid4(),
+            firebase_uid="firebase-user-123",
             authorized_property_ids=(uuid4(),),
             agent="analista",
             operation="cattle.read",
@@ -174,7 +177,7 @@ def test_issuer_rejects_empty_property_scope(delegation_keys):
     with pytest.raises(DelegationRequestError):
         issuer.issue(
             service="data",
-            user_id=uuid4(),
+            firebase_uid="firebase-user-123",
             authorized_property_ids=(),
             agent="fazenda",
             operation="cattle.read",

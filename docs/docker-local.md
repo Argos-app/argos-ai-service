@@ -10,6 +10,17 @@ modelos suportados; uma combinação não suportada falha na configuração, sem
 enviar parâmetros indevidos. A opção é compartilhada pelos agentes do Principal;
 embeddings não usam thinking.
 
+No Principal, o roteador, os especialistas e o formatador de perguntas pedem
+saída estruturada pela estratégia de chamada de ferramenta do LangGraph. O
+endpoint deve aceitar chamadas de ferramenta; para agentes que também têm
+ferramentas MCP/A2A, deve aceitar as duas classes de ferramentas na mesma
+chamada. O formatador não expõe ferramentas de negócio. O bootstrap verifica se
+o LangChain consegue vincular ferramentas localmente, mas não faz uma chamada ao
+provider; valide a compatibilidade real em homologação. Não passe o schema
+diretamente como `response_format` nesse endpoint sem verificar o perfil e o
+suporte à saída JSON Schema: a seleção nativa automática não troca para chamada
+de ferramenta quando uma requisição nativa falha.
+
 `MAIN_API_EXECUTION_TIMEOUT_SECONDS=300` define o prazo total de uma interação.
 O timeout de cada chamada, o orçamento de chamadas e a validade das preparações
 continuam sendo limites independentes. Aumentar o prazo não transforma uma falha
@@ -53,16 +64,33 @@ cobrança do provider. O script cria essas duas variáveis vazias, então elas n
 ativam estimativas até serem preenchidas.
 
 Por padrão, o ambiente local usa `AUTH_MODE=stub`, que representa todos os
-requests como um único usuário sintético. Para validar o contrato de identidade
-do backend, configure no `.env` `AUTH_MODE=jwt`, `MAIN_API_AUTH_ISSUER`,
-`MAIN_API_AUTH_AUDIENCE` e `MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`, depois recrie a
-API. O último campo é um objeto JSON que mapeia cada `kid` para a chave pública
-Ed25519 raw de 32 bytes, codificada em Base64. Configure somente chaves
-públicas; a chave privada permanece no backend que assina o token. Em modo JWT,
-cada token precisa conter a identidade, operações autorizadas e propriedades no
-contrato validado pela API. O teste local pode usar tokens sintéticos assinados;
-a homologação da integração real exige uma chave pública e um token emitido pelo
-backend de identidade do ambiente.
+requests como um único usuário sintético. Fora desse modo, o serviço aceita
+somente o JWT próprio obtido em `POST /v1/auth/firebase`: a rota valida o
+Firebase ID token e consulta o cadastro PostgreSQL. Configure o projeto
+Firebase, uma credencial Admin SDK (arquivo de service account montado como
+secret ou ADC), o DSN PostgreSQL somente leitura e
+`MAIN_API_ACCESS_TOKEN_KEY_ID` com `MAIN_API_ACCESS_TOKEN_PRIVATE_KEY` (chave
+Ed25519 PKCS#8 DER em Base64, exclusiva e diferente da chave de delegação MCP).
+O JWT dura cinco minutos e carrega o UUID interno do usuário no `sub` e seu UID
+Firebase; nome, e-mail, permissões e fazendas não são incluídos. As fazendas são
+recarregadas do banco em cada chamada protegida. Tokens assinados pelo backend
+de identidade não são mais aceitos.
+
+Para montar um JSON de service account no `main_api`, defina
+`MAIN_API_FIREBASE_PROJECT_ID` e `MAIN_API_FIREBASE_CREDENTIALS_HOST_PATH` no
+`.env`. O arquivo `compose.firebase.yaml` monta a credencial em
+`/run/secrets/firebase-service-account.json` como somente leitura e configura
+`MAIN_API_FIREBASE_CREDENTIALS_FILE` e `GOOGLE_APPLICATION_CREDENTIALS` com o
+caminho dentro do container. Suba a pilha incluindo o override:
+
+```powershell
+docker compose --file compose.yaml --file compose.firebase.yaml --profile apps config --quiet
+docker compose --file compose.yaml --file compose.firebase.yaml --profile apps up --build -d
+```
+
+O caminho do host não é passado ao container. Para usar ADC, não inclua o
+override e configure o mecanismo de credenciais do ambiente onde o container
+executa.
 
 ## Banco PostgreSQL e dados sintéticos
 
@@ -98,11 +126,11 @@ apropriado para validação de negócio, previsão real ou produção.
 ## Documentos sintéticos no MongoDB
 
 Ao iniciar o perfil `apps`, o serviço de carga `mongo_seed` espera MongoDB e
-PostgreSQL saudáveis e preenche `local_cattle_documents` e
-`local_medicine_documents` no banco `argos_ai`. A carga lê do PostgreSQL os dois
-imóveis fixos do stub local, seus rebanhos/lotes e o catálogo de medicamentos;
-assim, os UUIDs relacionais dos documentos Mongo correspondem à massa SQL da
-mesma execução. Os campos não representam histórico real de produção.
+PostgreSQL saudáveis e preenche `cattle_documents` e `medicine_documents` no
+banco `argos_ai`. A carga lê do PostgreSQL os dois imóveis fixos do stub local,
+seus rebanhos/lotes e o catálogo de medicamentos; assim, os UUIDs relacionais
+dos documentos Mongo correspondem à massa SQL da mesma execução. Os campos não
+representam histórico real de produção.
 
 O script `scripts/docker/seed-local-mongo.py` pode ser executado novamente: ele
 substitui somente documentos marcados por essa carga e preserva os demais dados

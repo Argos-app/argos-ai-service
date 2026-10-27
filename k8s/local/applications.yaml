@@ -15,6 +15,7 @@ spec:
     template:
         metadata: { labels: { app: main-api } }
         spec:
+            terminationGracePeriodSeconds: 330
             securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001 }
             containers:
                 - name: app
@@ -36,7 +37,6 @@ spec:
                         }
                       - { name: MAIN_API_OBSERVABILITY_REDIS_URL, value: "redis://redis:6379/0" }
                       - { name: USER_USAGE_REDIS_KEY_PREFIX, value: "argos:usage:users:v1" }
-                      - { name: MAIN_API_OBSERVABILITY_COLLECTION, value: ai_observations }
                       - {
                             name: MAIN_API_MCP_DATA_TOKEN,
                             valueFrom:
@@ -221,12 +221,7 @@ spec:
                                         },
                                 },
                         }
-                      - { name: MCP_DATA_MONGO_CATTLE_COLLECTION, value: local_cattle_documents }
                       - { name: MCP_DATA_MONGO_RELATIONAL_ID_FORMAT, value: string }
-                      - {
-                            name: MCP_DATA_MONGO_MEDICINE_COLLECTION,
-                            value: local_medicine_documents,
-                        }
                       - { name: MCP_DATA_MONGO_MEDICINE_ID_FORMAT, value: uuid_standard }
                       - {
                             name: MCP_DATA_TRUSTED_DELEGATION_KEYS,
@@ -589,7 +584,6 @@ spec:
                                         { name: argos-local-secrets, key: MONGO_DATABASE },
                                 },
                         }
-                      - { name: A2A_OBSERVABILITY_COLLECTION, value: ai_a2a_observations }
                       - { name: A2A_QDRANT_URL, value: "http://qdrant:6333" }
                       - { name: A2A_QDRANT_READ_API_KEY, value: local-qdrant-read-only }
                       - { name: A2A_QDRANT_WRITE_API_KEY, value: local-qdrant-index-writer }

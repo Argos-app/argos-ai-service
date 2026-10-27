@@ -9,7 +9,7 @@ from packages.security.errors import AccessDeniedError
 
 @dataclass(frozen=True, slots=True)
 class AccessContext:
-    user_id: UUID
+    firebase_uid: str
     authorized_property_ids: tuple[UUID, ...]
     operations: frozenset[str]
     agent_id: str
@@ -55,6 +55,7 @@ class AuthorizedScope:
         cls,
         context: AccessContext,
         *,
+        user_id: UUID,
         current_property_ids: set[UUID],
         operation: str,
         selected_property_ids: tuple[UUID, ...] | None = None,
@@ -82,7 +83,7 @@ class AuthorizedScope:
             raise AccessDeniedError("seleção de propriedades fora do escopo autorizado")
 
         return cls(
-            user_id=context.user_id,
+            user_id=user_id,
             property_ids=tuple(selection),
             operation=operation,
             agent_id=context.agent_id,

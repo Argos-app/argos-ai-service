@@ -3,6 +3,7 @@
 import base64
 import json
 import os
+import time
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
@@ -19,9 +20,11 @@ from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.email_workflow import EmailWorkflow
 from app.application.report_artifact_service import validate_report_source
 from app.domain.report_artifacts import ReportArtifact
+from app.domain.user_access import UserAccess, UserFarm
 from app.graph.workflow import build_graph
 from app.ports.agent import AgentId
 from app.settings import Settings
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
@@ -32,39 +35,37 @@ from packages.contracts import (
 )
 
 
-def _b64url(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+class _UserAccessRepository:
+    def __init__(self, users: tuple[UserAccess, ...]) -> None:
+        self._users = {user.user_id: user for user in users}
+
+    async def find_by_firebase_uid(self, firebase_uid: str) -> UserAccess | None:
+        return next(
+            (user for user in self._users.values() if user.firebase_uid == firebase_uid), None
+        )
 
 
-def _identity_token(private_key, *, user_id: UUID, property_id: UUID) -> str:
-    now = int(datetime.now(UTC).timestamp())
-    header = {"alg": "EdDSA", "kid": "main-test-key", "typ": "JWT"}
-    claims = {
-        "v": 1,
-        "iss": "main-api-integration-test",
-        "aud": "argos-ai-integration-test",
-        "sub": str(user_id),
-        "email": "requester@example.test",
-        "name": "Solicitante de teste",
-        "permission": "USER",
-        "farm_ids": [str(property_id)],
-        "operations": [
-            "ai.sessions.create",
-            "ai.sessions.read",
-            "ai.interactions.create",
-        ],
-        "jti": str(uuid4()),
-        "request_id": str(uuid4()),
-        "iat": now,
-        "nbf": now,
-        "exp": now + 120,
-        "agent": "argos-ai-service",
-    }
-    encoded_header = _b64url(json.dumps(header, separators=(",", ":")).encode())
-    encoded_claims = _b64url(json.dumps(claims, separators=(",", ":"), sort_keys=True).encode())
-    signing_input = f"{encoded_header}.{encoded_claims}".encode("ascii")
-    signature = _b64url(private_key.sign(signing_input))
-    return f"{encoded_header}.{encoded_claims}.{signature}"
+def _submit_interaction_and_wait(client, session_id: str, headers: dict, body: dict) -> dict:
+    response = client.post(
+        f"/v1/sessions/{session_id}/interactions/async",
+        headers=headers,
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+    operation_id = response.json()["operation_id"]
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        status_response = client.get(
+            f"/v1/sessions/{session_id}/interactions/{operation_id}",
+            headers=headers,
+        )
+        assert status_response.status_code == 200, status_response.text
+        operation = status_response.json()
+        if operation["status"] in {"completed", "degraded"}:
+            return operation["result"]
+        assert operation["status"] not in {"failed", "interrupted"}, operation
+        time.sleep(0.05)
+    raise AssertionError(f"Interação {operation_id} não concluiu dentro do prazo")
 
 
 def _signed_report(private_key, *, user_id: UUID, property_id: UUID) -> LotReportEnvelope:
@@ -246,24 +247,57 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
     harness = mcp_harness
     user_id = harness.requester
     property_id = uuid4()
-    identity_key = Ed25519PrivateKey.generate()
-    trusted_key = base64.b64encode(identity_key.public_key().public_bytes_raw()).decode()
+    access_token_key = Ed25519PrivateKey.generate()
+    access_token_private_key = base64.b64encode(
+        access_token_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    ).decode()
+    other_user_id = uuid4()
+    users = (
+        UserAccess(
+            user_id=user_id,
+            firebase_uid="firebase-test-user",
+            name="Solicitante de teste",
+            email="requester@example.test",
+            active=True,
+            blocked_until=None,
+            permission_code="USER",
+            permission_name="Usuário",
+            permission_active=True,
+            farms=(UserFarm(property_id, "Fazenda de teste"),),
+        ),
+        UserAccess(
+            user_id=other_user_id,
+            firebase_uid="firebase-test-other-user",
+            name="Outro usuário de teste",
+            email="other@example.test",
+            active=True,
+            blocked_until=None,
+            permission_code="USER",
+            permission_name="Usuário",
+            permission_active=True,
+            farms=(UserFarm(property_id, "Fazenda de teste"),),
+        ),
+    )
     database_name = "argos_main_consumer_" + uuid4().hex
     settings = Settings(
         mongo_uri=mongo_uri,
         mongo_database=database_name,
-        auth_issuer="main-api-integration-test",
-        auth_audience="argos-ai-integration-test",
-        auth_trusted_public_keys=(("main-test-key", trusted_key),),
+        access_token_key_id="main-test-key",
+        access_token_private_key=access_token_private_key,
         mcp_email_url=harness.url,
         mcp_email_token=harness.token,
     )
-    token = _identity_token(identity_key, user_id=user_id, property_id=property_id)
-    headers = {"Authorization": f"Bearer {token}"}
     app = create_app(settings)
+    token = app.state.access_token_codec.issue(user_id, "firebase-test-user")
+    headers = {"Authorization": f"Bearer {token}"}
     mongo = AsyncIOMotorClient(mongo_uri, tz_aware=True)
     try:
         with TestClient(app) as client:
+            app.state.user_access_repository = _UserAccessRepository(users)
             persistence = app.state.persistence
             agent_factory = _factory(
                 artifacts=persistence.report_artifacts,
@@ -296,24 +330,18 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
                 "client_message_id": client_message_id,
                 "message": message,
             }
-            other_user_token = _identity_token(
-                identity_key, user_id=uuid4(), property_id=property_id
+            other_user_token = app.state.access_token_codec.issue(
+                other_user_id, "firebase-test-other-user"
             )
             other_headers = {"Authorization": f"Bearer {other_user_token}"}
             cross_user = client.post(
-                f"/v1/sessions/{session_id}/interactions",
+                f"/v1/sessions/{session_id}/interactions/async",
                 headers=other_headers,
                 json=request_body,
             )
             assert cross_user.status_code == 404
 
-            response = client.post(
-                f"/v1/sessions/{session_id}/interactions",
-                headers=headers,
-                json=request_body,
-            )
-            assert response.status_code == 200, response.text
-            public_result = response.json()
+            public_result = _submit_interaction_and_wait(client, session_id, headers, request_body)
             artifact_document = await mongo[database_name]["ai_report_artifacts"].find_one(
                 {
                     "principal_user_id": str(user_id),
@@ -367,26 +395,21 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
                 assert "O provedor aceitou o despacho" not in public_text
             assert "matheus@example.test" not in public_text
             assert harness.title not in public_text
-            stored_report = await harness.database.prepared_reports.find_one({})
+            stored_report = await harness.database.ai_email_prepared_reports.find_one({})
             assert stored_report is not None
             assert stored_report["body"] not in public_text
 
-            replay = client.post(
-                f"/v1/sessions/{session_id}/interactions",
-                headers=headers,
-                json=request_body,
-            )
-            assert replay.status_code == 200
-            assert replay.json() == public_result
+            replay = _submit_interaction_and_wait(client, session_id, headers, request_body)
+            assert replay == public_result
             altered_replay = client.post(
-                f"/v1/sessions/{session_id}/interactions",
+                f"/v1/sessions/{session_id}/interactions/async",
                 headers=headers,
                 json={**request_body, "message": "Envie este relatório para outro destinatário."},
             )
             assert altered_replay.status_code == 409
             expected_count = int(expected_dispatch)
-            assert await harness.database.email_dispatches.count_documents({}) == expected_count
-            assert await harness.database.prepared_reports.count_documents({}) == 1
+            assert await harness.database.ai_email_dispatches.count_documents({}) == expected_count
+            assert await harness.database.ai_email_prepared_reports.count_documents({}) == 1
 
             stored_action_count = await mongo[database_name][
                 "ai_email_send_authorizations"
@@ -399,15 +422,13 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
         # A new API instance replays the persisted HTTP interaction without calling the graph/MCP.
         restarted_app = create_app(settings)
         with TestClient(restarted_app) as restarted_client:
-            replay_after_restart = restarted_client.post(
-                f"/v1/sessions/{session_id}/interactions",
-                headers=headers,
-                json=request_body,
+            restarted_app.state.user_access_repository = _UserAccessRepository(users)
+            replay_after_restart = _submit_interaction_and_wait(
+                restarted_client, session_id, headers, request_body
             )
-            assert replay_after_restart.status_code == 200
-            assert replay_after_restart.json() == public_result
+            assert replay_after_restart == public_result
         expected_count = int(expected_dispatch)
-        assert await harness.database.email_dispatches.count_documents({}) == expected_count
+        assert await harness.database.ai_email_dispatches.count_documents({}) == expected_count
         assert len(await harness.messages()) == expected_count
     finally:
         await mongo.drop_database(database_name)

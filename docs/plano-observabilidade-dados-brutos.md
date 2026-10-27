@@ -119,10 +119,10 @@ válidos em outros checkouts do repositório.
    [MongoExecutionEventRepository](../apps/main_api/app/infrastructure/persistence/mongo.py)
    usa `_id` único e verifica conflitos de conteúdo. Esse padrão é reutilizável,
    mas o repositório atual pertence à persistência conversacional.
-4. **Identidade do backend:**
-   [IdentityTokenVerifier](../apps/main_api/app/api/v1/dependencies/auth.py)
-   valida JWT EdDSA, issuer, audience, validade e operações delegadas. Há
-   autorização por operação nas dependências HTTP.
+4. **Identidade e acesso:**
+   [autenticação Firebase](../apps/main_api/app/api/v1/routes/auth.py) troca
+   Firebase ID tokens por JWT próprio. As dependências HTTP recarregam as
+   fazendas do usuário no PostgreSQL antes de autorizar cada chamada.
 5. **MCP real no principal:**
    [McpToolServerClient](../apps/main_api/app/infrastructure/mcp/client.py) abre
    sessão Streamable HTTP por operação, inicializa o protocolo, aplica
@@ -315,14 +315,11 @@ chamada evita duplicar uso entre wrapper, callback e transporte.
 
 ### 5.1. Coleção e documento
 
-**Definido:** coleção específica, com nome ainda a ser escolhido pelo usuário.
-Propor as variáveis `MAIN_API_OBSERVABILITY_COLLECTION` no principal e
-`A2A_OBSERVABILITY_COLLECTION` no A2A, seguindo o prefixo de configuração de
-cada aplicação. Ambas apontarão para a coleção escolhida quando compartilharem o
-mesmo destino Mongo. Não criar nome padrão silencioso; informar o nome quando a
-coleta for habilitada. O database hospedeiro e as credenciais ainda serão
-configurados; um database exclusivo não está confirmado. Uma coleção atende ao
-envelope comum e aos blocos opcionais. Nenhuma coleção analítica.
+**Definido:** collections fixas `ai_observations` no principal e
+`ai_a2a_observations` no A2A. Use esses nomes no destino Mongo configurado para
+cada serviço. O database hospedeiro e as credenciais ainda serão configurados;
+um database exclusivo não está confirmado. Uma coleção atende ao envelope comum
+e aos blocos opcionais. Nenhuma coleção analítica.
 
 **Decisão confirmada:** um documento por operação/tentativa observada:
 
@@ -491,12 +488,11 @@ resumo/perfil, callback ou `include_raw=True`, se suportado, pode preservar
 metadados; conteúdo é descartado após a extração. Não usar acumulador global de
 tokens para substituir registros individuais.
 
-Configurações novas: habilitação, URI/database/collection, ambiente/versão,
-limites de fila/documento/lote, timeout/retries e prazo de shutdown. **Não
-adicionar configuração de retenção por idade ou TTL.** `.env.example` contém
-apenas exemplos sem segredos. Para o nome da coleção, prever
-`MAIN_API_OBSERVABILITY_COLLECTION` e `A2A_OBSERVABILITY_COLLECTION`, sem fixar
-seu valor antes da definição do usuário.
+Configurações novas: habilitação, URI/database, ambiente/versão, limites de
+fila/documento/lote, timeout/retries e prazo de shutdown. **Não adicionar
+configuração de retenção por idade ou TTL.** `.env.example` contém apenas
+exemplos sem segredos. Os nomes das collections são fixos no código:
+`ai_observations` e `ai_a2a_observations`.
 
 Dependências e driver: manter interface assíncrona com collection injetada.
 Avaliar PyMongo Async para o writer novo, validando Python 3.14.3 e versões
@@ -543,7 +539,7 @@ qualquer URI/senha autorize gravar ou criar índices.
 | Item em produção       | Necessidade                                                                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Mongo                  | URI/database e usuário autorizado por serviço produtor; o A2A ainda precisa de composição de persistência de métricas.    |
-| Coleção                | Nome definido pelo usuário nas variáveis MAIN_API_OBSERVABILITY_COLLECTION/A2A_OBSERVABILITY_COLLECTION.                  |
+| Coleção                | `ai_observations` no principal e `ai_a2a_observations` no A2A.                                                            |
 | Rede e acesso          | Caminho de rede liberado, TLS e privilégios necessários no Mongo; acesso BI restrito à coleção.                           |
 | Índices                | `_id` e os dois índices de período/incremental, sem TTL; criação prévia recomendada ou permissão para criação automática. |
 | Memória e concorrência | Limites por processo/réplica, incluindo itens em lote/retry; multiplicar capacidade pelo número de workers.               |

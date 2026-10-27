@@ -15,10 +15,10 @@ testes Mongo descartáveis e CI. O código correspondente está em `apps/main_ap
 | Atualização da memória | Automática, sem exigir pedido para lembrar nem confirmação adicional. Uma declaração do usuário pode atualizar o perfil. Não inferir perfil a partir do comportamento, de perguntas isoladas, de textos citados ou de resultados de tools.                 |
 | Retenção               | Sessões e memória independente não expiram automaticamente. Para esta proposta, histórico, resumos e eventos vinculados também não têm exclusão automática por prazo.                                                                                      |
 | Resumo de sessão       | Preservar atividade em andamento e últimos dados importantes, com teto de 2.000 tokens. Modelo específico será configurado depois.                                                                                                                         |
-| Histórico público      | Adicionar rota para consultar mensagens antigas, com paginação.                                                                                                                                                                                            |
+| Histórico público      | Rota paginada implementada; mensagens do assistente incluem o estado de degradação persistido quando o conteúdo está visível.                                                                                                                              |
 | Retomada               | Carregar contexto e estado consistente quando o usuário enviar outra entrada pela rota existente de interações. Não criar rota de recuperação, fila, worker ou retomada automática de processamento interrompido.                                          |
 | Concorrência           | Lease temporário por sessão para a função interna do main_api que processa a requisição. O vencimento libera o bloqueio; não dispara execução automática.                                                                                                  |
-| Autenticação           | Manter o stub local nesta fase e adiar integração externa, conforme confirmado pelo usuário. Fora do modo local, a validação de identidade continua indisponível.                                                                                          |
+| Autenticação           | Firebase ID token trocado por JWT próprio; cadastro, permissão e fazendas são validados no PostgreSQL a cada chamada protegida. O stub existe somente em `APP_ENV=local` e `AUTH_MODE=stub`.                                                               |
 
 As decisões do usuário substituem, neste escopo, as recomendações anteriores de
 PostgreSQL técnico, TTL de sessão/memória e confirmação para persistir
@@ -27,42 +27,47 @@ idempotência ou isolamento por usuário.
 
 ### Fontes consultadas
 
+Os diagnósticos e propostas foram atualizados para refletir a implementação
+atual. As referências `planejamento-sistema-agentes-argos.md` e outros planos
+externos continuam sendo fontes de requisitos, não descrições da implementação
+vigente.
+
 Todos os links abaixo apontam para arquivos existentes. Caminhos apresentados
 posteriormente na árvore de organização são propostas de novos componentes.
 
-| Fonte                                                                                                                                                                                                                                                                                                                                                                                           | Evidência e consequência                                                                                                                                                                                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [README](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/README.md)                                                                                                                                                                                                                                                                                                     | O principal usa FastAPI, LangGraph, LangChain e Protocol + Factory + Registry. Agora documenta persistência Mongo, contexto, memória limitada, histórico, configuração e testes; autenticação externa permanece pendente. |
-| [Planejamento: contratos públicos](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:480)                                                                                                                                                                                                                                      | As três operações atuais são criar sessão, listar sessões e enviar interação. A nova consulta de mensagens é uma ampliação autorizada pelo usuário.                                                                       |
-| [Planejamento: persistência técnica](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:779)                                                                                                                                                                                                                                    | Separação entre checkpoint e memória independente; armazenamento técnico separado de dados de negócio. PostgreSQL e expiração eram propostas anteriores, agora substituídas neste escopo.                                 |
-| [Planejamento: PLN-09](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:1710) e [PLN-31](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:1798)                                                                                                             | Sessões duráveis, ownership, retomada e isolamento entre sessões. Os critérios precisam ser alinhados a Mongo, atualização automática e ausência de expiração.                                                            |
-| [Contratos de sessões](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/models/sessions.py) e [interações](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/models/interactions.py)                                                                                                             | Já existem UUIDs, `client_message_id`, variantes de mensagens/respostas e perguntas com `expires_at`. Reutilizar os contratos de escrita.                                                                                 |
-| [Serviços](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/dependencies/services.py) e [autenticação](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/dependencies/auth.py)                                                                                                                   | Há `SessionService` como Protocol, mas sua resolução retorna 503. O stub fornece usuário fixo e só funciona com `APP_ENV=local` e `AUTH_MODE=stub`.                                                                       |
-| [Estado](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/graph/state.py) e [workflow](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/graph/workflow.py)                                                                                                                                                    | Já há mensagens, resultados, agentes chamados, fontes e perguntas pendentes; `build_graph` recebe checkpointer. Faltam composição persistente, resumo e contexto entre turnos.                                            |
-| [Factory LangChain](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/infrastructure/agents/langchain_factory.py) e [schemas de entrada](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/agent_schemas/inputs.py)                                                                                             | O adaptador envia apenas a entrada atual e retorna `structured_response`. É preciso fornecer contexto conversacional e capturar as mensagens e tools internas.                                                            |
-| [Handoff](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/agent-integration-handoff.md)                                                                                                                                                                                                                                                                            | Define integração por Factory, slots de ferramentas, sessão validada e callbacks. Preservar esses pontos de extensão.                                                                                                     |
-| [Adapter Mongo de envio](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/mcp_email/src/argos_mcp_email/adapters/storage/mongo_dispatch.py)                                                                                                                                                                                                                         | Referência existente para collection injetada, índice único, tratamento de duplicação e claim atômico. O claim de envio não é uma implementação pronta de lease recuperável.                                              |
-| [Testes de rotas](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/tests/unit/test_routes.py), [grafo](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/tests/unit/test_graph.py) e [Factory](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/tests/unit/test_agent_factory.py) | Base de contratos e retomada com fakes/MemorySaver; não comprovam durabilidade Mongo.                                                                                                                                     |
-| [Dependências](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/requirements.txt), [pyproject](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/pyproject.toml) e [CI](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/.github/workflows/ci.yml)                                                            | Python 3.14.3 e dependências de FastAPI/LangChain/LangGraph. A CI agora tem job Mongo separado com relatório JUnit; o Compose usa replica set local descartável.                                                          |
+| Fonte                                                                                                                                                                                                                                                                                                                                                                                           | Evidência e consequência                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [README](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/README.md)                                                                                                                                                                                                                                                                                                     | O principal usa FastAPI, LangGraph, LangChain e Protocol + Factory + Registry. Documenta persistência Mongo, contexto, memória limitada, histórico, autenticação Firebase, configuração e testes. |
+| [Planejamento: contratos públicos](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:480)                                                                                                                                                                                                                                      | As três operações atuais são criar sessão, listar sessões e enviar interação. A nova consulta de mensagens é uma ampliação autorizada pelo usuário.                                               |
+| [Planejamento: persistência técnica](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:779)                                                                                                                                                                                                                                    | Separação entre checkpoint e memória independente; armazenamento técnico separado de dados de negócio. PostgreSQL e expiração eram propostas anteriores, agora substituídas neste escopo.         |
+| [Planejamento: PLN-09](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:1710) e [PLN-31](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/planejamento-sistema-agentes-argos.md:1798)                                                                                                             | Sessões duráveis, ownership, retomada e isolamento entre sessões. Os critérios precisam ser alinhados a Mongo, atualização automática e ausência de expiração.                                    |
+| [Contratos de sessões](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/models/sessions.py) e [interações](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/models/interactions.py)                                                                                                             | Já existem UUIDs, `client_message_id`, variantes de mensagens/respostas e perguntas com `expires_at`. Reutilizar os contratos de escrita.                                                         |
+| [Serviços](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/dependencies/services.py) e [autenticação](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/api/v1/dependencies/auth.py)                                                                                                                   | As rotas usam serviços concretos de sessão e histórico. Em produção, o JWT próprio é validado e o Principal é reconstruído com cadastro e fazendas atuais; o stub fica restrito ao modo local.    |
+| [Estado](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/graph/state.py) e [workflow](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/graph/workflow.py)                                                                                                                                                    | O grafo recebe contexto resumido e mensagens recentes, grava checkpoints e eventos de execução, e mantém perguntas pendentes para retomada após nova entrada do usuário.                          |
+| [Factory LangChain](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/infrastructure/agents/langchain_factory.py) e [schemas de entrada](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/app/agent_schemas/inputs.py)                                                                                             | O adaptador fornece contexto conversacional limitado, mantém respostas estruturadas e propaga callbacks de uso de modelo; mensagens e eventos são persistidos de forma sanitizada.                |
+| [Handoff](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/docs/agent-integration-handoff.md)                                                                                                                                                                                                                                                                            | Define integração por Factory, slots de ferramentas, sessão validada e callbacks. Preservar esses pontos de extensão.                                                                             |
+| [Adapter Mongo de envio](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/mcp_email/src/argos_mcp_email/adapters/storage/mongo_dispatch.py)                                                                                                                                                                                                                         | Referência existente para collection injetada, índice único, tratamento de duplicação e claim atômico. O claim de envio não é uma implementação pronta de lease recuperável.                      |
+| [Testes de rotas](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/tests/unit/test_routes.py), [grafo](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/tests/unit/test_graph.py) e [Factory](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/tests/unit/test_agent_factory.py) | Base de contratos e retomada com fakes/MemorySaver; não comprovam durabilidade Mongo.                                                                                                             |
+| [Dependências](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/apps/main_api/requirements.txt), [pyproject](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/pyproject.toml) e [CI](C:/Users/matheusfazan-ieg/Programas/Argos/Repositorios/argos-ai-service/.github/workflows/ci.yml)                                                            | Python 3.14.3 e dependências de FastAPI/LangChain/LangGraph. A CI agora tem job Mongo separado com relatório JUnit; o Compose usa replica set local descartável.                                  |
 
-### Lacunas que orientam o trabalho
+### Estado atual dos objetivos do plano
 
-1. Persistir o estado atual não garante que o histórico seja usado: RouterInput
-   recebe apenas a mensagem atual, e os demais schemas não têm contexto de
-   sessão/perfil.
-2. `called_agents` registra IDs, mas não cada chamada com início, resultado,
-   erro e tentativa. Tools não possuem trilha durável no principal.
-3. A configuração externa do workflow aceita callbacks, mas o adaptador de
-   agentes monta uma configuração própria; a propagação deve ser explícita.
-4. O contrato da sessão contém múltiplas fazendas, enquanto o grafo recebe
-   apenas `farm_id`. Separar fazendas autorizadas de seleção efetiva por tarefa.
-5. A sanitização atual cobre e-mail e CPF; resumos, memória e resultados de
-   ferramentas exigem a mesma política e proteção adicional para segredos
-   conhecidos.
-6. A retomada atual ocorre por reinvocação com estado e termina em END após
-   perguntar. Persistir esse estado e restaurar a continuidade apenas mediante
-   nova requisição do usuário. Não tratar checkpoint de uma execução
-   interrompida como autorização para repetir tools ou efeitos externos.
+Os pontos abaixo eram lacunas no diagnóstico original e estão implementados no
+código atual:
+
+1. O contexto do agente inclui resumo e uma janela limitada de mensagens
+   anteriores; o perfil entre sessões permanece restrito ao tom e ao objetivo
+   declarado.
+2. Chamadas de agentes e ferramentas são persistidas como eventos sanitizados,
+   com estados, correlação e tentativas.
+3. Callbacks de uso são enviados pelo adaptador de modelos.
+4. A identidade da API contém várias fazendas autorizadas; as ferramentas
+   recebem somente o escopo assinado e necessário à chamada.
+5. Mensagens, resultados, resumos e eventos passam pelas rotinas de sanitização
+   antes de persistir ou retornar ao cliente.
+6. A continuidade exige nova requisição do usuário. Leases e fencing protegem
+   contra processamento concorrente; a perda do lease cancela a execução atual e
+   impede a finalização tardia.
 
 ## 2. Arquitetura e organização
 
@@ -350,10 +355,12 @@ teste Mongo separado. Os dois testes de integração passaram localmente contra 
 replica set descartável; a CI instala as dependências declaradas e repete a
 suíte.
 
-Alinhar PLN-09 e PLN-31 às novas decisões na implementação. PLN-06 deixa de
-bloquear a entrega local caso manter o stub seja confirmado; autenticação real
-continua uma entrega futura. Não modificar os demais contratos de acesso por
-causa dessa mudança.
+As etapas de persistência, autenticação e histórico descritas neste plano foram
+implementadas. As referências a PLN-06, PLN-09 e PLN-31 registram o backlog que
+orientou o trabalho; não representam autenticação ou histórico ainda pendentes.
+Para o contrato atual de autenticação e das rotas, consulte
+[`docs/api-main-api.md`](api-main-api.md) e
+[`docs/autenticacao-firebase-identidade.md`](autenticacao-firebase-identidade.md).
 
 ## 4. Plano de testes
 
@@ -423,9 +430,11 @@ especialmente para a nova resposta paginada.
 2. **Deployment Mongo:** testes e CI validam replica set de um membro,
    transações e checkpointer local. Cada ambiente implantado ainda precisa
    fornecer URI/database e capacidade de replica set apropriadas.
-3. **Autenticação externa:** integração com o backend permanece futura; esta
-   entrega mantém o stub local confirmado e não representa identidade
-   multiusuário real fora de testes com Principals injetados.
+3. **Configuração por ambiente:** o fluxo Firebase/JWT e a autorização
+   PostgreSQL estão implementados. Cada ambiente implantado ainda precisa
+   fornecer o projeto Firebase, credenciais do Admin SDK, DSN somente leitura,
+   chaves Ed25519 e uma instalação Mongo compatível com transações; a ausência
+   dessas configurações afeta a disponibilidade, não o contrato implementado.
 
 A ausência de expiração, atualização automática de memória, conteúdo sanitizado,
 campos restritos, contagem por entradas do usuário e rota de histórico já são

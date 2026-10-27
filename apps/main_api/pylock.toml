@@ -46,6 +46,17 @@ url = "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5
 sha256 = "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101"
 
 [[packages]]
+name = "asyncpg"
+version = "0.32.0"
+
+[[packages.wheels]]
+name = "asyncpg-0.32.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/68/db/fc91b503b3ec66cf242d83c799388285ea5f0ee238435d53dd9c1a8648a9/asyncpg-0.32.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+
+[packages.wheels.hashes]
+sha256 = "63417b8f7369c54f6754c1fbd5a2968fbe632ff55bfbedd56a0177b6a96bd251"
+
+[[packages]]
 name = "attrs"
 version = "26.1.0"
 
@@ -57,15 +68,26 @@ url = "https://files.pythonhosted.org/packages/64/b4/17d4b0b2a2dc85a6df63d1157e0
 sha256 = "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309"
 
 [[packages]]
-name = "certifi"
-version = "2026.7.22"
+name = "cachecontrol"
+version = "0.14.4"
 
 [[packages.wheels]]
-name = "certifi-2026.7.22-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl"
+name = "cachecontrol-0.14.4-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/ef/79/c45f2d53efe6ada1110cf6f9fca095e4ff47a0454444aefdde6ac4789179/cachecontrol-0.14.4-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+sha256 = "b7ac014ff72ee199b5f8af1de29d60239954f223e948196fa3d84adaffc71d2b"
+
+[[packages]]
+name = "certifi"
+version = "2026.10.19"
+
+[[packages.wheels]]
+name = "certifi-2026.10.19-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/c4/51/29046e48f693c54e5b7412216d447a1d8362c9653148d98c02cdf65fa733/certifi-2026.10.19-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b"
 
 [[packages]]
 name = "cffi"
@@ -145,6 +167,17 @@ url = "https://files.pythonhosted.org/packages/bd/f4/27e386913417ad32aae42bba48b
 sha256 = "3e9395fd35276425b61b516a31fdd7c77fe2af83e41b4da22e30696fb1304c5d"
 
 [[packages]]
+name = "firebase-admin"
+version = "7.7.0"
+
+[[packages.wheels]]
+name = "firebase_admin-7.7.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/e3/d3/fe159efc61e57acccabc582d6072be77db1534303d823642cccfd0cf51f6/firebase_admin-7.7.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "0a341ebbd1f80301fa11034f5e86ab0d0f00dde19253d2ee50cf98be2a7a2f33"
+
+[[packages]]
 name = "google-api-core"
 version = "2.42.0"
 
@@ -167,6 +200,61 @@ url = "https://files.pythonhosted.org/packages/eb/a3/87fe9b7203ec2e56ea6a57c75e6
 sha256 = "4ff4319aeb4ad128409759d397a9fcafad126d0031d241cc0dd6b9a00b43e3f3"
 
 [[packages]]
+name = "google-cloud-core"
+version = "2.8.0"
+
+[[packages.wheels]]
+name = "google_cloud_core-2.8.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/12/ed/1b09640a565e5d34d4e517463f65a67a11f9dcdeb6b6e8220f2d06aaf489/google_cloud_core-2.8.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "e235b0952f7ffe7b9c71a4cf96b506d9cfb557e22557c412f0df9b7068b5d007"
+
+[[packages]]
+name = "google-cloud-firestore"
+version = "2.34.1"
+
+[[packages.wheels]]
+name = "google_cloud_firestore-2.34.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/e1/88/e064d77571324edaa78f0523620ad7076a74e5848c05d671fe440f665b67/google_cloud_firestore-2.34.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "6279f049336e49181e8c1d2dbf14e9c0cfb75ddf03c70971adc88fb272cdae29"
+
+[[packages]]
+name = "google-cloud-storage"
+version = "3.17.1"
+
+[[packages.wheels]]
+name = "google_cloud_storage-3.17.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/09/77/4376bb26f24966008a9522c61bae025d7030baabf443f20c4b795fb58308/google_cloud_storage-3.17.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "287c7919d7bcda710eae6f6b60c756e89140475d9a4daec01b6174e737488ca8"
+
+[[packages]]
+name = "google-crc32c"
+version = "1.9.0"
+
+[[packages.wheels]]
+name = "google_crc32c-1.9.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/98/36/190d32caa363ef25d685f422ed1bbf93ff1140fb22fd4d90f24cec209977/google_crc32c-1.9.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+
+[packages.wheels.hashes]
+sha256 = "dee799544cae42a42b17a88e38b59cf2c271051dc001da2117a8ff240ffa0548"
+
+[[packages]]
+name = "google-resumable-media"
+version = "2.11.0"
+
+[[packages.wheels]]
+name = "google_resumable_media-2.11.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/5e/2e/4f0a152f2e576e496f31ba1c3c62ed174a8878d06008916a7edc58b1bb28/google_resumable_media-2.11.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "f43d15e6a7f818f762eaead0f369c551f8275a4179c9d6225d0d259f49b87b5d"
+
+[[packages]]
 name = "googleapis-common-protos"
 version = "1.75.5"
 
@@ -178,6 +266,28 @@ url = "https://files.pythonhosted.org/packages/65/b9/6b29500a1c581ff4d77fd83c656
 sha256 = "d7285525c23039db98f2463e6d5a4f9b958b94d497f03a844ece3259c4e72d5d"
 
 [[packages]]
+name = "grpcio"
+version = "1.84.0"
+
+[[packages.wheels]]
+name = "grpcio-1.84.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/21/d7/94240c7fae121ff1f116dcf04a3b7ee0216a06832c704310363f72638d4c/grpcio-1.84.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+
+[packages.wheels.hashes]
+sha256 = "57dc36a5ab0e676f5f6e171de2917fd0aef73f32a9aaf23956bfe19997a30bd1"
+
+[[packages]]
+name = "grpcio-status"
+version = "1.84.0"
+
+[[packages.wheels]]
+name = "grpcio_status-1.84.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/71/c4/3a77e4273e866b1b0c412afd80882e95941a37170032b5109d847c501124/grpcio_status-1.84.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "0c182ca0d6e60acbfd0e14499cf39a155e4827a1c3fd9f7638e49af15a74c30a"
+
+[[packages]]
 name = "h11"
 version = "0.16.0"
 
@@ -187,6 +297,28 @@ url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995
 
 [packages.wheels.hashes]
 sha256 = "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+
+[[packages]]
+name = "h2"
+version = "4.4.1"
+
+[[packages.wheels]]
+name = "h2-4.4.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/7e/22/e85faf23bd72a92d1921e37d674ca56eb298a3c8be31fdecef0ff2b3aaac/h2-4.4.1-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6"
+
+[[packages]]
+name = "hpack"
+version = "4.2.0"
+
+[[packages.wheels]]
+name = "hpack-4.2.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/71/b4/4a9fcfb2aef6ba44d9073ecd301443aa00b3dac95de5619f2a7de7ec8a91/hpack-4.2.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986"
 
 [[packages]]
 name = "httpcore"
@@ -242,6 +374,17 @@ url = "https://files.pythonhosted.org/packages/d8/9c/6fe8931fd9f381042a9e4c7d5a7
 
 [packages.wheels.hashes]
 sha256 = "6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4"
+
+[[packages]]
+name = "hyperframe"
+version = "6.1.0"
+
+[[packages.wheels]]
+name = "hyperframe-6.1.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/48/30/47d0bf6072f7252e6521f3447ccfa40b421b6824517f82854703d0f5a98b/hyperframe-6.1.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5"
 
 [[packages]]
 name = "idna"
@@ -344,14 +487,14 @@ sha256 = "1a11ea7fbe630c4f2af2f3873d27718ceac9488cf32d0821030be7cf039a6213"
 
 [[packages]]
 name = "langchain-core"
-version = "1.6.10"
+version = "1.7.0"
 
 [[packages.wheels]]
-name = "langchain_core-1.6.10-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/1e/2c/6ed698c6b451af0ed0efdbe94a703c18aea768d925347d8d1efd5645ae8c/langchain_core-1.6.10-py3-none-any.whl"
+name = "langchain_core-1.7.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/b3/d8/ed130e91cee0525cb47d185b98a5a6ffd6a8b660a100fbee43d887e745d6/langchain_core-1.7.0-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "14341bdd8b42d0dd9a53dbbcd8b0599ab47b0c718c7caa12e3eb5c50b32cffcb"
+sha256 = "e82b24d7ac51fc74874baa29d6b3c0b8234880d4f3d897f8ff57fb80dfd9b07d"
 
 [[packages]]
 name = "langchain-mongodb"
@@ -377,14 +520,14 @@ sha256 = "e65f2da39199a8e155fb6ae732e0aea208a01da2710a5da701d5e1a116195fcf"
 
 [[packages]]
 name = "langchain-protocol"
-version = "0.0.19"
+version = "0.0.20"
 
 [[packages.wheels]]
-name = "langchain_protocol-0.0.19-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/80/c9/f6cbf357d48ccbd18bb394433b1fd7ad9be004eed9377ad08bb85777e5e6/langchain_protocol-0.0.19-py3-none-any.whl"
+name = "langchain_protocol-0.0.20-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/02/4b/f1c99a0b27c5ff8b4b131c0d6e62012c17cc424089efe213767db927afd2/langchain_protocol-0.0.20-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "4cdf879a492a35980fd859ae792d3c65458ccaae504e183c9a10d7eac1f0720f"
+sha256 = "3c935e5e46b0f6f9cb52f45ba7cfa53d1b9fa80c82c4a277d47f03e07f7385b1"
 
 [[packages]]
 name = "langchain-text-splitters"
@@ -454,14 +597,14 @@ sha256 = "a005c7ac662c318a3405e436e9effaa90c05343f9f4ae9e11dca19c9369727dd"
 
 [[packages]]
 name = "langsmith"
-version = "0.14.8"
+version = "0.14.12"
 
 [[packages.wheels]]
-name = "langsmith-0.14.8-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/67/a8/5bfbcf7704f48331372ec36212a1e0e6bcb83eb967829d760fbdbf386616/langsmith-0.14.8-py3-none-any.whl"
+name = "langsmith-0.14.12-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/c6/6c/33e2de8d8d809895263e4f24ef7619e5535e3ece7de863ffbe49c1b7a60d/langsmith-0.14.12-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "bda7ec3d74bc5af3244c90920e924efcf99a700638860bf87d0231bfdb4f4ce4"
+sha256 = "9dafba7f615afa77204dc8afbb9c803e4ba1b55e96249f12c8f9aafb23fae6d0"
 
 [[packages]]
 name = "lark"
@@ -495,6 +638,17 @@ url = "https://files.pythonhosted.org/packages/01/9a/35e053d4f442addf751ed20e0e9
 
 [packages.wheels.hashes]
 sha256 = "8a63b9049e38eeeb56b4fdd57c3312a6d1f25d01db717fe7d82222393c410298"
+
+[[packages]]
+name = "msgpack"
+version = "1.2.3"
+
+[[packages.wheels]]
+name = "msgpack-1.2.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/3d/08/feb9a196269ba7809f44f9117d9e4a601c41c313f6144fd0c337293a5488/msgpack-1.2.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl"
+
+[packages.wheels.hashes]
+sha256 = "d8ef3a66e4b52d2d7fdd90df2984670124b2ff7546d76bb25dcf68ef47f7df58"
 
 [[packages]]
 name = "numpy"

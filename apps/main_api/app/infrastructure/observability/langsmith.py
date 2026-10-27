@@ -88,7 +88,7 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
     client = None
     try:
         from langchain_core.tracers import LangChainTracer
-        from langsmith import Client
+        from langsmith import Client, agent_address
         from langsmith.anonymizer import create_anonymizer
 
         pii_anonymizer = create_anonymizer(
@@ -172,11 +172,18 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
                 super()._on_llm_end(run)
 
         callback = BillingAwareLangChainTracer(
-            client=client, project_name=settings.langsmith_project
+            client=client,
+            address=agent_address(
+                settings.langsmith_agent_id,
+                settings.langsmith_agent_environment,
+            ),
         )
         return LangSmithTracing(client=client, callback=callback)
-    except Exception:
+    except Exception as exc:
         if client is not None:
             client.close()
-        _LOGGER.warning("LangSmith tracing could not be initialized")
+        _LOGGER.warning(
+            "LangSmith tracing could not be initialized (%s)",
+            type(exc).__name__,
+        )
         return None

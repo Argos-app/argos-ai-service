@@ -79,22 +79,25 @@ services:
 
     main_api:
         profiles: ["apps"]
+        stop_grace_period: 5m30s
         build:
             context: .
             dockerfile: apps/main_api/Dockerfile
         environment:
             MAIN_API_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
+            MAIN_API_AUTH_DATABASE_URL: "postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}"
             MAIN_API_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
             USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
             MAIN_API_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
-            MAIN_API_OBSERVABILITY_COLLECTION: ${MAIN_API_OBSERVABILITY_COLLECTION:-ai_observations}
             APP_ENV: ${APP_ENV:-local}
             AUTH_MODE: ${AUTH_MODE:-stub}
-            MAIN_API_AUTH_ISSUER: ${MAIN_API_AUTH_ISSUER:-argos-backend-service}
-            MAIN_API_AUTH_AUDIENCE: ${MAIN_API_AUTH_AUDIENCE:-argos-ai-service}
-            MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS: ${MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS:-{}}
-            MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS: ${MAIN_API_AUTH_TOKEN_MAX_TTL_SECONDS:-300}
-            MAIN_API_AUTH_CLOCK_SKEW_SECONDS: ${MAIN_API_AUTH_CLOCK_SKEW_SECONDS:-30}
+            MAIN_API_FIREBASE_PROJECT_ID: ${MAIN_API_FIREBASE_PROJECT_ID:-}
+            MAIN_API_FIREBASE_CREDENTIALS_FILE: ""
+            MAIN_API_ACCESS_TOKEN_ISSUER: ${MAIN_API_ACCESS_TOKEN_ISSUER:-argos-ai-service}
+            MAIN_API_ACCESS_TOKEN_AUDIENCE: ${MAIN_API_ACCESS_TOKEN_AUDIENCE:-argos-ai-service-api}
+            MAIN_API_ACCESS_TOKEN_KEY_ID: ${MAIN_API_ACCESS_TOKEN_KEY_ID:-}
+            MAIN_API_ACCESS_TOKEN_PRIVATE_KEY: ${MAIN_API_ACCESS_TOKEN_PRIVATE_KEY:-}
+            MAIN_API_ACCESS_TOKEN_TTL_SECONDS: ${MAIN_API_ACCESS_TOKEN_TTL_SECONDS:-300}
             MAIN_API_MODEL_MODE: ${ARGOS_MODEL_MODE:-simulated}
             MODEL_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_INPUT_COST_PER_MILLION_TOKENS:-}
             MODEL_OUTPUT_COST_PER_MILLION_TOKENS: ${MODEL_OUTPUT_COST_PER_MILLION_TOKENS:-}
@@ -115,7 +118,8 @@ services:
             MAIN_API_MODEL_JUDGE: ${MAIN_API_MODEL_JUDGE:-}
             MAIN_API_MODEL_QUESTION_FORMATTER: ${MAIN_API_MODEL_QUESTION_FORMATTER:-}
             MAIN_API_LANGSMITH_API_KEY: ${MAIN_API_LANGSMITH_API_KEY:-}
-            MAIN_API_LANGSMITH_PROJECT: ${MAIN_API_LANGSMITH_PROJECT:-argos-ai-service}
+            MAIN_API_LANGSMITH_AGENT_ID: ${MAIN_API_LANGSMITH_AGENT_ID:-argos-ai-service}
+            MAIN_API_LANGSMITH_AGENT_ENVIRONMENT: ${MAIN_API_LANGSMITH_AGENT_ENVIRONMENT:-}
             MAIN_API_LANGSMITH_ENDPOINT: ${MAIN_API_LANGSMITH_ENDPOINT:-}
             MAIN_API_LANGSMITH_WORKSPACE_ID: ${MAIN_API_LANGSMITH_WORKSPACE_ID:-}
             MAIN_API_LANGSMITH_CAPTURE_CONTENT: ${MAIN_API_LANGSMITH_CAPTURE_CONTENT:-false}
@@ -137,6 +141,8 @@ services:
                 condition: service_healthy
             redis:
                 condition: service_healthy
+            postgres:
+                condition: service_healthy
             mcp_data:
                 condition: service_started
             mcp_prediction:
@@ -146,7 +152,7 @@ services:
             a2a_agent:
                 condition: service_started
         ports:
-            - "127.0.0.1:${MAIN_API_PUBLISHED_PORT:-8080}:8000"
+            - "${MAIN_API_PUBLISHED_ADDRESS:-127.0.0.1}:${MAIN_API_PUBLISHED_PORT:-8080}:8000"
         read_only: true
         tmpfs: ["/tmp:mode=1777,size=16m"]
         cap_drop: ["ALL"]
@@ -176,9 +182,7 @@ services:
             MCP_DATA_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
             MCP_DATA_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
             MCP_DATA_INTERNAL_SERVICE_TOKEN: ${MCP_DATA_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
-            MCP_DATA_MONGO_CATTLE_COLLECTION: local_cattle_documents
             MCP_DATA_MONGO_RELATIONAL_ID_FORMAT: string
-            MCP_DATA_MONGO_MEDICINE_COLLECTION: local_medicine_documents
             MCP_DATA_MONGO_MEDICINE_ID_FORMAT: uuid_standard
             MCP_DATA_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
             MCP_DATA_REPORT_SIGNING_KEY_ID: ${REPORT_SIGNING_KEY_ID:-local-report-key}
@@ -212,8 +216,6 @@ services:
             ARGOS_LOCAL_MONGO_SEED_ENABLED: "true"
             MCP_DATA_MONGO_URI: mongodb://mongo:27017/?replicaSet=rs0
             MCP_DATA_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
-            MCP_DATA_MONGO_CATTLE_COLLECTION: local_cattle_documents
-            MCP_DATA_MONGO_MEDICINE_COLLECTION: local_medicine_documents
             MCP_DATA_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
         depends_on:
             mongo:
@@ -289,6 +291,7 @@ services:
             context: .
             dockerfile: apps/a2a_agent/Dockerfile
         environment:
+            APP_ENV: ${APP_ENV:-local}
             A2A_HOST: 0.0.0.0
             A2A_PORT: 8000
             A2A_ENDPOINT_URL: http://a2a_agent:8000/a2a
@@ -296,7 +299,6 @@ services:
             A2A_OBSERVABILITY_REDIS_URL: redis://redis:6379/0
             USER_USAGE_REDIS_KEY_PREFIX: ${USER_USAGE_REDIS_KEY_PREFIX:-argos:usage:users:v1}
             A2A_OBSERVABILITY_MONGO_DATABASE: ${MONGO_DATABASE:-argos_ai}
-            A2A_OBSERVABILITY_COLLECTION: ${A2A_OBSERVABILITY_COLLECTION:-ai_a2a_observations}
             A2A_QDRANT_URL: http://qdrant:6333
             A2A_QDRANT_READ_API_KEY: local-qdrant-read-only
             A2A_QDRANT_WRITE_API_KEY: local-qdrant-index-writer
@@ -316,7 +318,8 @@ services:
             A2A_MODEL_TIMEOUT_SECONDS: ${A2A_MODEL_TIMEOUT_SECONDS:-40}
             A2A_MODEL_MAX_OUTPUT_TOKENS: ${A2A_MODEL_MAX_OUTPUT_TOKENS:-4096}
             A2A_LANGSMITH_API_KEY: ${A2A_LANGSMITH_API_KEY:-}
-            A2A_LANGSMITH_PROJECT: ${A2A_LANGSMITH_PROJECT:-argos-ai-service}
+            A2A_LANGSMITH_AGENT_ID: ${A2A_LANGSMITH_AGENT_ID:-argos-ai-service}
+            A2A_LANGSMITH_AGENT_ENVIRONMENT: ${A2A_LANGSMITH_AGENT_ENVIRONMENT:-}
             A2A_LANGSMITH_ENDPOINT: ${A2A_LANGSMITH_ENDPOINT:-}
             A2A_LANGSMITH_WORKSPACE_ID: ${A2A_LANGSMITH_WORKSPACE_ID:-}
             A2A_LANGSMITH_CAPTURE_CONTENT: "${A2A_LANGSMITH_CAPTURE_CONTENT:-false}"

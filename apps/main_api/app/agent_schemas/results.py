@@ -180,6 +180,23 @@ class RoutePlan(_AgentOutput):
 
 
 class QuestionFormatterResult(_AgentOutput):
-    """Texto final da pergunta; IDs e envelope público são atribuídos pela API."""
+    """Pergunta e alternativas gerais; IDs e envelope são atribuídos pela API."""
 
     prompt: str = Field(min_length=1, max_length=8000)
+    options: tuple[str, ...] = Field(default=(), max_length=6)
+
+    @field_validator("options")
+    @classmethod
+    def validate_option_labels(cls, options: tuple[str, ...]) -> tuple[str, ...]:
+        labels = tuple(label.strip() for label in options)
+        if any(not label or len(label) > 160 for label in labels):
+            raise ValueError("cada opção deve ter entre 1 e 160 caracteres")
+        if len({label.casefold() for label in labels}) != len(labels):
+            raise ValueError("opções devem ser únicas")
+        return labels
+
+    @model_validator(mode="after")
+    def validate_options(self) -> QuestionFormatterResult:
+        if self.options and len(self.options) < 2:
+            raise ValueError("pergunta de escolha exige ao menos duas opções")
+        return self

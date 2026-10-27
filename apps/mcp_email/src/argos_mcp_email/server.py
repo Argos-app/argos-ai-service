@@ -104,12 +104,12 @@ def _authorization_from_context(context: Any) -> str | None:
     return f"Bearer {token}" if token is not None else None
 
 
-def create_mcp_server(service: McpEmailServer, settings: Settings) -> Any:
-    """Registra a facade no SDK MCP quando ele estiver instalado."""
+def create_mcp_server(settings: Settings) -> Any:
+    """Cria o transporte MCP autenticado sem registrar ferramentas."""
 
     try:
         from mcp.server.auth.settings import AuthSettings
-        from mcp.server.fastmcp import Context, FastMCP
+        from mcp.server.fastmcp import FastMCP
     except ImportError as exc:
         raise RuntimeError("instale a dependência 'mcp' para iniciar o servidor") from exc
 
@@ -120,7 +120,7 @@ def create_mcp_server(service: McpEmailServer, settings: Settings) -> Any:
     if not settings.mcp_resource_server_url:
         raise ValueError("MCP_EMAIL_RESOURCE_SERVER_URL é obrigatório")
 
-    mcp = FastMCP(
+    return FastMCP(
         "argos-mcp-email",
         host=settings.mcp_host,
         port=settings.mcp_port,
@@ -136,7 +136,16 @@ def create_mcp_server(service: McpEmailServer, settings: Settings) -> Any:
         ),
     )
 
-    @mcp.tool()
+
+def register_email_tools(server: Any, service: McpEmailServer) -> None:
+    """Registra as ferramentas de e-mail no servidor MCP informado."""
+
+    try:
+        from mcp.server.fastmcp import Context
+    except ImportError as exc:
+        raise RuntimeError("instale a dependência 'mcp' para iniciar o servidor") from exc
+
+    @server.tool()
     async def prepare_report(payload: dict[str, Any], ctx: Context) -> dict[str, Any]:
         """Valida e prepara um relatório para os destinatários informados."""
 
@@ -145,7 +154,7 @@ def create_mcp_server(service: McpEmailServer, settings: Settings) -> Any:
             authorization=_authorization_from_context(ctx),
         )
 
-    @mcp.tool()
+    @server.tool()
     async def send_report(payload: dict[str, Any], ctx: Context) -> dict[str, Any]:
         """Envia um relatório previamente preparado."""
 
@@ -154,7 +163,7 @@ def create_mcp_server(service: McpEmailServer, settings: Settings) -> Any:
             authorization=_authorization_from_context(ctx),
         )
 
-    @mcp.tool()
+    @server.tool()
     async def get_report_status(payload: dict[str, Any], ctx: Context) -> dict[str, Any]:
         """Consulta o estado de uma operação de envio."""
 
@@ -162,5 +171,3 @@ def create_mcp_server(service: McpEmailServer, settings: Settings) -> Any:
             payload,
             authorization=_authorization_from_context(ctx),
         )
-
-    return mcp

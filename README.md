@@ -9,19 +9,19 @@ mobile ficam em outros repositórios.
 
 O principal tem contratos HTTP, grafo de agentes, Factory e Registry. Ele usa
 Mongo para sessões, mensagens, eventos de execução, checkpoints, resumos e
-preferências limitadas do usuário. A API valida identidade JWT EdDSA do backend
-e vincula ferramentas LangChain aos MCPs configurados, com delegação por
-usuário, propriedade, agente e operação. O backend ainda não inclui `farm_ids`,
-então a criação de sessão permanece bloqueada até delegar o escopo autorizado. O
-runtime principal configura um modelo por agente (`MAIN_API_MODEL_ROUTER`,
-`MAIN_API_MODEL_FARM`, `MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`,
-`MAIN_API_MODEL_SECRETARY`, `MAIN_API_MODEL_INFORMATION`,
-`MAIN_API_MODEL_ORCHESTRATOR`, `MAIN_API_MODEL_JUDGE` e
-`MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são compartilhadas entre os
-agentes; cada variável pode apontar para o mesmo modelo ou para um modelo
-diferente. A sumarização de sessão e a extração de memória reutilizam o modelo
-do Router. Sem runtime válido, `/health/ready` retorna indisponível. Os testes
-injetam modelos simulados explicitamente por `create_app(models=...)`.
+preferências limitadas do usuário. A API valida o JWT próprio emitido após a
+troca do Firebase ID token e carrega do PostgreSQL as fazendas autorizadas em
+cada chamada. Ferramentas LangChain vinculam os MCPs configurados com delegação
+por usuário, propriedade, agente e operação. O runtime principal configura um
+modelo por agente (`MAIN_API_MODEL_ROUTER`, `MAIN_API_MODEL_FARM`,
+`MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`, `MAIN_API_MODEL_SECRETARY`,
+`MAIN_API_MODEL_INFORMATION`, `MAIN_API_MODEL_ORCHESTRATOR`,
+`MAIN_API_MODEL_JUDGE` e `MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são
+compartilhadas entre os agentes; cada variável pode apontar para o mesmo modelo
+ou para um modelo diferente. A sumarização de sessão e a extração de memória
+reutilizam o modelo do Router. Sem runtime válido, `/health/ready` retorna
+indisponível. Os testes injetam modelos simulados explicitamente por
+`create_app(models=...)`.
 
 ## Agentes
 
@@ -111,7 +111,10 @@ destinatários, mas amplia a exposição de PII. Avalie acesso, retenção e pol
 do provider antes de usar dados pessoais reais. A chave deve ficar no
 gerenciador de secrets do ambiente. Para chaves de escopo organizacional,
 configure também `MAIN_API_LANGSMITH_WORKSPACE_ID` com o ID do workspace
-LangSmith. `MAIN_API_LANGSMITH_PROJECT` seleciona o projeto e
+LangSmith. `MAIN_API_LANGSMITH_AGENT_ID` identifica o Agent e
+`MAIN_API_LANGSMITH_AGENT_ENVIRONMENT` seleciona `local`, `development`,
+`staging` ou `production`; vazio deriva o valor de `APP_ENV`. Use o mesmo Agent
+ID entre ambientes. O workspace precisa ter Agent addressing habilitado.
 `MAIN_API_LANGSMITH_ENDPOINT` permite apontar para uma instância aprovada. O
 Mongo continua armazenando apenas os eventos brutos sanitizados existentes;
 conteúdo de trace é armazenado separadamente pelo LangSmith. A coleta local no
@@ -136,12 +139,17 @@ e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações
 feedback podem ser feitos sobre traces na plataforma; esta integração não define
 critérios automáticos de qualidade.
 
-As rotas disponíveis são `POST /v1/sessions`, `GET /v1/sessions`,
-`POST /v1/sessions/{session_id}/interactions` e
-`GET /v1/sessions/{session_id}/messages`. A consulta de mensagens não chama o
-LLM, valida o titular, usa cursor estável e aceita páginas de 1 a 100 itens
-(padrão 50). Eventos internos de agentes e tools não são incluídos no histórico
-público.
+As rotas disponíveis incluem `POST /v1/sessions`, `GET /v1/sessions`,
+`POST /v1/sessions/{session_id}/interactions/async` e
+`GET /v1/sessions/{session_id}/interactions/{operation_id}` para consultar o
+processamento assíncrono, além de `GET /v1/sessions/{session_id}/messages`. A
+consulta de mensagens não chama o LLM, valida o titular, usa cursor estável e
+aceita páginas de 1 a 100 itens (padrão 50). Eventos internos de agentes e tools
+não são incluídos no histórico público. O resultado consultado pelo GET de
+status contém `created_at`, `status` e `degradation_reasons`; o GET do histórico
+também retorna os metadados de degradação disponíveis nas mensagens visíveis do
+assistente, para que o aplicativo preserve o aviso de resposta parcial ao
+reabrir a conversa.
 
 O contrato OpenAPI e exemplos de autenticação, erros e correlação estão em
 [`docs/api-main-api.md`](docs/api-main-api.md) e
@@ -167,10 +175,13 @@ pois o Python não lê `.env` automaticamente:
 no host contra o Compose de testes, o URI usa `directConnection=true` porque o
 replica set anuncia um nome de host interno. O stub de identidade continua
 disponível apenas em ambiente local com `APP_ENV=local` e `AUTH_MODE=stub`. Fora
-desse modo, configure a chave pública Ed25519 do backend em
-`MAIN_API_AUTH_TRUSTED_PUBLIC_KEYS`; a API valida issuer, audience, validade,
-agente e operações delegadas. O backend deve incluir `farm_ids` no token para
-que a API possa abrir sessões com o escopo autorizado.
+desse modo, as rotas da API exigem o JWT próprio emitido após a troca do
+Firebase ID token em `POST /v1/auth/firebase`. Configure o projeto Firebase, o
+acesso somente leitura ao PostgreSQL e a chave Ed25519 própria do `main_api`; as
+fazendas são carregadas do cadastro em cada chamada. As decisões para a
+integração Firebase, incluindo a associação pelo UID e o tratamento de cadastros
+legados, estão em
+[`docs/autenticacao-firebase-identidade.md`](docs/autenticacao-firebase-identidade.md).
 
 O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
 aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
@@ -178,8 +189,11 @@ registrados separadamente. Sem `MAIN_API_LANGSMITH_API_KEY`, nada é enviado.
 Conteúdo fica oculto por padrão; `MAIN_API_LANGSMITH_CAPTURE_CONTENT=true`
 habilita prompts, respostas e argumentos de ferramentas após aprovação. E-mails
 permanecem sem anonimização; UUIDs, CPFs, CNPJs, telefones e tokens Bearer são
-anonimizados antes do envio. O projeto é selecionado por
-`MAIN_API_LANGSMITH_PROJECT` e o endpoint HTTPS opcional por
+anonimizados antes do envio. O destino usa o Agent ID definido por
+`MAIN_API_LANGSMITH_AGENT_ID` e o ambiente derivado de `APP_ENV` ou definido em
+`MAIN_API_LANGSMITH_AGENT_ENVIRONMENT`. Use o mesmo Agent ID entre ambientes
+para alternar entre Local, Development, Staging e Production. O workspace deve
+ter Agent addressing habilitado. O endpoint HTTPS opcional é configurado por
 `MAIN_API_LANGSMITH_ENDPOINT`. Para chaves de escopo organizacional, configure
 `MAIN_API_LANGSMITH_WORKSPACE_ID`. O serviço A2A possui configuração própria;
 IDs assinados de correlação e pai permitem relacionar a observação de chamada do

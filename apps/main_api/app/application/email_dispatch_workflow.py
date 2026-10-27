@@ -161,13 +161,53 @@ class EmailDispatchWorkflow:
             session_id=session_id,
             source_interaction_id=source_interaction_id,
         )
-        if authorization is None:
-            authorization = await self._authorize_prepared_confirmation(
+        if authorization is not None:
+            operation_reference = await self._preparations.get_send_operation_reference(
+                authorization_id=authorization.authorization_id,
+                principal_user_id=principal_user_id,
+                session_id=session_id,
+            )
+            if operation_reference is not None:
+                return await self._refresh_status(
+                    authorization, operation_reference, principal_user_id
+                )
+
+        confirmed_question = self._confirmed_question(configurable)
+        if (
+            authorization is not None
+            and authorization.origin == SendAuthorizationOrigin.EXPLICIT_REQUEST
+        ):
+            if configurable.get("argos_send_intent_requested") is not True:
+                raise ValueError("não há autorização explícita para este envio")
+            if confirmed_question is not None:
+                question_id, report_id, question_expires_at = confirmed_question
+                if authorization.report_id != report_id:
+                    raise ValueError("a confirmação não corresponde ao relatório reservado")
+                authorization = await self._preparations.confirm_send_authorization(
+                    principal_user_id=principal_user_id,
+                    session_id=session_id,
+                    source_interaction_id=source_interaction_id,
+                    question_id=question_id,
+                    question_expires_at=question_expires_at,
+                    now=datetime.now(UTC),
+                )
+                if authorization is None:
+                    raise ValueError("a autorização pendente não está mais disponível")
+        elif authorization is None:
+            authorization = await self._authorize_prepared_send(
                 principal_user_id=principal_user_id,
                 session_id=session_id,
                 source_interaction_id=source_interaction_id,
                 configurable=configurable,
             )
+        elif authorization.origin == SendAuthorizationOrigin.CONFIRMED_QUESTION:
+            if (
+                confirmed_question is None
+                or authorization.question_id != confirmed_question[0]
+                or authorization.report_id != confirmed_question[1]
+                or authorization.question_expires_at != confirmed_question[2]
+            ):
+                raise ValueError("a confirmação não corresponde à autorização de envio")
 
         operation_reference = await self._preparations.get_send_operation_reference(
             authorization_id=authorization.authorization_id,
@@ -243,7 +283,7 @@ class EmailDispatchWorkflow:
         )
         return _safe_result(result, recipient_count=len(prepared.recipients))
 
-    async def _authorize_prepared_confirmation(
+    async def _authorize_prepared_send(
         self,
         *,
         principal_user_id: UUID,
@@ -264,6 +304,8 @@ class EmailDispatchWorkflow:
         if not isinstance(selectors, dict) or not selectors or not property_ids:
             raise ValueError("destinatários ou escopo autorizado ausentes")
 
+        confirmed_question = self._confirmed_question(configurable)
+
         preparations = await self._preparations.list_prepared_for_session(
             principal_user_id=principal_user_id,
             session_id=session_id,
@@ -276,6 +318,12 @@ class EmailDispatchWorkflow:
             if item.prepared_report.status == PreparedReportStatus.PREPARED
             and now < item.prepared_report.expires_at
         )
+        if confirmed_question is not None:
+            candidates = tuple(
+                item
+                for item in candidates
+                if item.prepared_report.report_id == confirmed_question[1]
+            )
         if len(candidates) != 1:
             raise ValueError("não existe uma única preparação válida para confirmar nesta sessão")
         preparation = candidates[0]
@@ -316,12 +364,44 @@ class EmailDispatchWorkflow:
             recipients_fingerprint=_fingerprint(
                 [recipient.model_dump(mode="json") for recipient in prepared.recipients]
             ),
-            origin=SendAuthorizationOrigin.EXPLICIT_REQUEST,
+            origin=(
+                SendAuthorizationOrigin.CONFIRMED_QUESTION
+                if confirmed_question is not None
+                else SendAuthorizationOrigin.EXPLICIT_REQUEST
+            ),
             idempotency_key=str(uuid4()),
             authorized_at=now,
-            expires_at=prepared.expires_at,
+            expires_at=min(
+                prepared.expires_at,
+                confirmed_question[2] if confirmed_question is not None else prepared.expires_at,
+            ),
+            question_id=confirmed_question[0] if confirmed_question is not None else None,
+            question_expires_at=confirmed_question[2] if confirmed_question is not None else None,
         )
         return await self._preparations.reserve_send_authorization(authorization)
+
+    @staticmethod
+    def _confirmed_question(
+        configurable: dict[str, Any],
+    ) -> tuple[UUID, UUID, datetime] | None:
+        question_id = configurable.get("argos_confirmed_send_question_id")
+        report_id = configurable.get("argos_confirmed_send_report_id")
+        expires_at = configurable.get("argos_confirmed_send_question_expires_at")
+        if question_id is None and report_id is None and expires_at is None:
+            return None
+        try:
+            parsed_question_id = UUID(str(question_id))
+            parsed_report_id = UUID(str(report_id))
+            parsed_expiry = (
+                expires_at
+                if isinstance(expires_at, datetime)
+                else datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("confirmação estruturada de envio inválida") from exc
+        if parsed_expiry.tzinfo is None or datetime.now(UTC) >= parsed_expiry:
+            raise ValueError("confirmação estruturada de envio expirada")
+        return parsed_question_id, parsed_report_id, parsed_expiry
 
     async def status(self, *, authorization_id: UUID | None, configurable: dict[str, Any]) -> str:
         return await self._observe_workflow(

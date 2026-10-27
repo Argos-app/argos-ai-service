@@ -397,9 +397,9 @@ class _LangChainAgent(Agent[Any, BaseModel]):
             callbacks.append(
                 ObservabilityToolCallback(self._observation_collector, self._agent_id.value)
             )
-            callbacks.append(
-                ModelUsageCallback(self._observation_collector, agent=self._agent_id.value)
-            )
+        callbacks.append(
+            ModelUsageCallback(self._observation_collector, agent=self._agent_id.value)
+        )
         limits = (context or {}).get("argos_execution_limits")
         if isinstance(limits, ExecutionLimits):
             callbacks.append(ExecutionLimitCallback(limits, self._agent_id.value))

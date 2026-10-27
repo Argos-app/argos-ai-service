@@ -20,12 +20,15 @@ from app.agent_schemas.results import (
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import EmailDispatchEvidence, OrchestratorResult, TaskOutcome
+from app.graph.specialist_helpers import (
+    email_dispatch_recovery_context as _email_dispatch_recovery_context,
+)
+from app.graph.state import AgentState
 from app.graph.workflow import (
     NO_VERIFIED_RESULT_ANSWER,
     ROUTER_UNAVAILABLE_ANSWER,
     SAFE_ANSWER,
     _agent_failure_reason,
-    _email_dispatch_recovery_context,
     answer_state,
     build_agent_context,
     build_graph,
@@ -40,6 +43,7 @@ from app.graph.workflow import (
     no_orquestrador,
     no_roteador,
     no_saida_segura,
+    reset_turn_state,
     synthesis_timeout_with_runtime_grace,
 )
 from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
@@ -47,6 +51,11 @@ from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventWriteError
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
+
+
+def test_email_confirmation_report_id_is_a_resettable_graph_channel():
+    assert "email_send_confirmation_report_id" in AgentState.__annotations__
+    assert reset_turn_state()["email_send_confirmation_report_id"] is None
 
 
 class FakeAgent:
@@ -280,6 +289,56 @@ def test_safe_response_preserves_recovered_email_action_outcome() -> None:
     assert result["final_answer"] == (
         f"{SAFE_ANSWER}\n\nEstado do envio: O MCP confirmou o recebimento do envio."
     )
+
+
+def test_safe_response_prefers_confirmed_email_dispatch_over_generic_failure() -> None:
+    state = request_state("Envie o relatório preparado.")
+    state.update(
+        email_action_summary="O provedor aceitou o despacho; isso não confirma a entrega.",
+        email_dispatch_evidence=EmailDispatchEvidence(
+            status="accepted",
+            confirmed=True,
+            message="O provedor aceitou o despacho; isso não confirma a entrega.",
+        ),
+    )
+
+    result = no_saida_segura(state)
+
+    assert "o MCP confirmou" in result["final_answer"]
+    assert "O provedor aceitou o despacho" in result["final_answer"]
+    assert "Consulte o status do relatório" in result["final_answer"]
+    assert "conteúdo solicitado permanece desconhecido" not in result["final_answer"]
+    assert result["final_answer"].count("O provedor aceitou o despacho") == 1
+
+
+def test_output_guardrail_reports_dispatch_when_secretary_answer_is_unavailable() -> None:
+    state = request_state("Envie o relatório preparado.")
+    state.update(
+        email_action_summary="O provedor aceitou o despacho; isso não confirma a entrega.",
+        email_dispatch_evidence=EmailDispatchEvidence(
+            status="accepted",
+            confirmed=True,
+            message="O provedor aceitou o despacho; isso não confirma a entrega.",
+        ),
+        task_outcomes=(
+            TaskOutcome(
+                task=task(agent="secretary"),
+                result=SpecialistResult(
+                    agent="secretary",
+                    status="error",
+                    error="secretary_invalid_output",
+                ),
+            ),
+        ),
+        judge_result=JudgeResult(decision="revise", reason="Resposta final indisponível"),
+        draft_result=OrchestratorResult(draft_answer="O envio não aconteceu."),
+    )
+
+    result = no_guardrail_saida(state)
+
+    assert "O provedor aceitou o despacho" in result["final_answer"]
+    assert "O envio não aconteceu" not in result["final_answer"]
+    assert "Consulte o status do relatório" in result["final_answer"]
 
 
 def test_output_guardrail_replaces_unconfirmed_email_preparation_claim() -> None:
@@ -1014,6 +1073,31 @@ def test_send_intent_is_only_added_to_secretary_tool_context():
     assert "argos_send_intent_requested" not in farm_context
 
 
+def test_send_confirmation_metadata_is_only_added_to_secretary_tool_context():
+    state = {
+        "user_id": "user-demo",
+        "farm_id": "farm-demo",
+        "session_id": "session-demo",
+        "interaction_id": "interaction-origin",
+        "send_intent_requested": True,
+        "send_intent_source_interaction_id": "interaction-origin",
+    }
+    config = {
+        "configurable": {
+            "argos_confirmed_send_question_id": "question-1",
+            "argos_confirmed_send_report_id": "report-1",
+            "argos_confirmed_send_question_expires_at": "2026-10-25T12:05:00Z",
+        }
+    }
+
+    secretary_context = build_agent_context(state, config=config, recipient_selectors={})
+    farm_context = build_agent_context(state, config=config)
+
+    assert secretary_context["argos_confirmed_send_question_id"] == "question-1"
+    assert secretary_context["argos_confirmed_send_report_id"] == "report-1"
+    assert "argos_confirmed_send_question_id" not in farm_context
+
+
 def test_email_recovery_uses_current_turn_identity_over_stale_config_values():
     state = request_state()
     state.update(
@@ -1281,6 +1365,30 @@ async def test_router_missing_fields_asks_question_without_calling_specialists()
     assert result["clarification_request"].reason_code == "MISSING_FIELDS"
     assert result["question_id"]
     assert result["called_agents"] == ["router", "question_formatter"]
+
+
+@pytest.mark.asyncio
+async def test_question_formatter_can_create_general_single_choice() -> None:
+    router = FakeAgent(RoutePlan(intent="consulta", missing_slots=("escopo",)))
+    formatter = FakeAgent(
+        QuestionFormatterResult(
+            prompt="Qual escopo você quer consultar: aplicações ou carências?",
+            options=("Aplicações", "Períodos de carência"),
+        )
+    )
+    graph = build_graph(FakeFactory(router=router, question_formatter=formatter))
+
+    result = await graph.ainvoke(request_state("Quero consultar os dados da fazenda"))
+
+    request = result["clarification_request"]
+    assert request.input_type == "single_choice"
+    assert [option.label for option in request.options] == [
+        "Aplicações",
+        "Períodos de carência",
+    ]
+    assert len({option.option_id for option in request.options}) == 2
+    assert all(option.option_id for option in request.options)
+    assert formatter.calls[0][0].user_request == "Quero consultar os dados da fazenda"
 
 
 @pytest.mark.asyncio

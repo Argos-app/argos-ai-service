@@ -55,7 +55,7 @@ def signed_delegation(delegation_key, configured_settings):
             "v": 1,
             "iss": configured_settings.delegation_issuer,
             "aud": configured_settings.mcp_resource_server_url,
-            "sub": str(uuid4()),
+            "sub": f"firebase-{uuid4().hex}",
             "authorized_property_ids": [str(uuid4())],
             "agent": "analista",
             "operations": ["prediction.read"],

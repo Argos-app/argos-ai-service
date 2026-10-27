@@ -54,6 +54,31 @@ Factory pelos slots. Cada slot aceita uma sequência de tools; a identidade real
 da tool pode ser diferente do nome do mock. O Registry continua impedindo que um
 grupo seja atribuído a um agente não autorizado.
 
+## Estratégia de saída estruturada
+
+Os agentes `router`, especialistas e `question_formatter` usam `ToolStrategy`
+explicitamente no LangGraph. O schema aparece para o modelo como uma chamada de
+ferramenta estruturada, separada das ferramentas de negócio listadas nos slots.
+O LangGraph intercepta essa chamada, valida os argumentos contra o schema e
+entrega o objeto em `structured_response`; ela não é encaminhada ao MCP.
+
+Essa escolha evita depender da saída nativa por JSON Schema no endpoint NVIDIA
+compatível com OpenAI configurado no serviço, que já respondeu HTTP 500 a uma
+requisição com esse formato. O formatador não tem ferramentas de negócio, mas
+usa a mesma estratégia estruturada. O `orchestrator` e o `judge` recebem texto
+normal no provider e têm a resposta interpretada e validada no adaptador; no
+runtime simulado, usam `ToolStrategy`.
+
+Quando um schema é passado diretamente ao `create_agent`, LangGraph pode
+selecionar a estratégia nativa a partir do perfil declarado pelo modelo. Essa
+seleção não é uma tentativa com fallback: uma falha HTTP da chamada nativa não
+faz o LangGraph repetir automaticamente com uma chamada de ferramenta. A
+validação do bootstrap em `model_factory.py` verifica apenas se o objeto
+LangChain permite vincular ferramentas localmente para esses agentes; ela não
+chama o endpoint nem verifica a resposta real do provider. O suporte efetivo do
+provider deve ser verificado por teste de integração com credenciais e endpoint
+de homologação.
+
 Exemplo de composição quando os adaptadores estiverem disponíveis:
 
 ```python

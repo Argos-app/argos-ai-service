@@ -196,11 +196,12 @@
         }
       }
     },
-    "/v1/sessions/{session_id}/interactions": {
+    "/v1/sessions/{session_id}/interactions/async": {
       "post": {
         "tags": ["interactions"],
-        "summary": "Create Interaction",
-        "operationId": "create_interaction_v1_sessions__session_id__interactions_post",
+        "summary": "Create Interaction Async",
+        "description": "Aceita a interação e deixa o processamento seguir em segundo plano.",
+        "operationId": "create_interaction_async_v1_sessions__session_id__interactions_async_post",
         "parameters": [
           {
             "name": "session_id",
@@ -239,12 +240,147 @@
           }
         },
         "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionAccepted"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/interactions/{operation_id}": {
+      "get": {
+        "tags": ["interactions"],
+        "summary": "Get Interaction Operation",
+        "operationId": "get_interaction_operation_v1_sessions__session_id__interactions__operation_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Operation Id"
+            }
+          }
+        ],
+        "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InteractionResult"
+                  "$ref": "#/components/schemas/InteractionOperationStatus"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/firebase": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Authenticate Firebase",
+        "description": "Troca Firebase ID token válido por JWT mínimo do serviço de IA.",
+        "operationId": "authenticate_firebase_v1_auth_firebase_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponse"
                 }
               }
             },
@@ -283,6 +419,19 @@
   },
   "components": {
     "schemas": {
+      "AccessTokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Access Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["access_token"],
+        "title": "AccessTokenResponse"
+      },
       "AnswerChoice": {
         "properties": {
           "kind": {
@@ -413,6 +562,58 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "InteractionAccepted": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "const": "accepted",
+            "title": "Status",
+            "default": "accepted"
+          },
+          "poll_after_ms": {
+            "type": "integer",
+            "title": "Poll After Ms",
+            "default": 1000
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["operation_id"],
+        "title": "InteractionAccepted"
+      },
+      "InteractionOperationStatus": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["accepted", "running", "completed", "degraded", "failed", "interrupted"],
+            "title": "Status"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InteractionResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["operation_id", "status"],
+        "title": "InteractionOperationStatus"
+      },
       "InteractionResult": {
         "properties": {
           "schema_version": {
@@ -433,6 +634,18 @@
             },
             "type": "array",
             "title": "Degradation Reasons"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "session_id": {
             "type": "string",
@@ -696,6 +909,25 @@
             "type": "boolean",
             "title": "Redacted",
             "default": false
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["completed", "degraded"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "degradation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degradation Reasons"
           }
         },
         "additionalProperties": false,

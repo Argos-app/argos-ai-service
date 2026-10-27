@@ -64,7 +64,7 @@ class McpDataHarness:
             "v": 1,
             "iss": "argos-main-service-test",
             "aud": self.url,
-            "sub": str(self.fixture_ids["user_id"]),
+            "sub": self.fixture_ids["firebase_uid"],
             "authorized_property_ids": [
                 str(self.fixture_ids["property_a"]),
                 str(self.fixture_ids["property_b"]),
@@ -104,9 +104,7 @@ class McpDataHarness:
             MCP_DATA_SQL_DSN=SQL_ADMIN_DSN.rsplit("/", 1)[0] + "/" + self.database_name,
             MCP_DATA_MONGO_URI=MONGO_URI,
             MCP_DATA_MONGO_DATABASE=self.database_name,
-            MCP_DATA_MONGO_CATTLE_COLLECTION="bois",
             MCP_DATA_MONGO_RELATIONAL_ID_FORMAT="string",
-            MCP_DATA_MONGO_MEDICINE_COLLECTION="medicamentos",
             MCP_DATA_MONGO_MEDICINE_ID_FORMAT="string",
             MCP_DATA_INTERNAL_SERVICE_TOKEN=self.service_token,
             MCP_DATA_AUTH_ISSUER_URL=f"http://127.0.0.1:{self.port}/test-issuer",
@@ -234,7 +232,7 @@ async def mcp_data_harness():
 async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> None:
     """Insere documentos sintéticos independentes das linhas relacionais."""
     now = datetime.now(UTC)
-    await database["bois"].insert_many(
+    await database["cattle_documents"].insert_many(
         [
             {
                 "_id": f"historico-{key}",
@@ -270,7 +268,7 @@ async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> N
         "unit": "ml",
         "route": "INTRAMUSCULAR",
     }
-    await database["medicamentos"].insert_many(
+    await database["medicine_documents"].insert_many(
         [
             {
                 **medicine,
@@ -322,7 +320,8 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
     async with sql.transaction():
         await sql.execute("SELECT set_config('app.carga', 'true', true)")
         permission_id = await sql.fetchval("SELECT id FROM permission WHERE code = 'PECUARISTA'")
-        await _insert_user(sql, user_id, permission_id, "usuario-mcp")
+        user_firebase_uid = "firebase-usuario-mcp"
+        await _insert_user(sql, user_id, permission_id, "usuario-mcp", user_firebase_uid)
         await _insert_user(sql, owner_id, permission_id, "proprietario-outro")
         await sql.executemany(
             """INSERT INTO property (id, user_id, name, city, state, active)
@@ -479,6 +478,7 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
 
     return {
         "user_id": user_id,
+        "firebase_uid": user_firebase_uid,
         "medicine_id": medicine_id,
         "supplier_id": supplier_id,
         "therapeutic_category_id": category_id,
@@ -499,13 +499,17 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
     }
 
 
-async def _insert_user(sql, user_id, permission_id, suffix: str) -> None:
+async def _insert_user(
+    sql, user_id, permission_id, suffix: str, firebase_uid: str | None = None
+) -> None:
+    firebase_uid = firebase_uid or f"firebase-{suffix}"
     await sql.execute(
-        """INSERT INTO app_user (id, permission_id, name, cpf, email, active)
-           VALUES ($1, $2, $3, $4, $5, TRUE)""",
+        """INSERT INTO app_user (id, permission_id, name, cpf, email, active, firebase_uid)
+           VALUES ($1, $2, $3, $4, $5, TRUE, $6)""",
         user_id,
         permission_id,
         suffix,
         f"{uuid4().int % 10**11:011d}",
         f"{uuid4().hex}@example.test",
+        firebase_uid,
     )

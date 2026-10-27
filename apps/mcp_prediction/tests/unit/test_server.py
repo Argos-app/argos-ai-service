@@ -3,7 +3,7 @@
 import asyncio
 import json
 from unittest.mock import AsyncMock
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -15,6 +15,7 @@ from argos_mcp_prediction.server import (
 )
 from mcp.types import LATEST_PROTOCOL_VERSION
 
+from packages.security.access_directory import UserPropertyAccess
 from packages.security.access_policy import AccessPolicy
 from packages.security.delegation import DelegationTokenVerifier
 
@@ -143,17 +144,21 @@ async def test_same_mcp_session_uses_each_request_context_and_revalidates_access
     )
     token_a, claims_a = signed_delegation(request_id="request-a")
     token_b, claims_b = signed_delegation(request_id="request-b")
+    user_ids = {claims_a["sub"]: uuid4(), claims_b["sub"]: uuid4()}
     current = {
-        UUID(claims_a["sub"]): {UUID(value) for value in claims_a["authorized_property_ids"]},
-        UUID(claims_b["sub"]): {UUID(value) for value in claims_b["authorized_property_ids"]},
+        claims_a["sub"]: {UUID(value) for value in claims_a["authorized_property_ids"]},
+        claims_b["sub"]: {UUID(value) for value in claims_b["authorized_property_ids"]},
     }
     directory = AsyncMock()
 
-    async def lookup(user_id):
+    async def lookup(firebase_uid):
         await asyncio.sleep(0)
-        return current[user_id]
+        properties = current[firebase_uid]
+        if not properties:
+            return None
+        return UserPropertyAccess(user_id=user_ids[firebase_uid], property_ids=properties)
 
-    directory.get_active_property_ids.side_effect = lookup
+    directory.get_user_property_access.side_effect = lookup
     policy = AccessPolicy(directory)
 
     # Test-only tool exercises the SDK request metadata; runtime still has no business tools.
@@ -221,20 +226,20 @@ async def test_same_mcp_session_uses_each_request_context_and_revalidates_access
             result = result_json(response)["result"]
             assert not result.get("isError")
             assert result["structuredContent"] == {
-                "user_id": claims["sub"],
+                "user_id": str(user_ids[claims["sub"]]),
                 "property_id": claims["authorized_property_ids"][0],
                 "request_id": claims["request_id"],
             }
-        assert directory.get_active_property_ids.await_count == 2
+        assert directory.get_user_property_access.await_count == 2
         # A valid signed token cannot retain access revoked after an earlier successful call.
-        current[UUID(claims_a["sub"])] = set()
+        current[claims_a["sub"]] = set()
         denied = await call(token_a, 4)
         assert result_json(denied)["result"]["isError"]
-        assert directory.get_active_property_ids.await_count == 3
+        assert directory.get_user_property_access.await_count == 3
         # Session initialization never substitutes for a delegation on the current request.
         missing = {key: value for key, value in headers.items() if key != "X-Argos-Delegation"}
         denied = await client.post(
             "/mcp", headers=missing, json={"jsonrpc": "2.0", "id": 5, "method": "tools/list"}
         )
         assert denied.status_code == 401
-        assert directory.get_active_property_ids.await_count == 3
+        assert directory.get_user_property_access.await_count == 3

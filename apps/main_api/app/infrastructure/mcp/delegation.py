@@ -78,7 +78,7 @@ class McpDelegationTokenIssuer:
         self,
         *,
         service: str,
-        user_id: UUID | str,
+        firebase_uid: str,
         authorized_property_ids: Sequence[UUID | str],
         agent: str,
         operation: str,
@@ -93,11 +93,17 @@ class McpDelegationTokenIssuer:
             raise DelegationRequestError("audience do MCP não está configurada")
 
         try:
-            subject = str(UUID(str(user_id)))
+            if (
+                not isinstance(firebase_uid, str)
+                or not firebase_uid.strip()
+                or len(firebase_uid) > 128
+            ):
+                raise ValueError
+            subject = firebase_uid
             request_identifier = str(request_id)
             properties = tuple(str(UUID(str(value))) for value in authorized_property_ids)
         except (TypeError, ValueError, AttributeError) as exc:
-            raise DelegationRequestError("identidade ou propriedades inválidas") from exc
+            raise DelegationRequestError("firebase_uid ou propriedades inválidos") from exc
         if not 1 <= len(properties) <= 1000 or len(set(properties)) != len(properties):
             raise DelegationRequestError("escopo deve conter de 1 a 1000 propriedades únicas")
         if not 1 <= len(request_identifier) <= 128:

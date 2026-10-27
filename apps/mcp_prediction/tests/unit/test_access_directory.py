@@ -42,13 +42,20 @@ async def test_current_user_and_link_must_be_active(change):
         database.row_factory = sqlite3.Row
         database.executescript("""
             CREATE TABLE permission (id TEXT, active BOOLEAN);
-            CREATE TABLE app_user (id TEXT, permission_id TEXT, active BOOLEAN, blocked_until TEXT);
+            CREATE TABLE app_user (
+                id TEXT, firebase_uid TEXT, permission_id TEXT, active BOOLEAN,
+                blocked_until TEXT
+            );
             CREATE TABLE property (id TEXT, user_id TEXT, active BOOLEAN);
             CREATE TABLE user_property (user_id TEXT, property_id TEXT, active BOOLEAN,
                                         link_date TEXT, unlink_date TEXT);
         """)
         database.execute("INSERT INTO permission VALUES ('permission', 1)")
-        database.execute("INSERT INTO app_user VALUES (?, 'permission', 1, NULL)", (str(user),))
+        firebase_uid = f"firebase-{user.hex}"
+        database.execute(
+            "INSERT INTO app_user VALUES (?, ?, 'permission', 1, NULL)",
+            (str(user), firebase_uid),
+        )
         database.execute("INSERT INTO property VALUES (?, ?, 1)", (str(property_id), str(owner)))
         database.execute(
             "INSERT INTO user_property VALUES (?, ?, 1, '2000-01-01', NULL)",
@@ -68,11 +75,14 @@ async def test_current_user_and_link_must_be_active(change):
         elif change:
             database.execute(updates[change])
         directory = PostgresAccessDirectory(FixtureSqlReader(database))
-        assert await directory.get_active_property_ids(user) == (
-            {property_id} if change is None else set()
-        )
-        assert await directory.get_active_property_ids(uuid4()) == set()
+        access = await directory.get_user_property_access(firebase_uid)
+        assert access is not None if change is None else access is None
+        if access is not None:
+            assert access.user_id == user
+            assert access.property_ids == {property_id}
+        assert await directory.get_user_property_access(f"firebase-{uuid4().hex}") is None
         # Ownership remains valid without a link, except for inactive/blocked entities.
         database.execute("UPDATE property SET user_id = ?", (str(user),))
         if change in (None, "link_inactive", "future_link", "expired_link"):
-            assert await directory.get_active_property_ids(user) == {property_id}
+            access = await directory.get_user_property_access(firebase_uid)
+            assert access is not None and access.property_ids == {property_id}

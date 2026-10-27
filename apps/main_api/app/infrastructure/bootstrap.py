@@ -106,8 +106,6 @@ async def _create_observability_runtime(
     user_usage_counter: RedisUserUsageCounter | None = None,
 ) -> tuple[MongoObservationWriter | None, ObservationCollector]:
     collection_name = settings.observability_collection
-    if collection_name is None:
-        return None, DisabledObservationCollector()
     try:
         if (
             not collection_name
@@ -137,7 +135,7 @@ async def _create_observability_runtime(
     except Exception:
         _LOGGER.warning(
             "observability disabled because configuration could not be applied",
-            extra={"setting": "MAIN_API_OBSERVABILITY_COLLECTION"},
+            extra={"component": "main_api_observability"},
         )
         return None, DisabledObservationCollector()
 

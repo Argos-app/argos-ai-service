@@ -73,17 +73,17 @@ class SpecialistInput(_AgentInput):
 
 
 class QuestionOption(_AgentInput):
-    """Opção já autorizada pelo fluxo para uma pergunta de escolha."""
+    """Opção estruturada com identificador atribuído pelo serviço."""
 
     option_id: str = Field(min_length=1, max_length=128)
     label: str = Field(min_length=1)
 
 
 class QuestionFormattingRequest(_AgentInput):
-    """Intenção e estrutura aprovada que o formatador deve converter em pergunta."""
+    """Intenção da pergunta e opções confiáveis, quando o fluxo já as definiu."""
 
     reason_code: str = Field(min_length=1)
-    input_type: Literal["free_text", "single_choice", "confirmation"]
+    input_type: Literal["free_text", "single_choice", "confirmation"] | None = None
     question_goal: str = Field(min_length=1)
     options: tuple[QuestionOption, ...] = ()
 
@@ -100,6 +100,7 @@ class QuestionFormattingRequest(_AgentInput):
 
 
 class QuestionFormatterInput(_AgentInput):
-    """Entrada do agente que redige a pergunta para apresentação ao usuário."""
+    """Contexto sanitizado para formular uma pergunta de esclarecimento."""
 
     request: QuestionFormattingRequest
+    user_request: str = Field(min_length=1, max_length=8_000)

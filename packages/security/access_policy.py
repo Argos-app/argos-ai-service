@@ -23,12 +23,15 @@ class AccessPolicy:
             raise AccessDeniedError("contexto de acesso obrigatório")
         if context.expires_at.tzinfo is None or context.expires_at <= datetime.now(UTC):
             raise AccessDeniedError("contexto de acesso expirado")
-        current_property_ids = await self._access_directory.get_active_property_ids(context.user_id)
+        user_access = await self._access_directory.get_user_property_access(context.firebase_uid)
+        if user_access is None:
+            raise AccessDeniedError("usuário sem acesso ativo")
         if context.expires_at.tzinfo is None or context.expires_at <= datetime.now(UTC):
             raise AccessDeniedError("contexto de acesso expirado")
         return AuthorizedScope.build(
             context,
-            current_property_ids=current_property_ids,
+            user_id=user_access.user_id,
+            current_property_ids=user_access.property_ids,
             operation=operation,
             selected_property_ids=selected_property_ids,
         )

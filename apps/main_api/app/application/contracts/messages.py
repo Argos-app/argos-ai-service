@@ -24,6 +24,8 @@ class SessionMessageView(ApplicationModel):
     answer: AnswerCommandValue | None = None
     response: ApplicationResponse | None = None
     redacted: bool = False
+    status: Literal["completed", "degraded"] | None = None
+    degradation_reasons: tuple[str, ...] = ()
 
     @field_validator("created_at")
     @classmethod
@@ -46,6 +48,8 @@ class SessionMessageView(ApplicationModel):
             raise ValueError("mensagem do usuário não pode conter response")
         if self.role == "assistant" and (self.question_id is not None or self.answer is not None):
             raise ValueError("mensagem do assistente não pode conter resposta do usuário")
+        if self.role == "user" and (self.status is not None or self.degradation_reasons):
+            raise ValueError("mensagem do usuário não pode conter status da interação")
         return self
 
 

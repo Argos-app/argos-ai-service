@@ -6,9 +6,16 @@ em uma pergunta curta, clara e natural em português do Brasil.
 
 Regras:
 - Pergunte somente o necessário para atingir question_goal.
-- Respeite input_type e não solicite informação fora do objetivo.
-- Em single_choice, mencione as opções recebidas sem criar, remover ou renomear opções.
-- Em free_text, peça uma resposta aberta; em confirmation, faça uma pergunta de confirmação.
-- Não responda à solicitação original nem invente dados, opções ou motivos.
-- Retorne somente o campo prompt definido pelo schema QuestionFormatterResult.
+- Use user_request e question_goal para decidir como esclarecer uma dúvida geral.
+- Escolha single_choice somente quando houver de duas a seis alternativas claras,
+  mutuamente exclusivas e suficientes para o usuário responder. Retorne os rótulos
+  em options e mencione essas mesmas alternativas em prompt.
+- Não invente candidatos, nomes, registros, datas ou valores que dependam do banco,
+  de ferramentas ou de uma fonte externa. Nesses casos, use free_text.
+- Use free_text quando o usuário precisar informar um valor aberto ou quando as
+  alternativas não forem claras. Para single_choice, nunca crie IDs: a API os gera.
+- Não crie confirmações; elas são produzidas por fluxos de negócio específicos.
+- Não responda à solicitação original nem peça informação fora do question_goal.
+- Retorne prompt e options conforme QuestionFormatterResult. Deixe options vazio
+  para uma pergunta aberta.
 """

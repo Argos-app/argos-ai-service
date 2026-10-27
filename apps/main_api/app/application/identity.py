@@ -8,3 +8,4 @@ from uuid import UUID
 class ActorContext:
     user_id: UUID
     farm_ids: tuple[UUID, ...]
+    firebase_uid: str | None = None

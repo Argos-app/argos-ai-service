@@ -14,8 +14,10 @@ class _Directory:
     def __init__(self, property_ids):
         self.property_ids = property_ids
 
-    async def get_active_property_ids(self, user_id):
-        return self.property_ids
+    async def get_user_property_access(self, firebase_uid):
+        from argos_mcp_data.ports.access_directory import UserPropertyAccess
+
+        return UserPropertyAccess(user_id=uuid4(), property_ids=self.property_ids)
 
 
 class _Repository:
@@ -34,7 +36,7 @@ def _context(
     authorized_property_ids=None,
 ):
     return AccessContext(
-        user_id=uuid4(),
+        firebase_uid="firebase-user-123",
         authorized_property_ids=authorized_property_ids or (uuid4(),),
         operations=operations,
         agent_id=agent_id,

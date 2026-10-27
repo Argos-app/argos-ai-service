@@ -75,7 +75,7 @@ class FakeCoverageRepository:
 def make_scope(properties):
     now = datetime.now(UTC)
     context = AccessContext(
-        user_id=uuid4(),
+        firebase_uid="firebase-user-123",
         authorized_property_ids=properties,
         operations=frozenset({"prediction.read"}),
         agent_id="analista",
@@ -85,7 +85,7 @@ def make_scope(properties):
         request_id="request",
     )
     return AuthorizedScope.build(
-        context, current_property_ids=set(properties), operation="prediction.read"
+        context, user_id=uuid4(), current_property_ids=set(properties), operation="prediction.read"
     )
 
 

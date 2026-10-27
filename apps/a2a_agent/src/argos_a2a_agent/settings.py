@@ -4,9 +4,12 @@ import json
 import logging
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from packages.observability.langsmith_environment import resolve_langsmith_agent_environment
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,7 +73,7 @@ class Settings:
     a2a_endpoint_url: str | None = None
     observability_mongo_uri: str | None = field(default=None, repr=False)
     observability_mongo_database: str = "argos_ai"
-    observability_collection: str | None = None
+    observability_collection: str = "ai_a2a_observations"
     observability_mongo_server_selection_timeout_ms: int = 5_000
     observability_mongo_write_timeout_ms: int = 5_000
     observability_queue_max_items: int = 2_048
@@ -82,7 +85,8 @@ class Settings:
     observability_retry_base_delay_ms: int = 50
     observability_shutdown_timeout_ms: int = 2_000
     langsmith_api_key: str | None = field(default=None, repr=False)
-    langsmith_project: str = "argos-ai-service"
+    langsmith_agent_id: str = "argos-ai-service"
+    langsmith_agent_environment: str = "production"
     langsmith_endpoint: str | None = None
     langsmith_capture_content: bool = False
     langsmith_workspace_id: str | None = None
@@ -157,7 +161,6 @@ class Settings:
             a2a_endpoint_url=os.getenv("A2A_ENDPOINT_URL"),
             observability_mongo_uri=os.getenv("A2A_OBSERVABILITY_MONGO_URI") or None,
             observability_mongo_database=os.getenv("A2A_OBSERVABILITY_MONGO_DATABASE", "argos_ai"),
-            observability_collection=os.getenv("A2A_OBSERVABILITY_COLLECTION") or None,
             observability_mongo_server_selection_timeout_ms=_observability_int(
                 "A2A_OBSERVABILITY_MONGO_SERVER_SELECTION_TIMEOUT_MS", 5_000
             ),
@@ -185,7 +188,11 @@ class Settings:
                 "A2A_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2_000
             ),
             langsmith_api_key=os.getenv("A2A_LANGSMITH_API_KEY") or None,
-            langsmith_project=os.getenv("A2A_LANGSMITH_PROJECT", "argos-ai-service"),
+            langsmith_agent_id=os.getenv("A2A_LANGSMITH_AGENT_ID", "argos-ai-service"),
+            langsmith_agent_environment=resolve_langsmith_agent_environment(
+                os.getenv("A2A_LANGSMITH_AGENT_ENVIRONMENT"),
+                os.getenv("APP_ENV", "production"),
+            ),
             langsmith_endpoint=os.getenv("A2A_LANGSMITH_ENDPOINT") or None,
             langsmith_workspace_id=os.getenv("A2A_LANGSMITH_WORKSPACE_ID") or None,
             langsmith_capture_content=_environment_bool("A2A_LANGSMITH_CAPTURE_CONTENT"),
@@ -235,11 +242,6 @@ class Settings:
         ]
         if not self.trusted_delegation_keys:
             missing.append("A2A_TRUSTED_DELEGATION_KEYS")
-        if (self.observability_mongo_uri is None) != (self.observability_collection is None):
-            missing.append(
-                "A2A_OBSERVABILITY_MONGO_URI e A2A_OBSERVABILITY_COLLECTION "
-                "devem ser configuradas juntas"
-            )
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.a2a_port <= 65535:
@@ -365,8 +367,15 @@ class Settings:
             raise ValueError("A2A_INTERNAL_SERVICE_TOKEN não pode conter espaços")
         if not self.observability_mongo_database.strip():
             raise ValueError("A2A_OBSERVABILITY_MONGO_DATABASE não pode estar vazio")
-        if not self.langsmith_project.strip():
-            raise ValueError("A2A_LANGSMITH_PROJECT não pode estar vazio")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", self.langsmith_agent_id):
+            raise ValueError("A2A_LANGSMITH_AGENT_ID deve ser um identificador DNS válido")
+        if self.langsmith_agent_environment not in {
+            "local",
+            "development",
+            "staging",
+            "production",
+        }:
+            raise ValueError("A2A_LANGSMITH_AGENT_ENVIRONMENT inválido")
         if self.langsmith_capture_content and not self.langsmith_api_key:
             raise ValueError("A2A_LANGSMITH_CAPTURE_CONTENT exige A2A_LANGSMITH_API_KEY")
         if self.langsmith_endpoint is not None:
@@ -384,17 +393,17 @@ class Settings:
                 valid_langsmith_endpoint = False
             if not valid_langsmith_endpoint:
                 raise ValueError("A2A_LANGSMITH_ENDPOINT deve usar HTTPS")
-        if self.observability_collection is not None:
-            collection = self.observability_collection
-            if (
-                not collection
-                or collection.strip() != collection
-                or collection.startswith("system.")
-                or "$" in collection
-                or "\x00" in collection
-                or len(collection.encode("utf-8")) > 120
-            ):
-                raise ValueError("A2A_OBSERVABILITY_COLLECTION inválida")
+        collection = self.observability_collection
+        if (
+            not collection
+            or collection.strip() != collection
+            or collection.startswith("system.")
+            or "$" in collection
+            or "\x00" in collection
+            or len(collection.encode("utf-8")) > 120
+        ):
+            raise ValueError("collection de observabilidade A2A inválida")
+        if self.observability_mongo_uri is not None:
             try:
                 mongo_uri = urlsplit(self.observability_mongo_uri or "")
                 valid_mongo_uri = mongo_uri.scheme in {"mongodb", "mongodb+srv"} and bool(

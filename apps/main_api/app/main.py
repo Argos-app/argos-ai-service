@@ -9,16 +9,22 @@ from uuid import uuid4
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api.v1.router import router as v1_router
 from app.application.errors import ApplicationError, ApplicationErrorCode
 from app.application.operation_observation import OperationRecorder, active_collector
 from app.infrastructure.a2a import DocumentA2AClient
+from app.infrastructure.access_tokens import MainApiAccessTokenCodec
 from app.infrastructure.agents.model_factory import (
     ModelRuntimeConfigurationError,
     create_configured_models,
 )
 from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
+from app.infrastructure.firebase_auth import (
+    FirebaseIdentityAuthenticator,
+    create_firebase_id_token_verifier,
+)
 from app.infrastructure.mcp import (
     McpDelegationTokenIssuer,
     bind_observation_collector,
@@ -27,6 +33,10 @@ from app.infrastructure.mcp import (
 from app.infrastructure.observability.langsmith import (
     LangSmithTracing,
     create_langsmith_tracing,
+)
+from app.infrastructure.postgres import (
+    PostgresUserAccessRuntime,
+    create_postgres_user_access_runtime,
 )
 from app.settings import Settings
 from packages.observability import (
@@ -40,6 +50,63 @@ from packages.observability import (
     observation_scope,
 )
 from packages.security.signatures import TrustedEd25519SignatureVerifier
+
+
+class BodySizeLimitMiddleware:
+    """Rejeita corpos grandes após ler no máximo o limite configurado."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+
+        raw_content_length = next(
+            (value for name, value in scope.get("headers", ()) if name == b"content-length"),
+            None,
+        )
+        if raw_content_length is not None:
+            try:
+                if int(raw_content_length) > self.max_bytes:
+                    await JSONResponse(
+                        status_code=413,
+                        content={"detail": "Corpo excede 32 KiB"},
+                    )(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > self.max_bytes:
+                await JSONResponse(
+                    status_code=413,
+                    content={"detail": "Corpo excede 32 KiB"},
+                )(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
 
 
 def create_app(
@@ -70,9 +137,24 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         runtime: ServiceRuntime | None = None
+        postgres_runtime: PostgresUserAccessRuntime | None = None
         langsmith_tracing = create_langsmith_tracing(configured)
         app.state.langsmith_tracing = langsmith_tracing
         try:
+            postgres_runtime = await create_postgres_user_access_runtime(configured)
+            app.state.user_access_repository = (
+                postgres_runtime.user_access_repository if postgres_runtime else None
+            )
+            if configured.firebase_project_id is not None:
+                if postgres_runtime is None:
+                    raise RuntimeError(
+                        "MAIN_API_AUTH_DATABASE_URL é obrigatório para autenticação Firebase"
+                    )
+                verifier = create_firebase_id_token_verifier(configured)
+                app.state.firebase_identity_authenticator = FirebaseIdentityAuthenticator(
+                    verifier,
+                    postgres_runtime.user_access_repository,
+                )
             if configured.mongo_uri:
                 runtime = await create_runtime(configured)
             app.state.persistence = runtime.persistence if runtime else None
@@ -100,7 +182,8 @@ def create_app(
             try:
                 pending = tuple(getattr(app.state, "background_tasks", ()))
                 if pending:
-                    _, unfinished = await asyncio.wait(pending, timeout=2.0)
+                    shutdown_timeout = max(2.0, configured.execution_timeout_seconds + 5.0)
+                    _, unfinished = await asyncio.wait(pending, timeout=shutdown_timeout)
                     for task in unfinished:
                         task.cancel()
                     if unfinished:
@@ -109,11 +192,15 @@ def create_app(
                     await runtime.close()
             finally:
                 try:
-                    if app.state.documental_a2a_client is not None:
-                        await app.state.documental_a2a_client.aclose()
+                    if postgres_runtime is not None:
+                        await postgres_runtime.close()
                 finally:
-                    if isinstance(langsmith_tracing, LangSmithTracing):
-                        langsmith_tracing.close()
+                    try:
+                        if app.state.documental_a2a_client is not None:
+                            await app.state.documental_a2a_client.aclose()
+                    finally:
+                        if isinstance(langsmith_tracing, LangSmithTracing):
+                            langsmith_tracing.close()
 
     app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
 
@@ -138,6 +225,11 @@ def create_app(
     app.state.session_summary_generator = session_summary_generator
     app.state.user_memory_extractor = user_memory_extractor
     app.state.settings = configured
+    app.state.access_token_codec = (
+        MainApiAccessTokenCodec(configured)
+        if configured.access_token_key_id and configured.access_token_private_key
+        else None
+    )
     app.state.report_source_signature_verifier = (
         TrustedEd25519SignatureVerifier(dict(configured.mcp_data_report_trusted_signature_keys))
         if configured.mcp_data_report_trusted_signature_keys
@@ -145,6 +237,8 @@ def create_app(
     )
     app.state.observability_collector = DisabledObservationCollector()
     app.state.user_usage_counter = None
+    app.state.user_access_repository = None
+    app.state.firebase_identity_authenticator = None
     app.state.langsmith_tracing = None
     app.state.mcp_clients = create_mcp_clients(configured)
     app.state.documental_a2a_client = (
@@ -155,14 +249,6 @@ def create_app(
         if configured.mcp_delegation_key_id and configured.mcp_delegation_private_key
         else None
     )
-
-    @app.middleware("http")
-    async def limit_body(request: Request, call_next):
-        if request.method in {"POST", "PUT", "PATCH"}:
-            body = await request.body()
-            if len(body) > 32 * 1024:
-                return JSONResponse(status_code=413, content={"detail": "Corpo excede 32 KiB"})
-        return await call_next(request)
 
     @app.middleware("http")
     async def observe_http(request: Request, call_next):
@@ -223,9 +309,9 @@ def create_app(
                 status_code=503,
                 content={"status": "unavailable", "reason": "session_store_not_configured"},
             )
-        if not configured.auth_trusted_public_keys and not (
-            configured.app_env == "local" and configured.auth_mode == "stub"
-        ):
+        if (
+            configured.firebase_project_id is None or app.state.access_token_codec is None
+        ) and not (configured.app_env == "local" and configured.auth_mode == "stub"):
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "identity_not_configured"},
@@ -247,6 +333,11 @@ def create_app(
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "reason": "graph_runtime_not_configured"},
+            )
+        if configured.auth_database_url and app.state.user_access_repository is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "reason": "auth_database_not_configured"},
             )
         if app.state.agent_graph is None:
             try:
@@ -314,6 +405,7 @@ def create_app(
         return schema
 
     app.openapi = openapi_with_correlation_header
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=32 * 1024)
     return app
 
 

@@ -11,6 +11,16 @@ def test_settings_reads_no_reply_and_smtp(monkeypatch):
     assert settings.smtp_host == "smtp.example.com"
 
 
+def test_mongo_collection_names_are_fixed(monkeypatch):
+    monkeypatch.setenv("MCP_EMAIL_REPORTS_COLLECTION", "override_reports")
+    monkeypatch.setenv("MCP_EMAIL_DISPATCH_COLLECTION", "override_dispatches")
+
+    settings = Settings.from_env()
+
+    assert settings.mongo_reports_collection == "ai_email_prepared_reports"
+    assert settings.mongo_dispatch_collection == "ai_email_dispatches"
+
+
 def test_settings_reads_trusted_signature_keys(monkeypatch):
     monkeypatch.setenv(
         "MCP_EMAIL_TRUSTED_SIGNATURE_KEYS",

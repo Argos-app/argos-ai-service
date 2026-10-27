@@ -30,9 +30,7 @@ reservadas são `54329` (PostgreSQL) e `27029` (MongoDB). Não aponte essa suít
 para bancos compartilhados ou de produção: ela cria e remove bancos com prefixo
 `mcp_data_it_`.
 
-No runtime de teste, as coleções configuradas são `bois` e `medicamentos`; os
-UUIDs relacionais são configurados como texto (`string`). Esses valores são
-específicos do ambiente descartável; em outros ambientes, configure
-`MCP_DATA_MONGO_CATTLE_COLLECTION`, `MCP_DATA_MONGO_RELATIONAL_ID_FORMAT`,
-`MCP_DATA_MONGO_MEDICINE_COLLECTION` e `MCP_DATA_MONGO_MEDICINE_ID_FORMAT` de
-acordo com as coleções implantadas.
+No runtime de teste, as collections fixas são `cattle_documents` e
+`medicine_documents`; os UUIDs relacionais são configurados como texto
+(`string`). Os formatos de ID podem variar por implantação e são definidos por
+`MCP_DATA_MONGO_RELATIONAL_ID_FORMAT` e `MCP_DATA_MONGO_MEDICINE_ID_FORMAT`.

@@ -21,6 +21,7 @@ class AgentState(MessagesState):
     email_action_summary: str | None
     email_dispatch_evidence: EmailDispatchEvidence | None
     email_preparation_confirmed: bool
+    email_send_confirmation_report_id: str | None
 
     route: list[str]
     route_plan: RoutePlan | None

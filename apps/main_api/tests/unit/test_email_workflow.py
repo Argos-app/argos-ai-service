@@ -151,6 +151,35 @@ class _Preparations:
         self.authorizations[key] = authorization
         return authorization
 
+    async def confirm_send_authorization(
+        self,
+        *,
+        principal_user_id,
+        session_id,
+        source_interaction_id,
+        question_id,
+        question_expires_at,
+        now,
+    ):
+        key = (principal_user_id, session_id, source_interaction_id)
+        authorization = self.authorizations.get(key)
+        if authorization is None:
+            return None
+        if authorization.origin == SendAuthorizationOrigin.CONFIRMED_QUESTION:
+            if authorization.question_id == question_id:
+                return authorization
+            raise EmailSendAuthorizationConflictError("different confirmation")
+        confirmed = replace(
+            authorization,
+            origin=SendAuthorizationOrigin.CONFIRMED_QUESTION,
+            authorized_at=now,
+            expires_at=min(authorization.expires_at, question_expires_at),
+            question_id=question_id,
+            question_expires_at=question_expires_at,
+        )
+        self.authorizations[key] = confirmed
+        return confirmed
+
     async def get_send_authorization(self, **scope):
         return self.authorizations.get(
             (
@@ -400,7 +429,7 @@ def test_explicit_send_reserves_one_authorization_and_stable_idempotency_key():
     assert next(iter(preparations.authorizations.values())).idempotency_key == original_key
 
 
-def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_protected():
+def test_ambiguous_recipient_question_displays_full_emails_only_in_choice_labels():
     artifact, property_id = _artifact()
     prepared = PreparedReport(
         report_id=uuid4(),
@@ -464,12 +493,15 @@ def test_ambiguous_recipient_question_exposes_masked_choices_and_keeps_emails_pr
     assert "alex1@example.com" not in result_text
     assert "alex2@example.com" not in result_text
     assert pending.options[0].selector.value == "alex1@example.com"
-    assert "a***@example.com" in pending.options[0].label
+    assert "alex1@example.com" in pending.options[0].label
+    assert "alex2@example.com" in pending.options[1].label
     assert preparations.authorizations == {}
 
 
 def _authorized_dispatch(artifact, prepared, property_id, client):
     now = datetime.now(UTC)
+    question_id = uuid4()
+    question_expires_at = now + timedelta(minutes=5)
     preparation = EmailPreparation(
         reference=uuid4(),
         principal_user_id=artifact.principal_user_id,
@@ -492,10 +524,12 @@ def _authorized_dispatch(artifact, prepared, property_id, client):
         recipients_fingerprint=_fingerprint(
             [recipient.model_dump(mode="json") for recipient in prepared.recipients]
         ),
-        origin=SendAuthorizationOrigin.EXPLICIT_REQUEST,
+        origin=SendAuthorizationOrigin.CONFIRMED_QUESTION,
         idempotency_key=str(uuid4()),
         authorized_at=now,
-        expires_at=prepared.expires_at,
+        expires_at=min(prepared.expires_at, question_expires_at),
+        question_id=question_id,
+        question_expires_at=question_expires_at,
     )
     repository = _Preparations()
     repository.records[
@@ -523,6 +557,9 @@ def _authorized_dispatch(artifact, prepared, property_id, client):
         "session_id": str(artifact.session_id),
         "argos_send_intent_source_interaction_id": str(authorization.source_interaction_id),
         "argos_authorized_property_ids": (str(property_id),),
+        "argos_confirmed_send_question_id": str(question_id),
+        "argos_confirmed_send_report_id": str(prepared.report_id),
+        "argos_confirmed_send_question_expires_at": question_expires_at.isoformat(),
     }
     return workflow, repository, authorization, config
 
@@ -692,6 +729,7 @@ def test_explicit_confirmation_rejects_ambiguous_prepared_reports():
     config.update(
         {
             "argos_send_intent_requested": True,
+            "argos_confirmed_send_report_id": str(uuid4()),
             "recipient_selectors": {"recipient-1": {"kind": "email", "value": "ana@example.com"}},
         }
     )
@@ -699,6 +737,48 @@ def test_explicit_confirmation_rejects_ambiguous_prepared_reports():
     with pytest.raises(ValueError, match="única preparação válida"):
         asyncio.run(workflow.send(configurable=config))
     assert client.calls == []
+
+
+def test_explicit_send_reservation_dispatches_without_extra_confirmation():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Conteúdo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    accepted = _dispatch_result(prepared.report_id)
+    client = _EmailClient(accepted)
+    workflow, repository, original, config = _authorized_dispatch(
+        artifact, prepared, property_id, client
+    )
+    pending = replace(
+        original,
+        origin=SendAuthorizationOrigin.EXPLICIT_REQUEST,
+        question_id=None,
+        question_expires_at=None,
+        expires_at=prepared.expires_at,
+    )
+    repository.authorizations[
+        (pending.principal_user_id, pending.session_id, pending.source_interaction_id)
+    ] = pending
+    config.pop("argos_confirmed_send_question_id")
+    config.pop("argos_confirmed_send_question_expires_at")
+    config.pop("argos_confirmed_send_report_id")
+    config["argos_send_intent_requested"] = True
+
+    sent = json.loads(asyncio.run(workflow.send(configurable=config)))
+    reserved = repository.authorizations[
+        (pending.principal_user_id, pending.session_id, pending.source_interaction_id)
+    ]
+    assert sent["status"] == "accepted"
+    assert reserved.origin == SendAuthorizationOrigin.EXPLICIT_REQUEST
+    assert reserved.question_id is None
+    assert [name for name, _, _ in client.calls] == ["send_report"]
 
 
 def test_recover_interaction_outcome_reads_mcp_without_resending():

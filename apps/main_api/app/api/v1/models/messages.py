@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from app.api.v1.models.base import StrictModel
 from app.api.v1.models.interactions import AnswerValue, ResponseValue
@@ -36,6 +36,8 @@ class SessionMessage(StrictModel):
     answer: AnswerValue | None = None
     response: ResponseValue | None = None
     redacted: bool = False
+    status: Literal["completed", "degraded"] | None = None
+    degradation_reasons: list[str] = Field(default_factory=list)
 
     @field_validator("created_at")
     @classmethod
@@ -58,7 +60,17 @@ class SessionMessage(StrictModel):
             raise ValueError("mensagem do usuário não pode conter response")
         if self.role == "assistant" and (self.question_id is not None or self.answer is not None):
             raise ValueError("mensagem do assistente não pode conter resposta do usuário")
+        if self.role == "user" and (self.status is not None or self.degradation_reasons):
+            raise ValueError("mensagem do usuário não pode conter status da interação")
         return self
+
+    @model_serializer(mode="wrap")
+    def omit_user_outcome_metadata(self, handler):
+        serialized = handler(self)
+        if self.role == "user":
+            serialized.pop("status", None)
+            serialized.pop("degradation_reasons", None)
+        return serialized
 
 
 class SessionMessagesPage(StrictModel):

@@ -16,9 +16,7 @@ O processo encerra com erro se qualquer variável obrigatória estiver ausente:
 | `MCP_DATA_SQL_DSN`                     | DSN PostgreSQL de uma conta provisionada para leitura.                       |
 | `MCP_DATA_MONGO_URI`                   | URI MongoDB de uma conta provisionada com papel `read` no banco configurado. |
 | `MCP_DATA_MONGO_DATABASE`              | Banco MongoDB.                                                               |
-| `MCP_DATA_MONGO_CATTLE_COLLECTION`     | Nome confirmado/configurado da coleção de documentos bovinos.                |
 | `MCP_DATA_MONGO_RELATIONAL_ID_FORMAT`  | Representação do UUID relacional no Mongo: `string` ou `uuid_standard`.      |
-| `MCP_DATA_MONGO_MEDICINE_COLLECTION`   | Nome confirmado/configurado da coleção de detalhes de medicamentos.          |
 | `MCP_DATA_MONGO_MEDICINE_ID_FORMAT`    | Representação de `relational_medicine_id`: `string` ou `uuid_standard`.      |
 | `MCP_DATA_INTERNAL_SERVICE_TOKEN`      | Token interno de serviço aceito pelo verificador MCP.                        |
 | `MCP_DATA_AUTH_ISSUER_URL`             | Emissor OAuth configurado no transporte MCP.                                 |
@@ -32,6 +30,10 @@ O processo encerra com erro se qualquer variável obrigatória estiver ausente:
 | `MCP_DATA_REPORT_ENVELOPE_TTL_SECONDS` | Validade do envelope assinado; padrão `300`, máximo `300`.                   |
 | `MCP_DATA_HOST`                        | Host de escuta; padrão `0.0.0.0`.                                            |
 | `MCP_DATA_PORT`                        | Porta de escuta; padrão `8000`.                                              |
+
+Os nomes das collections Mongo são fixos: `cattle_documents` para os documentos
+bovinos e `medicine_documents` para detalhes de medicamentos. Os ambientes são
+separados pelo database configurado, que deve disponibilizar essas collections.
 
 O pool PostgreSQL define `default_transaction_read_only=on`, valida esse estado
 na inicialização e cada leitura abre transação explicitamente `READ ONLY`. O

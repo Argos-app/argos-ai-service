@@ -78,11 +78,6 @@ def _minimal_result(prepared: PreparedReport, *, reused: bool) -> str:
     )
 
 
-def _masked_email(value: str) -> str:
-    local, separator, domain = value.partition("@")
-    return f"{local[:1] or '*'}***@{domain}" if separator else "contato mascarado"
-
-
 def _fingerprint(value: Any) -> str:
     canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()
@@ -122,7 +117,7 @@ async def _recipient_question_result(
         options = tuple(
             PendingRecipientOption(
                 option_id=str(uuid4()),
-                label=f"{match.name} ({_masked_email(match.email)})",
+                label=f"{match.name} ({match.email})",
                 selector=RecipientSelector(kind="email", value=match.email),
             )
             for match in resolution.matches

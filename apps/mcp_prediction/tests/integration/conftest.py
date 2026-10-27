@@ -25,7 +25,8 @@ SQL_ADMIN_DSN = os.getenv("MCP_PREDICTION_TEST_ADMIN_DSN") or (
 _SCHEMA = """
 CREATE TABLE permission (id UUID PRIMARY KEY, code TEXT NOT NULL, active BOOLEAN NOT NULL);
 CREATE TABLE app_user (
-    id UUID PRIMARY KEY, permission_id UUID NOT NULL, name TEXT NOT NULL,
+    id UUID PRIMARY KEY, firebase_uid TEXT NOT NULL UNIQUE,
+    permission_id UUID NOT NULL, name TEXT NOT NULL,
     cpf TEXT NOT NULL, email TEXT NOT NULL, active BOOLEAN NOT NULL,
     blocked_until TIMESTAMPTZ
 );
@@ -80,6 +81,7 @@ class PredictionHarness:
         self.private_key = private_key
         self.as_of = date.today() - timedelta(days=1)
         self.user_id = uuid4()
+        self.firebase_uid = f"firebase-{uuid4().hex}"
         self.property_a = uuid4()
         self.property_b = uuid4()
         self.property_external = uuid4()
@@ -105,7 +107,7 @@ class PredictionHarness:
             "v": 1,
             "iss": "argos-main-service-test",
             "aud": self.url,
-            "sub": str(self.user_id),
+            "sub": self.firebase_uid,
             "authorized_property_ids": [
                 str(value) for value in (authorized_properties or (self.property_a,))
             ],
@@ -268,17 +270,26 @@ async def _seed_database(sql, harness, as_of):
     batch_id = uuid4()
     await sql.execute("INSERT INTO permission VALUES ($1, 'ANALISTA', TRUE)", permission_id)
     await sql.executemany(
-        """INSERT INTO app_user (id, permission_id, name, cpf, email, active, blocked_until)
-           VALUES ($1, $2, $3, $4, $5, TRUE, NULL)""",
+        """INSERT INTO app_user
+           (id, firebase_uid, permission_id, name, cpf, email, active, blocked_until)
+           VALUES ($1, $2, $3, $4, $5, $6, TRUE, NULL)""",
         [
             (
                 harness.user_id,
+                harness.firebase_uid,
                 permission_id,
                 "Analista de integração",
                 uuid4().hex,
                 "analista@test",
             ),
-            (other_user_id, permission_id, "Outro usuário", uuid4().hex, "outro@test"),
+            (
+                other_user_id,
+                f"firebase-{uuid4().hex}",
+                permission_id,
+                "Outro usuário",
+                uuid4().hex,
+                "outro@test",
+            ),
         ],
     )
     await sql.executemany(

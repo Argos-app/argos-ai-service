@@ -14,7 +14,7 @@ from argos_mcp_email.adapters.source_verification import (
 from argos_mcp_email.adapters.storage import MongoDispatchRepository, MongoReportRepository
 from argos_mcp_email.application import GetReportStatus, PrepareReport, SendReport
 from argos_mcp_email.infrastructure import AsyncpgSqlExecutor
-from argos_mcp_email.server import McpEmailServer, create_mcp_server
+from argos_mcp_email.server import McpEmailServer, create_mcp_server, register_email_tools
 from argos_mcp_email.settings import Settings
 
 
@@ -143,10 +143,17 @@ async def create_runtime(
         send_report=send_report,
         get_report_status=build_get_report_status(dispatch_repository=dispatch_repository),
     )
+    try:
+        server = create_mcp_server(configured)
+        register_email_tools(server, service)
+    except Exception:
+        mongo_client.close()
+        await sql_pool.close()
+        raise
     return ServiceRuntime(
         mongo_client=mongo_client,
         sql_pool=sql_pool,
-        server=create_mcp_server(service, configured),
+        server=server,
     )
 
 

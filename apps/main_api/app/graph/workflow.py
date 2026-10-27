@@ -1,33 +1,27 @@
 import asyncio
 import logging
 import re
-from collections.abc import Mapping
-from datetime import UTC, datetime
 from functools import partial
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from app.agent_schemas.inputs import (
-    DependencyEvidence,
-    DependencyResult,
     QuestionFormatterInput,
     QuestionFormattingRequest,
     QuestionOption,
     RouterInput,
     SessionContext,
-    SpecialistInput,
 )
 from app.agent_schemas.results import (
     JudgeDecision,
     JudgeResult,
+    QuestionFormatterResult,
     RoutePlan,
     RouteTask,
     SourceReference,
-    SpecialistResult,
     SpecialistStatus,
 )
 from app.agent_schemas.synthesis import (
-    EmailDispatchEvidence,
     JudgeInput,
     OrchestratorInput,
     OrchestratorResult,
@@ -38,16 +32,16 @@ from app.application.execution_limits import (
     ExecutionLimits,
     current_execution_limits,
 )
-from app.application.report_artifact_service import (
-    ReportSourceExpiredError,
-    ReportSourceValidationError,
-    validate_report_source,
-)
 from app.application.verified_evidence import verified_evidence_fallback
-from app.domain.email_preparations import PendingRecipientResolution
-from app.domain.report_artifacts import (
-    ReportArtifactExpiredError,
-    ReportArtifactNotFoundError,
+from app.graph.specialist_helpers import (
+    agent_failure_reason as _agent_failure_reason,
+)
+from app.graph.specialist_helpers import (
+    build_agent_context,
+    unique_sources,
+)
+from app.graph.specialist_helpers import (
+    history_context as _history_context,
 )
 from app.graph.state import AgentState
 from app.ports.agent import AgentId
@@ -121,33 +115,6 @@ SECRET_REQUEST_PATTERN = re.compile(
 )
 
 
-def _agent_failure_reason(agent: str, error: BaseException) -> str:
-    """Converte falhas técnicas em códigos públicos seguros e específicos."""
-    current: BaseException | None = error
-    visited: set[int] = set()
-    while current is not None and id(current) not in visited:
-        visited.add(id(current))
-        status_code = getattr(current, "status_code", None)
-        if status_code == 429:
-            return f"{agent}_provider_rate_limited"
-        if status_code in {408, 504} or isinstance(current, TimeoutError):
-            return f"{agent}_provider_timeout"
-        if isinstance(status_code, int) and 500 <= status_code <= 599:
-            return f"{agent}_provider_unavailable"
-        if status_code in {401, 403}:
-            return f"{agent}_provider_rejected"
-        if type(current).__name__ in {
-            "AgentResponseError",
-            "OutputParserException",
-            "ValidationError",
-            "StructuredOutputValidationError",
-            "MultipleStructuredOutputsError",
-        } or isinstance(current, (TypeError, ValueError)):
-            return f"{agent}_invalid_output"
-        current = current.__cause__ or current.__context__
-    return f"{agent}_execution_failed"
-
-
 def _all_agent_results_failed_without_evidence(state: AgentState) -> bool:
     outcomes = state.get("task_outcomes", ())
     if not outcomes or any(source.excerpt for source in state.get("sources", ())):
@@ -174,53 +141,6 @@ def _unconfirmed_email_preparation(state: AgentState) -> str | None:
     return None
 
 
-def build_agent_context(
-    state: AgentState,
-    *,
-    config: RunnableConfig | None = None,
-    report_artifact_scopes: dict[str, dict[str, str]] | None = None,
-    recipient_selectors: dict[str, dict[str, str]] | None = None,
-) -> dict[str, Any]:
-    context = {
-        "user_id": state["user_id"],
-        "farm_id": state["farm_id"],
-        "session_id": state["session_id"],
-    }
-    if state.get("interaction_id"):
-        context["interaction_id"] = state["interaction_id"]
-    task_index = state.get("current_task_index", 0)
-    tasks = state.get("ordered_tasks", ())
-    if 0 <= task_index < len(tasks):
-        context["argos_task_id"] = tasks[task_index].task_id
-    configurable = (config or {}).get("configurable") or {}
-    if configurable.get("argos_user_id"):
-        context["argos_user_id"] = configurable["argos_user_id"]
-    if configurable.get("argos_authorized_property_ids"):
-        context["argos_authorized_property_ids"] = configurable["argos_authorized_property_ids"]
-    if configurable.get("argos_request_id"):
-        context["argos_request_id"] = configurable["argos_request_id"]
-    limits = current_execution_limits()
-    if isinstance(limits, ExecutionLimits):
-        context["argos_execution_limits"] = limits
-    if report_artifact_scopes:
-        context["argos_report_artifact_scopes"] = report_artifact_scopes
-    if recipient_selectors is not None:
-        context["recipient_selectors"] = recipient_selectors
-        context["argos_send_intent_requested"] = bool(state.get("send_intent_requested"))
-        context["argos_send_intent_source_interaction_id"] = state.get(
-            "send_intent_source_interaction_id"
-        )
-    return context
-
-
-def _history_context(state: AgentState) -> SessionContext:
-    context = state.get("session_context") or SessionContext()
-    return SessionContext(
-        session_summary=context.session_summary,
-        recent_messages=context.recent_messages,
-    )
-
-
 def _preference_context(state: AgentState) -> SessionContext:
     context = state.get("session_context") or SessionContext()
     return SessionContext(
@@ -238,6 +158,7 @@ def reset_turn_state() -> dict:
         "email_action_summary": None,
         "email_dispatch_evidence": None,
         "email_preparation_confirmed": False,
+        "email_send_confirmation_report_id": None,
         "sanitized_message": "",
         "route": [],
         "route_plan": None,
@@ -363,12 +284,16 @@ def order_tasks(plan: RoutePlan) -> tuple[RouteTask, ...]:
     return tuple(ordered)
 
 
-def unique_sources(sources: list[SourceReference]) -> list[SourceReference]:
-    unique: list[SourceReference] = []
-    for source in sources:
-        if source not in unique:
-            unique.append(source)
-    return unique
+def _canonicalize_sources(
+    candidate_sources: tuple[SourceReference, ...],
+    trusted_sources: list[SourceReference],
+) -> tuple[SourceReference, ...]:
+    """Aceita somente referências emitidas pelo fluxo e recupera seus metadados confiáveis."""
+    canonical_by_reference = {source.reference: source for source in trusted_sources}
+    requested_references = tuple(dict.fromkeys(source.reference for source in candidate_sources))
+    if any(reference not in canonical_by_reference for reference in requested_references):
+        raise ValueError("unknown_source")
+    return tuple(canonical_by_reference[reference] for reference in requested_references)
 
 
 def _canonicalize_sources(
@@ -561,7 +486,6 @@ async def no_roteador(
         update["missing_fields"] = fields
         update["clarification_request"] = QuestionFormattingRequest(
             reason_code="MISSING_FIELDS",
-            input_type="free_text",
             question_goal=f"Informe os dados necessários: {', '.join(fields)}.",
         )
     elif not ordered:
@@ -581,527 +505,17 @@ async def no_especialista(
     email_dispatch: EmailDispatchWorkflow | None = None,
     config: RunnableConfig | None = None,
 ) -> dict:
-    tasks = state["ordered_tasks"]
-    index = state["current_task_index"]
-    if index >= len(tasks) or tasks[index].agent.value != agent_id.value:
-        return {
-            "final_answer": SAFE_ANSWER,
-            "errors": [*state.get("errors", []), "invalid_specialist_route"],
-        }
+    from app.graph.specialist_workflow import run_specialist_workflow
 
-    task = tasks[index]
-    completed = {outcome.task.task_id: outcome for outcome in state.get("task_outcomes", ())}
-    if any(dep not in completed for dep in task.depends_on):
-        return {
-            "final_answer": SAFE_ANSWER,
-            "errors": [*state.get("errors", []), "missing_dependency_result"],
-        }
-    dependencies = tuple(completed[dep] for dep in task.depends_on)
-    blocked = any(
-        outcome.result.status not in (SpecialistStatus.SUCCESS, SpecialistStatus.PARTIAL)
-        for outcome in dependencies
+    return await run_specialist_workflow(
+        state,
+        factory=factory,
+        agent_id=agent_id,
+        report_artifacts=report_artifacts,
+        email_preparations=email_preparations,
+        email_dispatch=email_dispatch,
+        config=config,
     )
-    errors = list(state.get("errors", []))
-    trusted_recipient_question: PendingRecipientResolution | None = None
-    report_refs_by_dependency: dict[str, tuple[str, ...]] = {}
-    report_artifact_scopes: dict[str, dict[str, str]] = {}
-    farm_dependencies = tuple(
-        outcome for outcome in dependencies if outcome.task.agent.value == AgentId.FARM.value
-    )
-    if task.agent.value == AgentId.SECRETARY.value and farm_dependencies and not blocked:
-        configurable = (config or {}).get("configurable") or {}
-        try:
-            principal_user_id = UUID(str(configurable["argos_user_id"]))
-            authorized_property_ids = tuple(
-                UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
-            )
-            origin_interaction_id = UUID(
-                str(
-                    state.get("report_artifact_origin_interaction_id")
-                    or state.get("interaction_id")
-                )
-            )
-            session_id = UUID(state["session_id"])
-            if principal_user_id != UUID(state["user_id"]):
-                raise ValueError("principal_mismatch")
-            if report_artifacts is None:
-                raise ReportArtifactNotFoundError("artifact_store_unavailable")
-            for dependency in farm_dependencies:
-                refs = tuple(state.get("report_artifact_refs", {}).get(dependency.task.task_id, ()))
-                if not refs:
-                    raise ReportArtifactNotFoundError("missing_report_artifact")
-                for reference in refs:
-                    artifact = await report_artifacts.get(
-                        UUID(reference),
-                        principal_user_id=principal_user_id,
-                        session_id=session_id,
-                        interaction_id=origin_interaction_id,
-                        task_id=dependency.task.task_id,
-                    )
-                    validate_report_source(
-                        artifact.envelope,
-                        principal_user_id=principal_user_id,
-                        lot_id=artifact.envelope.report.requested_lot.lot_id,
-                        authorized_property_ids=authorized_property_ids,
-                    )
-                    report_artifact_scopes[reference] = {
-                        "interaction_id": str(origin_interaction_id),
-                        "task_id": dependency.task.task_id,
-                    }
-                report_refs_by_dependency[dependency.task.task_id] = refs
-        except ReportArtifactExpiredError, ReportSourceExpiredError:
-            if state.get("report_source_renewal_count", 0) < 1:
-                source_index = next(
-                    index
-                    for index, candidate_task in enumerate(state["ordered_tasks"])
-                    if candidate_task.task_id == farm_dependencies[0].task.task_id
-                )
-                prior_outcomes = tuple(
-                    outcome
-                    for outcome in state.get("task_outcomes", ())
-                    if outcome.task.task_id
-                    in {candidate.task_id for candidate in state["ordered_tasks"][:source_index]}
-                )
-                prior_task_ids = {outcome.task.task_id for outcome in prior_outcomes}
-                prior_sources = unique_sources(
-                    [source for outcome in prior_outcomes for source in outcome.result.sources]
-                )
-                return {
-                    "current_task_index": source_index,
-                    "task_outcomes": prior_outcomes,
-                    "sources": prior_sources,
-                    "report_artifact_refs": {
-                        key: value
-                        for key, value in state.get("report_artifact_refs", {}).items()
-                        if key in prior_task_ids
-                    },
-                    "report_source_renewal_count": (
-                        state.get("report_source_renewal_count", 0) + 1
-                    ),
-                }
-            blocked = True
-            errors = [*state.get("errors", []), "report_source_expired_after_renewal"]
-        except ReportArtifactNotFoundError, ReportSourceValidationError, ValueError:
-            blocked = True
-            errors.append("invalid_or_missing_report_artifact")
-
-    called = list(state.get("called_agents", []))
-    failure_reason = None
-
-    if blocked:
-        report_source_missing = "invalid_or_missing_report_artifact" in errors
-        result = SpecialistResult(
-            agent=task.agent,
-            status=SpecialistStatus.UNAVAILABLE,
-            answer=(
-                "A consulta do lote não disponibilizou a fonte assinada exigida; "
-                "nenhum relatório foi preparado e nenhum e-mail foi enviado."
-                if report_source_missing
-                else "A tarefa anterior não produziu dados confiáveis para continuar."
-            ),
-            error=(
-                "required_signed_report_source_missing"
-                if report_source_missing
-                else "dependency_unavailable"
-            ),
-        )
-        errors.append("blocked_dependency")
-    else:
-        dependency_results = tuple(
-            DependencyResult(
-                task_id=outcome.task.task_id,
-                answer=outcome.result.answer,
-                source_references=tuple(source.reference for source in outcome.result.sources),
-                source_evidence=tuple(
-                    DependencyEvidence(
-                        title=source.title,
-                        reference=source.reference,
-                        excerpt=source.excerpt,
-                    )
-                    for source in outcome.result.sources
-                    if source.excerpt
-                ),
-                report_artifact_refs=report_refs_by_dependency.get(outcome.task.task_id, ()),
-            )
-            for outcome in dependencies
-        )
-        agent_input = SpecialistInput(
-            task_id=task.task_id,
-            request=state.get("sanitized_message") or None,
-            goal=task.goal,
-            brief_sanitized=task.brief_sanitized,
-            context_refs=task.context_refs,
-            depends_on=task.depends_on,
-            required_evidence=task.required_evidence,
-            dependency_results=dependency_results,
-            session_context=_history_context(state),
-            email_send_authorized=(
-                state.get("send_intent_requested", False)
-                if agent_id == AgentId.SECRETARY
-                else False
-            ),
-        )
-        called.append(agent_id.value)
-        try:
-            context = build_agent_context(
-                state,
-                config=config,
-                report_artifact_scopes=report_artifact_scopes,
-                recipient_selectors=(
-                    state.get("recipient_selectors", {}) if agent_id == AgentId.SECRETARY else None
-                ),
-            )
-            if agent_id == AgentId.SECRETARY and email_preparations is not None:
-                preparations = await email_preparations.list_prepared_for_session(
-                    principal_user_id=UUID(str(context["argos_user_id"])),
-                    session_id=UUID(state["session_id"]),
-                )
-                active_preparations = tuple(
-                    item
-                    for item in preparations
-                    if item.prepared_report.status.value == "prepared"
-                    and item.prepared_report.expires_at > datetime.now(UTC)
-                )
-                agent_input = agent_input.model_copy(
-                    update={"email_preparation_count": len(active_preparations)}
-                )
-            response = await factory.create(agent_id).run(agent_input, context=context)
-            result = SpecialistResult.model_validate(response)
-            if result.agent.value != agent_id.value:
-                raise ValueError("specialist_agent_mismatch")
-            if agent_id in {
-                AgentId.FARM,
-                AgentId.DOCTOR,
-                AgentId.ANALYST,
-                AgentId.INFORMATION,
-            }:
-                limits = context.get("argos_execution_limits")
-                own_evidence = (
-                    limits.evidence_for(agent_id.value)
-                    if isinstance(limits, ExecutionLimits)
-                    else ()
-                )
-                inherited_sources = tuple(
-                    source
-                    for dependency in dependencies
-                    for source in dependency.result.sources
-                    if source.excerpt
-                )
-                if (
-                    not own_evidence
-                    and not inherited_sources
-                    and result.status
-                    in {
-                        SpecialistStatus.SUCCESS,
-                        SpecialistStatus.PARTIAL,
-                    }
-                ):
-                    result = result.model_copy(
-                        update={
-                            "status": SpecialistStatus.UNAVAILABLE,
-                            "answer": SAFE_ANSWER,
-                            "sources": (),
-                            "error": "required_external_evidence_missing",
-                        }
-                    )
-                    errors.append(f"{agent_id.value}_external_evidence_missing")
-                else:
-                    source_evidence = tuple(
-                        SourceReference(
-                            title=f"Consulta externa: {item.tool_name}",
-                            reference=item.reference,
-                            excerpt=item.excerpt,
-                        )
-                        for item in own_evidence
-                    )
-                    result = result.model_copy(
-                        update={
-                            "sources": tuple(unique_sources([*source_evidence, *inherited_sources]))
-                        }
-                    )
-        except ExecutionEventWriteError:
-            raise
-        except Exception as exc:
-            failure_reason = _agent_failure_reason(agent_id.value, exc)
-            _LOGGER.warning(
-                "agent execution failed: %s",
-                type(exc).__name__,
-                extra={"agent": agent_id.value, "failure_reason": failure_reason},
-            )
-            limits = current_execution_limits()
-            tool_result = (
-                limits.latest_non_evidence_result(agent_id.value)
-                if isinstance(limits, ExecutionLimits)
-                else None
-            )
-            tool_status = tool_result.status if tool_result is not None else None
-            fallback_status = (
-                SpecialistStatus.ABSTAIN
-                if tool_status == "abstain"
-                else SpecialistStatus.UNAVAILABLE
-                if tool_status in {"unavailable", "corpus_updating"}
-                else SpecialistStatus.ERROR
-            )
-            answer = (
-                f"A ferramenta {tool_result.tool_name} retornou status {tool_status}; "
-                "não há resultado verificável para apresentar."
-                if tool_result is not None
-                else ""
-            )
-            result = SpecialistResult(
-                agent=task.agent,
-                status=fallback_status,
-                answer=answer,
-                error=failure_reason,
-            )
-            # Keep successful external results when only model interpretation failed.
-            # Cancellation, budget and storage errors must keep their original semantics.
-            evidence = (
-                limits.evidence_for(agent_id.value)
-                if isinstance(limits, ExecutionLimits)
-                and ("_provider_" in failure_reason or failure_reason.endswith("_invalid_output"))
-                else ()
-            )
-            if evidence:
-                result = SpecialistResult(
-                    agent=task.agent,
-                    status=SpecialistStatus.PARTIAL,
-                    answer=verified_evidence_fallback(evidence, unavailable_stage="processamento"),
-                    sources=tuple(
-                        SourceReference(
-                            title=f"Consulta externa: {item.tool_name}",
-                            reference=item.reference,
-                            excerpt=item.excerpt,
-                        )
-                        for item in evidence
-                    ),
-                    error=failure_reason,
-                )
-            errors.append(failure_reason)
-
-    email_preparation_confirmed = False
-    if agent_id == AgentId.SECRETARY and email_preparations is not None:
-        configurable = (config or {}).get("configurable") or {}
-        try:
-            trusted_recipient_question = await email_preparations.get_pending_recipient_resolution(
-                principal_user_id=UUID(str(configurable["argos_user_id"])),
-                session_id=UUID(state["session_id"]),
-                interaction_id=UUID(state["interaction_id"]),
-            )
-        except Exception:
-            failure_reason = "recipient_resolution_storage_unavailable"
-            result = SpecialistResult(
-                agent=task.agent,
-                status=SpecialistStatus.ERROR,
-                error=failure_reason,
-            )
-            errors.append(failure_reason)
-        if trusted_recipient_question is not None:
-            # A persisted recipient question is authoritative: the MCP completed
-            # preparation and the application has a valid next step. The model's
-            # malformed post-tool response must not turn that clarification into
-            # a degraded interaction.
-            if failure_reason and failure_reason in errors:
-                errors.remove(failure_reason)
-            result = SpecialistResult(
-                agent=task.agent,
-                status=SpecialistStatus.NEEDS_CLARIFICATION,
-                answer="É necessário resolver um destinatário antes de preparar o relatório.",
-                missing_fields=("recipient",),
-            )
-        elif "confirmed_email_preparation" in task.required_evidence and result.status in {
-            SpecialistStatus.SUCCESS,
-            SpecialistStatus.PARTIAL,
-        }:
-            try:
-                preparations = await email_preparations.list_prepared_for_session(
-                    principal_user_id=UUID(str(configurable["argos_user_id"])),
-                    session_id=UUID(state["session_id"]),
-                )
-                prepared = tuple(
-                    item
-                    for item in preparations
-                    if str(item.interaction_id) == state["interaction_id"]
-                    and item.prepared_report.status.value == "prepared"
-                    and item.prepared_report.expires_at > datetime.now(UTC)
-                )
-                if not prepared:
-                    result = SpecialistResult(
-                        agent=task.agent,
-                        status=SpecialistStatus.ERROR,
-                        answer=(
-                            "A origem do relatório foi localizada, mas a preparação não foi "
-                            "confirmada pelo MCP de e-mail. Nenhum e-mail foi enviado."
-                        ),
-                        error="email_preparation_not_confirmed",
-                    )
-                    errors.append("secretary_preparation_not_confirmed")
-                else:
-                    email_preparation_confirmed = True
-            except Exception:
-                result = SpecialistResult(
-                    agent=task.agent,
-                    status=SpecialistStatus.ERROR,
-                    error="email_preparation_verification_failed",
-                )
-                errors.append("secretary_preparation_verification_failed")
-        elif result.status in {SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE}:
-            try:
-                preparations = await email_preparations.list_prepared_for_session(
-                    principal_user_id=UUID(str(configurable["argos_user_id"])),
-                    session_id=UUID(state["session_id"]),
-                )
-                prepared = tuple(
-                    item
-                    for item in preparations
-                    if str(item.interaction_id) == state["interaction_id"]
-                    and item.prepared_report.status.value == "prepared"
-                    and item.prepared_report.expires_at > datetime.now(UTC)
-                )
-                if len(prepared) == 1:
-                    email_preparation_confirmed = True
-                    result = SpecialistResult(
-                        agent=task.agent,
-                        status=SpecialistStatus.PARTIAL,
-                        answer=(
-                            "O MCP confirmou a preparação do relatório. A interpretação "
-                            "pelo modelo falhou; isso não confirma envio. Confirme o envio "
-                            "somente após conferir a preparação."
-                        ),
-                        error=failure_reason,
-                    )
-            except Exception:
-                errors.append("email_preparation_recovery_unavailable")
-
-    email_action_summary = None
-    email_dispatch_evidence = None
-    if (
-        agent_id == AgentId.SECRETARY
-        and email_dispatch is not None
-        and state.get("send_intent_requested")
-    ):
-        configurable = (config or {}).get("configurable") or {}
-        recovery_context = _email_dispatch_recovery_context(state, configurable)
-        dispatch_result = await email_dispatch.recover_interaction_outcome(
-            configurable=recovery_context
-        )
-        if dispatch_result is not None:
-            try:
-                email_dispatch_evidence = EmailDispatchEvidence.model_validate_json(dispatch_result)
-                email_action_summary = email_dispatch_evidence.message
-            except ValueError, TypeError:
-                # A legacy or malformed provider payload is never presented as
-                # confirmed dispatch evidence.
-                email_action_summary = (
-                    "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado."
-                )
-
-    outcome = TaskOutcome(
-        task=task,
-        result=result,
-        email_dispatch=email_dispatch_evidence,
-    )
-    if result.status == SpecialistStatus.ABSTAIN:
-        errors.append(f"{agent_id.value}_abstained")
-    elif result.status == SpecialistStatus.PARTIAL:
-        errors.append(f"{agent_id.value}_partial_result")
-    elif (
-        result.status in (SpecialistStatus.ERROR, SpecialistStatus.UNAVAILABLE)
-        and not failure_reason
-    ):
-        errors.append(f"{agent_id.value}_{result.status.value}")
-    sources = unique_sources([*state.get("sources", []), *result.sources])
-    update: dict[str, Any] = {
-        "called_agents": called,
-        "errors": errors,
-        "current_task_index": index + 1,
-        "task_outcomes": (*state.get("task_outcomes", ()), outcome),
-        "sources": sources,
-    }
-    if email_action_summary is not None:
-        update["email_action_summary"] = email_action_summary
-    if email_dispatch_evidence is not None:
-        update["email_dispatch_evidence"] = email_dispatch_evidence
-    if email_preparation_confirmed:
-        update["email_preparation_confirmed"] = True
-    if agent_id == AgentId.SECRETARY and result.error in {
-        "secretary_invalid_output",
-        "secretary_execution_failed",
-    }:
-        update["final_answer"] = (
-            "Falha explícita da Secretaria: a execução não terminou com uma resposta válida "
-            "e confirmada. "
-            + (
-                "O MCP de e-mail confirmou a preparação e o Principal a registrou; isso não "
-                "confirma que houve envio."
-                if email_preparation_confirmed
-                else (
-                    "A preparação do relatório não foi confirmada; não considere a operação "
-                    "concluída."
-                )
-            )
-        )
-    if agent_id == AgentId.FARM and report_artifacts is not None:
-        configurable = (config or {}).get("configurable") or {}
-        try:
-            principal_user_id = UUID(str(configurable["argos_user_id"]))
-            session_id = UUID(state["session_id"])
-            interaction_id = UUID(state["interaction_id"])
-            artifacts = await report_artifacts.list_for_task(
-                principal_user_id=principal_user_id,
-                session_id=session_id,
-                interaction_id=interaction_id,
-                task_id=task.task_id,
-            )
-            for artifact in artifacts:
-                validate_report_source(
-                    artifact.envelope,
-                    principal_user_id=principal_user_id,
-                    lot_id=artifact.envelope.report.requested_lot.lot_id,
-                    authorized_property_ids=tuple(
-                        UUID(str(value)) for value in configurable["argos_authorized_property_ids"]
-                    ),
-                    now=artifact.created_at,
-                )
-            refs = tuple(str(artifact.reference) for artifact in artifacts)
-            refs_by_task = dict(state.get("report_artifact_refs", {}))
-            if refs:
-                refs_by_task[task.task_id] = refs
-                update["report_artifact_origin_interaction_id"] = str(interaction_id)
-            else:
-                refs_by_task.pop(task.task_id, None)
-            update["report_artifact_refs"] = refs_by_task
-        except Exception:
-            update["report_artifact_refs"] = {
-                key: value
-                for key, value in state.get("report_artifact_refs", {}).items()
-                if key != task.task_id
-            }
-            update["errors"] = [*update["errors"], "invalid_report_artifact_created"]
-    if result.status in (SpecialistStatus.NEEDS_CLARIFICATION, SpecialistStatus.NEEDS_INPUT):
-        fields = list(dict.fromkeys(result.missing_fields))
-        goal = ", ".join(fields) if fields else task.goal
-        update["missing_fields"] = fields
-        update["clarification_request"] = QuestionFormattingRequest(
-            reason_code="SPECIALIST_NEEDS_INPUT",
-            input_type="free_text",
-            question_goal=f"Esclareça: {goal}.",
-        )
-        update["pending_task_id"] = task.task_id
-    if trusted_recipient_question is not None:
-        update["clarification_request"] = QuestionFormattingRequest(
-            reason_code=trusted_recipient_question.reason_code,
-            input_type=trusted_recipient_question.input_type,
-            question_goal=trusted_recipient_question.question_goal,
-            options=tuple(
-                QuestionOption(option_id=option.option_id, label=option.label)
-                for option in trusted_recipient_question.options
-            ),
-        )
-        update["question_id"] = str(trusted_recipient_question.question_id)
-        update["clarification_expires_at"] = trusted_recipient_question.expires_at.isoformat()
-        update["pending_task_id"] = task.task_id
-    return update
 
 
 async def no_orquestrador(
@@ -1254,10 +668,12 @@ async def no_formatador(
             "errors": [*state.get("errors", []), "missing_question_request"],
             "final_answer": SAFE_ANSWER,
         }
-    if request.reason_code in {"RECIPIENT_AMBIGUOUS", "RECIPIENT_NOT_FOUND"}:
-        # Recipient prompts and options come from the persisted application
-        # workflow; asking a model to rewrite them adds latency and can corrupt
-        # the exact clarification contract.
+    if request.reason_code in {
+        "RECIPIENT_AMBIGUOUS",
+        "RECIPIENT_NOT_FOUND",
+    } or request.input_type in {"single_choice", "confirmation"}:
+        # Business workflows own trusted recipient choices and confirmations.
+        # The formatter creates choices only for general clarifications.
         return {
             "clarification_question": request.question_goal,
             "question_id": state.get("question_id") or str(uuid4()),
@@ -1266,12 +682,28 @@ async def no_formatador(
     called = [*state.get("called_agents", []), AgentId.QUESTION_FORMATTER.value]
     try:
         response = await factory.create(AgentId.QUESTION_FORMATTER).run(
-            QuestionFormatterInput(request=request),
+            QuestionFormatterInput(
+                request=request,
+                user_request=(state.get("sanitized_message") or request.question_goal),
+            ),
             context=build_agent_context(state, config=config),
         )
-        question = response.prompt.strip()
+        formatted = QuestionFormatterResult.model_validate(response)
+        question = formatted.prompt.strip()
         if not question:
             raise ValueError("empty_question")
+        if formatted.options:
+            request = request.model_copy(
+                update={
+                    "input_type": "single_choice",
+                    "options": tuple(
+                        QuestionOption(option_id=str(uuid4()), label=label)
+                        for label in formatted.options
+                    ),
+                }
+            )
+        else:
+            request = request.model_copy(update={"input_type": "free_text", "options": ()})
     except ExecutionEventWriteError:
         raise
     except Exception as exc:
@@ -1282,14 +714,17 @@ async def no_formatador(
             extra={"agent": AgentId.QUESTION_FORMATTER.value, "failure_reason": failure_reason},
         )
         question = request.question_goal
+        request = request.model_copy(update={"input_type": "free_text", "options": ()})
         return {
             "called_agents": called,
             "errors": [*state.get("errors", []), failure_reason],
+            "clarification_request": request,
             "clarification_question": question,
             "question_id": state.get("question_id") or str(uuid4()),
         }
     return {
         "called_agents": called,
+        "clarification_request": request,
         "clarification_question": question,
         "question_id": state.get("question_id") or str(uuid4()),
     }
@@ -1306,37 +741,45 @@ def no_guardrail_pergunta(state: AgentState) -> dict:
 def no_guardrail_saida(state: AgentState) -> dict:
     review = state.get("judge_result")
     draft = state.get("draft_result")
-    email_preparation_failure = _unconfirmed_email_preparation(state)
-    if email_preparation_failure:
-        answer = minimize_pii(email_preparation_failure)
-    elif _all_agent_results_failed_without_evidence(state):
-        answer = _unverified_result_answer(state)
-    elif (
-        review is None
-        or review.decision != JudgeDecision.APPROVED
-        or review.unsupported_claims
-        or draft is None
-    ):
-        answer = SAFE_ANSWER
+    email_dispatch_fallback = _confirmed_email_dispatch_fallback(state)
+    if email_dispatch_fallback:
+        answer = email_dispatch_fallback
     else:
-        answer = minimize_pii(draft.draft_answer)
-        for identifier in build_agent_context(state).values():
-            if isinstance(identifier, str) and identifier:
-                answer = answer.replace(identifier, "[identificador protegido]")
-    answer = _include_email_action_summary(answer, state.get("email_action_summary"))
+        email_preparation_failure = _unconfirmed_email_preparation(state)
+        if email_preparation_failure:
+            answer = minimize_pii(email_preparation_failure)
+        elif _all_agent_results_failed_without_evidence(state):
+            answer = _unverified_result_answer(state)
+        elif (
+            review is None
+            or review.decision != JudgeDecision.APPROVED
+            or review.unsupported_claims
+            or draft is None
+        ):
+            answer = SAFE_ANSWER
+        else:
+            answer = minimize_pii(draft.draft_answer)
+            for identifier in build_agent_context(state).values():
+                if isinstance(identifier, str) and identifier:
+                    answer = answer.replace(identifier, "[identificador protegido]")
+        answer = _include_email_action_summary(answer, state.get("email_action_summary"))
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
 def no_saida_segura(state: AgentState) -> dict:
-    fallback = state.get("final_answer") or (
-        _unverified_result_answer(state)
-        if _all_agent_results_failed_without_evidence(state)
-        else SAFE_ANSWER
-    )
-    answer = _include_email_action_summary(
-        fallback,
-        state.get("email_action_summary"),
-    )
+    email_dispatch_fallback = _confirmed_email_dispatch_fallback(state)
+    if email_dispatch_fallback:
+        answer = email_dispatch_fallback
+    else:
+        fallback = state.get("final_answer") or (
+            _unverified_result_answer(state)
+            if _all_agent_results_failed_without_evidence(state)
+            else SAFE_ANSWER
+        )
+        answer = _include_email_action_summary(
+            fallback,
+            state.get("email_action_summary"),
+        )
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
@@ -1346,19 +789,15 @@ def _include_email_action_summary(answer: str, summary: str | None) -> str:
     return f"{answer}\n\nEstado do envio: {summary}"
 
 
-def _email_dispatch_recovery_context(
-    state: AgentState, configurable: Mapping[str, Any]
-) -> dict[str, Any]:
-    """Build status lookup scope from the current turn's trusted graph state."""
-    context = dict(configurable)
-    # RunnableConfig can already contain stale or null values for these keys.
-    # The checkpointed state is authoritative for the operation being recovered.
-    context["argos_user_id"] = state["user_id"]
-    context["session_id"] = state["session_id"]
-    source_interaction_id = state.get("send_intent_source_interaction_id")
-    if source_interaction_id:
-        context["argos_send_intent_source_interaction_id"] = source_interaction_id
-    return context
+def _confirmed_email_dispatch_fallback(state: AgentState) -> str | None:
+    """Reports a persisted MCP outcome when the model fails after a dispatch."""
+    evidence = state.get("email_dispatch_evidence")
+    if evidence is None or not evidence.confirmed:
+        return None
+    return minimize_pii(
+        "A resposta final da Secretária não foi concluída, mas o MCP confirmou: "
+        f"{evidence.message} Consulte o status do relatório antes de solicitar outro envio."
+    )
 
 
 def _include_confirmed_email_preparation(answer: str | None, state: AgentState) -> str | None:

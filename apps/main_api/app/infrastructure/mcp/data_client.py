@@ -56,6 +56,7 @@ class McpDataClient:
         self,
         *,
         lot_code: str,
+        firebase_uid: str,
         principal_user_id: UUID,
         authorized_property_ids: Sequence[UUID],
         request_id: UUID,
@@ -73,7 +74,7 @@ class McpDataClient:
 
         headers = self._issuer.headers_for_call(
             service="data",
-            user_id=principal_user_id,
+            firebase_uid=firebase_uid,
             authorized_property_ids=properties,
             agent="fazenda",
             operation="cattle.read",
@@ -136,6 +137,7 @@ class McpDataClient:
         *,
         lot_id: UUID,
         property_id: UUID,
+        firebase_uid: str,
         principal_user_id: UUID,
         authorized_property_ids: Sequence[UUID],
         request_id: UUID,
@@ -145,7 +147,7 @@ class McpDataClient:
             raise ValueError("propriedade solicitada está fora do escopo autorizado")
         headers = self._issuer.headers_for_call(
             service="data",
-            user_id=principal_user_id,
+            firebase_uid=firebase_uid,
             authorized_property_ids=properties,
             agent="fazenda",
             operation="report.read",

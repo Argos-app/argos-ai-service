@@ -35,6 +35,7 @@ from app.infrastructure.agents.langchain_factory import AgentResponseError
 from app.infrastructure.agents.model_factory import ModelRuntimeConfigurationError
 from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.infrastructure.mcp.client import McpClients
+from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.ports.agent import AgentId
 
 
@@ -196,9 +197,12 @@ def test_build_agent_factory_registers_question_formatter_without_tools(monkeypa
     factory.create(AgentId.QUESTION_FORMATTER)
 
     formatter_call = next(
-        call for call in calls if call.get("response_format") is QuestionFormatterResult
+        call for call in calls if "Formatador de Perguntas" in call["system_prompt"]
     )
     assert formatter_call["tools"] == []
+    assert isinstance(formatter_call["response_format"], ToolStrategy)
+    assert formatter_call["response_format"].schema is QuestionFormatterResult
+    assert formatter_call["response_format"].handle_errors is False
     assert "Formatador de Perguntas" in formatter_call["system_prompt"]
 
 
@@ -725,13 +729,15 @@ async def test_agent_passes_context_to_runnable(monkeypatch) -> None:
         },
     )
 
-    assert runnable.last_config == {
-        "configurable": {
-            "user_id": "user-demo",
-            "farm_id": "farm-demo",
-            "session_id": "session-demo",
-        }
+    assert runnable.last_config is not None
+    assert runnable.last_config["configurable"] == {
+        "user_id": "user-demo",
+        "farm_id": "farm-demo",
+        "session_id": "session-demo",
     }
+    assert any(
+        isinstance(callback, ModelUsageCallback) for callback in runnable.last_config["callbacks"]
+    )
 
 
 @pytest.mark.asyncio

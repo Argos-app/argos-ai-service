@@ -1,15 +1,19 @@
 """Fluxos de sessão, deduplicação, contador e lease do serviço de aplicação."""
 
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
-from app.agent_schemas.inputs import QuestionFormattingRequest
+from app.agent_schemas.inputs import QuestionFormattingRequest, QuestionOption
+from app.agent_schemas.synthesis import EmailDispatchEvidence
 from app.application.contracts.interactions import (
     AnswerCommand,
     ChoiceAnswer,
+    ConfirmationAnswer,
     InteractionOutcome,
     MessageCommand,
     QuestionOptionResult,
@@ -19,7 +23,11 @@ from app.application.contracts.interactions import (
 from app.application.errors import ApplicationError, ApplicationErrorCode
 from app.application.identity import ActorContext
 from app.application.session_service import SessionApplicationService, _response_from_state
-from app.domain.email_preparations import PendingRecipientOption, PendingRecipientResolution
+from app.domain.email_preparations import (
+    EmailPreparation,
+    PendingRecipientOption,
+    PendingRecipientResolution,
+)
 from app.domain.memory import (
     MemoryFieldAction,
     SessionSummary,
@@ -35,7 +43,12 @@ from app.domain.sessions import (
     SessionRecord,
 )
 
-from packages.contracts import RecipientSelector
+from packages.contracts import (
+    PreparedReport,
+    PreparedReportStatus,
+    RecipientRef,
+    RecipientSelector,
+)
 from packages.observability import correlation_key
 
 
@@ -66,6 +79,43 @@ def test_response_marks_successful_graph_results_as_completed():
     )
 
     assert outcome.status == "completed"
+
+
+def test_general_single_choice_is_exposed_with_server_assigned_option_ids():
+    question_id = uuid4()
+    options = (
+        QuestionOption(option_id=str(uuid4()), label="Aplicações"),
+        QuestionOption(option_id=str(uuid4()), label="Períodos de carência"),
+    )
+    request = QuestionFormattingRequest(
+        reason_code="MISSING_FIELDS",
+        input_type="single_choice",
+        question_goal="Qual assunto você quer consultar?",
+        options=options,
+    )
+
+    outcome = _response_from_state(
+        session_id=uuid4(),
+        interaction_id=uuid4(),
+        public_request_id=uuid4(),
+        state={
+            "clarification_request": request,
+            "clarification_question": "Você quer consultar aplicações ou carências?",
+            "question_id": str(question_id),
+            "errors": [],
+        },
+        now=_utcnow(),
+    )
+
+    assert outcome.response.kind == "question"
+    assert outcome.response.input_type == "single_choice"
+    assert [option.label for option in outcome.response.options] == [
+        "Aplicações",
+        "Períodos de carência",
+    ]
+    assert [option.option_id for option in outcome.response.options] == [
+        option.option_id for option in options
+    ]
 
 
 def test_response_hides_executor_report_artifact_reference():
@@ -268,6 +318,8 @@ class FakeGraph:
         self.invocations = []
         self.state_configs = []
         self.question_id = str(uuid4())
+        self.state_values = {"question_id": self.question_id}
+        self.updates = []
 
     async def ainvoke(self, state, *, config):
         self.calls += 1
@@ -286,7 +338,13 @@ class FakeGraph:
 
     async def aget_state(self, config):
         self.state_configs.append(config)
-        return SimpleNamespace(values={"question_id": self.question_id})
+        return SimpleNamespace(values=dict(self.state_values))
+
+    async def aupdate_state(self, config, values):
+        self.state_configs.append(config)
+        self.updates.append(values)
+        self.state_values.update(values)
+        self.question_id = str(values.get("question_id", self.question_id))
 
 
 class FakeRecipientQuestionGraph(FakeGraph):
@@ -298,7 +356,11 @@ class FakeRecipientQuestionGraph(FakeGraph):
     async def aget_state(self, config):
         self.state_configs.append(config)
         return SimpleNamespace(
-            values={"question_id": self.question_id, "recipient_selectors": self.selectors}
+            values={
+                **self.state_values,
+                "question_id": self.question_id,
+                "recipient_selectors": self.selectors,
+            }
         )
 
 
@@ -317,8 +379,67 @@ class FakePendingRecipientRepository:
         return current if matches else None
 
 
+class FakePreparedEmailRepository:
+    def __init__(self, preparations=()):
+        self.preparations = tuple(preparations)
+
+    async def list_prepared_for_session(self, *, principal_user_id, session_id, limit=20):
+        return tuple(
+            item
+            for item in self.preparations[:limit]
+            if item.principal_user_id == principal_user_id and item.session_id == session_id
+        )
+
+
+class FakeSendConfirmationGraph(FakeGraph):
+    async def ainvoke(self, state, *, config):
+        self.calls += 1
+        self.invocations.append((state, config))
+        if state.get("input_kind") == "message":
+            task = SimpleNamespace(
+                task_id="secretary-task",
+                agent=SimpleNamespace(value="secretary"),
+            )
+            self.state_values.update(
+                {
+                    "send_intent_requested": state.get("send_intent_requested"),
+                    "send_intent_source_interaction_id": state.get(
+                        "send_intent_source_interaction_id"
+                    ),
+                    "recipient_selectors": state.get("recipient_selectors", {}),
+                    "ordered_tasks": (task,),
+                }
+            )
+            return {"final_answer": "Preparação pronta.", "ordered_tasks": (task,)}
+        return {"final_answer": "Envio autorizado e concluído."}
+
+
 def _principal() -> ActorContext:
     return ActorContext(user_id=uuid4(), farm_ids=(uuid4(),))
+
+
+def _prepared_email(principal_id: UUID, session_id: UUID) -> EmailPreparation:
+    now = _utcnow()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=principal_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório de teste",
+        body="Conteúdo do relatório.",
+        created_at=now,
+        expires_at=now.replace(year=now.year + 1),
+    )
+    return EmailPreparation(
+        reference=uuid4(),
+        principal_user_id=principal_id,
+        session_id=session_id,
+        interaction_id=uuid4(),
+        report_artifact_ref=uuid4(),
+        request_fingerprint="request-hash",
+        prepared_report=prepared,
+        created_at=now,
+    )
 
 
 def _service(graph=None, **options):
@@ -336,6 +457,42 @@ def _service(graph=None, **options):
         **options,
     )
     return service, sessions, interactions, conversations
+
+
+@pytest.mark.asyncio
+async def test_async_submission_persists_status_and_returns_structured_result():
+    graph = FakeGraph()
+    scheduled = []
+    service, sessions, interactions, _ = _service(
+        graph,
+        background_task_scheduler=scheduled.append,
+    )
+    principal = _principal()
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte a fazenda",
+    )
+
+    operation_id = await service.submit_interaction(principal, session.session_id, request)
+
+    assert graph.calls == 0
+    assert interactions.records[operation_id].status == InteractionStatus.RUNNING
+    assert sessions.records[session.session_id].processing_lease is not None
+    assert len(scheduled) == 1
+    assert await service.submit_interaction(principal, session.session_id, request) == operation_id
+    assert len(scheduled) == 1
+
+    await scheduled.pop()
+    await scheduled.pop()
+    operation = await service.get_interaction_operation(principal, session.session_id, operation_id)
+
+    assert operation.status == "completed"
+    assert operation.result is not None
+    assert operation.result.response.kind == "question"
+    assert operation.result.created_at == interactions.records[operation_id].updated_at
+    assert sessions.records[session.session_id].processing_lease is None
 
 
 @pytest.mark.asyncio
@@ -376,6 +533,157 @@ async def test_message_is_sanitized_and_replay_counts_once():
     assert len(conversations.messages) == 2
     assert conversations.messages[0].sanitized_content.endswith("usuario@example.invalid")
     assert all(message.sequence == index for index, message in enumerate(conversations.messages, 1))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["context", "graph"])
+@pytest.mark.parametrize("renewal", ["refused", "error", "timeout"])
+async def test_lease_loss_cancels_processing_before_finalization(
+    monkeypatch, caplog, phase, renewal
+):
+    graph = FakeGraph()
+    service, sessions, interactions, conversations = _service(graph)
+    service._renew_seconds = 0.001
+    principal = _principal()
+    session = await service.create_session(principal)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def blocked_phase(*args, **kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    async def renew(*args, **kwargs):
+        await started.wait()
+        if renewal == "error":
+            raise RuntimeError("database unavailable")
+        if renewal == "timeout":
+            raise TimeoutError("database timeout")
+        return False
+
+    target, method = (
+        (service, "_build_interaction_context") if phase == "context" else (graph, "ainvoke")
+    )
+    monkeypatch.setattr(target, method, blocked_phase)
+    monkeypatch.setattr(sessions, "renew_lease", renew)
+    finalize = AsyncMock()
+    release = AsyncMock(wraps=sessions.release_lease)
+    monkeypatch.setattr(service, "_finalize_interaction", finalize)
+    monkeypatch.setattr(sessions, "release_lease", release)
+
+    with pytest.raises(ApplicationError) as caught:
+        await asyncio.wait_for(
+            service.create_interaction(
+                principal,
+                session.session_id,
+                MessageCommand(kind="message", client_message_id=uuid4(), message="Consultar lote"),
+            ),
+            timeout=5,
+        )
+
+    assert caught.value.code == ApplicationErrorCode.CONFLICT
+    assert stopped.is_set()
+    finalize.assert_not_awaited()
+    release.assert_awaited_once()
+    assert sessions.records[session.session_id].processing_lease is None
+    assert len(conversations.messages) == 1
+    assert next(iter(interactions.records.values())).status == InteractionStatus.RUNNING
+    if renewal != "refused":
+        assert "session lease renewal failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_request_cancellation_stops_processing_and_releases_lease(monkeypatch):
+    service, sessions, _, _ = _service(FakeGraph())
+    principal = _principal()
+    session = await service.create_session(principal)
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def blocked_context(*args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(service, "_build_interaction_context", blocked_context)
+    task = asyncio.create_task(
+        service.create_interaction(
+            principal,
+            session.session_id,
+            MessageCommand(kind="message", client_message_id=uuid4(), message="Consultar lote"),
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert task.cancelled()
+    assert stopped.is_set()
+    assert sessions.records[session.session_id].processing_lease is None
+
+
+@pytest.mark.asyncio
+async def test_partial_farm_revocation_blocks_replaying_persisted_interaction():
+    graph = FakeGraph()
+    service, sessions, _, _ = _service(graph)
+    farm_ids = (uuid4(), uuid4())
+    principal = ActorContext(user_id=uuid4(), farm_ids=farm_ids)
+    session = await service.create_session(principal)
+    request = MessageCommand(
+        kind="message",
+        client_message_id=uuid4(),
+        message="Consulte os dados da fazenda.",
+    )
+    first = await service.create_interaction(principal, session.session_id, request)
+    partially_authorized = ActorContext(user_id=principal.user_id, farm_ids=(farm_ids[0],))
+
+    with pytest.raises(ApplicationError) as denied:
+        await service.create_interaction(partially_authorized, session.session_id, request)
+
+    assert denied.value.code == ApplicationErrorCode.FORBIDDEN
+    assert "nova sessão" in denied.value.detail
+    assert graph.calls == 1
+    assert sessions.records[session.session_id].user_message_count == 1
+    assert first.session_id == session.session_id
+
+
+@pytest.mark.asyncio
+async def test_partial_farm_revocation_blocks_resuming_a_persisted_question():
+    graph = FakeGraph()
+    service, _, _, _ = _service(graph)
+    farm_ids = (uuid4(), uuid4())
+    principal = ActorContext(user_id=uuid4(), farm_ids=farm_ids)
+    session = await service.create_session(principal)
+    initial = await service.create_interaction(
+        principal,
+        session.session_id,
+        MessageCommand(
+            kind="message",
+            client_message_id=uuid4(),
+            message="Consulte os dados da fazenda.",
+        ),
+    )
+    answer = AnswerCommand(
+        kind="answer",
+        interaction_id=initial.interaction_id,
+        question_id=initial.response.question_id,
+        answer=TextAnswer(kind="text", text="Últimos 30 dias"),
+    )
+    partially_authorized = ActorContext(user_id=principal.user_id, farm_ids=(farm_ids[0],))
+
+    with pytest.raises(ApplicationError) as denied:
+        await service.create_interaction(partially_authorized, session.session_id, answer)
+
+    assert denied.value.code == ApplicationErrorCode.FORBIDDEN
+    assert graph.calls == 1
+    assert graph.state_configs == []
 
 
 @pytest.mark.asyncio
@@ -586,11 +894,236 @@ async def test_ambiguous_recipient_choice_resolves_to_protected_email_selector()
         new_recipient_selectors={},
     )
 
-    graph_answer, selectors, _, _ = result
+    graph_answer, selectors = result[:2]
     assert graph_answer == "[DESTINATARIO_3]"
     assert selectors["[DESTINATARIO_3]"]["value"] == "alex.silva@example.com"
     assert "[DESTINATARIO_1]" not in selectors
     assert selectors["[DESTINATARIO_2]"]["value"] == "Bruno"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("confirm", [True, False])
+async def test_email_confirmation_answer_is_bound_to_saved_report(confirm):
+    principal = _principal()
+    graph = FakeGraph()
+    repository = FakePreparedEmailRepository()
+    service, sessions, interactions, _ = _service(graph, email_preparations=repository)
+    session = await service.create_session(principal)
+    preparation = _prepared_email(principal.user_id, session.session_id)
+    repository.preparations = (preparation,)
+    source_interaction_id = uuid4()
+    question_id = uuid4()
+    now = _utcnow()
+    question = QuestionResult(
+        kind="question",
+        question_id=question_id,
+        input_type="confirmation",
+        prompt="Confirma o envio do relatório?",
+        reason_code="EMAIL_SEND_CONFIRMATION",
+        expires_at=now.replace(year=now.year + 1),
+    )
+    interactions.records[source_interaction_id] = InteractionRecord(
+        interaction_id=source_interaction_id,
+        session_id=session.session_id,
+        user_id=principal.user_id,
+        deduplication_key="confirmation",
+        kind=InteractionKind.MESSAGE,
+        sanitized_input="Enviar o relatório",
+        input_hash="confirmation-hash",
+        status=InteractionStatus.COMPLETED,
+        created_at=now,
+        updated_at=now,
+        result_json=InteractionOutcome(
+            session_id=session.session_id,
+            interaction_id=source_interaction_id,
+            public_request_id=uuid4(),
+            response=question,
+        ).model_dump_json(),
+    )
+    graph.question_id = str(question_id)
+    graph.state_values.update(
+        {
+            "question_id": str(question_id),
+            "send_intent_requested": True,
+            "send_intent_source_interaction_id": str(source_interaction_id),
+            "recipient_selectors": {"recipient-1": {"kind": "email", "value": "ana@example.com"}},
+            "email_send_confirmation_report_id": str(preparation.prepared_report.report_id),
+        }
+    )
+    answer = AnswerCommand(
+        kind="answer",
+        interaction_id=source_interaction_id,
+        question_id=question_id,
+        answer=ConfirmationAnswer(kind="confirmation", confirm=confirm),
+    )
+
+    result = await service._validate_answer(
+        sessions.records[session.session_id],
+        answer,
+        graph,
+        new_recipient_selectors={},
+    )
+
+    assert result[4] is True
+    if confirm:
+        assert result[5] == question_id
+        assert result[6] == preparation.prepared_report.report_id
+        assert result[7] == question.expires_at
+    else:
+        assert result[5:] == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_declining_email_confirmation_clears_pending_checkpoint():
+    principal = _principal()
+    graph = FakeGraph()
+    service, sessions, interactions, _ = _service(
+        graph,
+        email_preparations=FakePreparedEmailRepository(),
+    )
+    session = await service.create_session(principal)
+    source_interaction_id = uuid4()
+    question_id = uuid4()
+    now = _utcnow()
+    question = QuestionResult(
+        kind="question",
+        question_id=question_id,
+        input_type="confirmation",
+        prompt="Confirma o envio do relatório?",
+        reason_code="EMAIL_SEND_CONFIRMATION",
+        expires_at=now.replace(year=now.year + 1),
+    )
+    interactions.records[source_interaction_id] = InteractionRecord(
+        interaction_id=source_interaction_id,
+        session_id=session.session_id,
+        user_id=principal.user_id,
+        deduplication_key="confirmation",
+        kind=InteractionKind.MESSAGE,
+        sanitized_input="Enviar o relatório",
+        input_hash="confirmation-hash",
+        status=InteractionStatus.COMPLETED,
+        created_at=now,
+        updated_at=now,
+        result_json=InteractionOutcome(
+            session_id=session.session_id,
+            interaction_id=source_interaction_id,
+            public_request_id=uuid4(),
+            response=question,
+        ).model_dump_json(),
+    )
+    graph.question_id = str(question_id)
+    graph.state_values.update(
+        {
+            "question_id": str(question_id),
+            "send_intent_requested": True,
+            "send_intent_source_interaction_id": str(source_interaction_id),
+            "email_send_confirmation_report_id": str(uuid4()),
+        }
+    )
+    answer = AnswerCommand(
+        kind="answer",
+        interaction_id=source_interaction_id,
+        question_id=question_id,
+        answer=ConfirmationAnswer(kind="confirmation", confirm=False),
+    )
+
+    result = await service.create_interaction(principal, session.session_id, answer)
+
+    assert result.response.kind == "answer"
+    assert result.response.text == "Envio cancelado. Nenhum e-mail foi enviado."
+    assert graph.calls == 0
+    assert graph.state_values["question_id"] is None
+    assert graph.state_values["send_intent_requested"] is False
+    with pytest.raises(ApplicationError) as reused:
+        await service.create_interaction(
+            principal,
+            session.session_id,
+            answer.model_copy(
+                update={"answer": ConfirmationAnswer(kind="confirmation", confirm=True)}
+            ),
+        )
+    assert reused.value.code == ApplicationErrorCode.CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_explicit_send_intent_creates_persisted_confirmation_question():
+    principal = _principal()
+    graph = FakeSendConfirmationGraph()
+    repository = FakePreparedEmailRepository()
+    service, _, _, _ = _service(graph, email_preparations=repository)
+    session = await service.create_session(principal)
+    repository.preparations = (_prepared_email(principal.user_id, session.session_id),)
+    accepted = SimpleNamespace(
+        request=SimpleNamespace(
+            send_intent_requested=True,
+            confirmed_send_question_id=None,
+            send_confirmation=False,
+            recipient_selectors={},
+        ),
+        principal=principal,
+        session=session,
+        graph=graph,
+        running=SimpleNamespace(interaction_id=uuid4()),
+    )
+    context = SimpleNamespace(graph_config={"configurable": {"thread_id": str(session.session_id)}})
+    state = {
+        "final_answer": "Relatório preparado.",
+        "ordered_tasks": (
+            SimpleNamespace(task_id="secretary-task", agent=SimpleNamespace(value="secretary")),
+        ),
+    }
+
+    updated = await service._attach_send_confirmation(accepted, context, state)
+
+    assert updated["clarification_request"].input_type == "confirmation"
+    assert updated["clarification_request"].reason_code == "EMAIL_SEND_CONFIRMATION"
+    assert "Ana <ana@example.com>" in updated["clarification_question"]
+    assert "Relatório de teste" in updated["clarification_question"]
+    assert updated["question_id"] == graph.question_id
+    assert datetime.fromisoformat(updated["clarification_expires_at"]).microsecond % 1000 == 0
+    assert graph.state_values["email_send_confirmation_report_id"] == str(
+        repository.preparations[0].prepared_report.report_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatched_explicit_send_does_not_attach_a_late_confirmation_question():
+    principal = _principal()
+    graph = FakeSendConfirmationGraph()
+    repository = FakePreparedEmailRepository()
+    service, _, _, _ = _service(graph, email_preparations=repository)
+    session = await service.create_session(principal)
+    repository.preparations = (_prepared_email(principal.user_id, session.session_id),)
+    accepted = SimpleNamespace(
+        request=SimpleNamespace(
+            send_intent_requested=True,
+            confirmed_send_question_id=None,
+            send_confirmation=False,
+            recipient_selectors={},
+        ),
+        principal=principal,
+        session=session,
+        graph=graph,
+        running=SimpleNamespace(interaction_id=uuid4()),
+    )
+    context = SimpleNamespace(graph_config={"configurable": {"thread_id": str(session.session_id)}})
+    state = {
+        "final_answer": "O provedor aceitou o despacho.",
+        "email_dispatch_evidence": EmailDispatchEvidence(
+            status="accepted",
+            confirmed=True,
+            operation_id=str(uuid4()),
+            report_id=str(repository.preparations[0].prepared_report.report_id),
+            recipient_count=1,
+            message="O provedor aceitou o despacho.",
+        ),
+    }
+
+    updated = await service._attach_send_confirmation(accepted, context, state)
+
+    assert updated is state
+    assert "clarification_request" not in updated
+    assert graph.updates == []
 
 
 class FakeSummaryRepository:

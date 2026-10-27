@@ -1,5 +1,6 @@
 """Porta de armazenamento protegido das preparações do MCP de e-mail."""
 
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -51,6 +52,17 @@ class EmailPreparationRepository(Protocol):
     async def reserve_send_authorization(
         self, authorization: EmailSendAuthorization
     ) -> EmailSendAuthorization: ...
+
+    async def confirm_send_authorization(
+        self,
+        *,
+        principal_user_id: UUID,
+        session_id: UUID,
+        source_interaction_id: UUID,
+        question_id: UUID,
+        question_expires_at: datetime,
+        now: datetime,
+    ) -> EmailSendAuthorization | None: ...
 
     async def get_send_authorization(
         self,

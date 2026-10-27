@@ -141,6 +141,7 @@ def _state():
     config = {
         "configurable": {
             "argos_user_id": str(user_id),
+            "argos_firebase_uid": "firebase-report-test-user",
             "argos_authorized_property_ids": (str(property_id),),
             "argos_request_id": str(uuid4()),
         }
@@ -165,6 +166,8 @@ async def test_farm_tool_stores_envelope_and_returns_only_its_opaque_reference()
 
     class FakeDataClient:
         async def resolve_report_lot(self, **kwargs):
+            assert kwargs["firebase_uid"] == config["configurable"]["argos_firebase_uid"]
+            assert kwargs["principal_user_id"] == user_id
             return ReportLotResolution(
                 candidates=(
                     ReportLotCandidate(
@@ -179,6 +182,8 @@ async def test_farm_tool_stores_envelope_and_returns_only_its_opaque_reference()
             )
 
         async def get_lot_report_source(self, **kwargs):
+            assert kwargs["firebase_uid"] == config["configurable"]["argos_firebase_uid"]
+            assert kwargs["principal_user_id"] == user_id
             return envelope
 
     repository = _FakeArtifactRepository()

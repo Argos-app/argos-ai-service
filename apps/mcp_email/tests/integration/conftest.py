@@ -47,8 +47,6 @@ class McpHarness:
             PYTHONUNBUFFERED="1",
             MCP_EMAIL_MONGO_URI=MONGO_URI,
             MCP_EMAIL_MONGO_DATABASE=self.database_name,
-            MCP_EMAIL_REPORTS_COLLECTION="prepared_reports",
-            MCP_EMAIL_DISPATCH_COLLECTION="email_dispatches",
             MCP_EMAIL_SQL_DSN=(
                 "postgresql://email_test:email_test_local_only@127.0.0.1:54328/"
                 + self.database_name

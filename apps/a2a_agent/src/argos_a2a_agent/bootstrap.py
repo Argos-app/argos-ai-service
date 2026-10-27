@@ -420,7 +420,7 @@ async def _create_observability_runtime(
     RedisUserUsageCounter | None,
     ObservationCollector,
 ]:
-    if settings.observability_mongo_uri is None or settings.observability_collection is None:
+    if settings.observability_mongo_uri is None:
         return None, None, None, DisabledObservationCollector()
     client = None
     writer = None
