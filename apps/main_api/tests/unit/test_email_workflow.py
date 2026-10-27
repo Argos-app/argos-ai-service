@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from hashlib import sha256
 from types import SimpleNamespace
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from app.agent_schemas.synthesis import EmailDispatchEvidence
@@ -739,7 +739,7 @@ def test_explicit_confirmation_rejects_ambiguous_prepared_reports():
     assert client.calls == []
 
 
-def test_explicit_send_reservation_waits_for_structured_confirmation():
+def test_explicit_send_reservation_dispatches_without_extra_confirmation():
     artifact, property_id = _artifact()
     prepared = PreparedReport(
         report_id=uuid4(),
@@ -766,28 +766,18 @@ def test_explicit_send_reservation_waits_for_structured_confirmation():
     repository.authorizations[
         (pending.principal_user_id, pending.session_id, pending.source_interaction_id)
     ] = pending
-    question_id = config.pop("argos_confirmed_send_question_id")
-    question_expiry = config.pop("argos_confirmed_send_question_expires_at")
+    config.pop("argos_confirmed_send_question_id")
+    config.pop("argos_confirmed_send_question_expires_at")
     config.pop("argos_confirmed_send_report_id")
+    config["argos_send_intent_requested"] = True
 
-    waiting = json.loads(asyncio.run(workflow.send(configurable=config)))
-    assert waiting["status"] == "confirmation_required"
-    assert client.calls == []
-
-    config.update(
-        {
-            "argos_confirmed_send_question_id": question_id,
-            "argos_confirmed_send_report_id": str(prepared.report_id),
-            "argos_confirmed_send_question_expires_at": question_expiry,
-        }
-    )
     sent = json.loads(asyncio.run(workflow.send(configurable=config)))
-    promoted = repository.authorizations[
+    reserved = repository.authorizations[
         (pending.principal_user_id, pending.session_id, pending.source_interaction_id)
     ]
     assert sent["status"] == "accepted"
-    assert promoted.origin == SendAuthorizationOrigin.CONFIRMED_QUESTION
-    assert promoted.question_id == UUID(question_id)
+    assert reserved.origin == SendAuthorizationOrigin.EXPLICIT_REQUEST
+    assert reserved.question_id is None
     assert [name for name, _, _ in client.calls] == ["send_report"]
 
 

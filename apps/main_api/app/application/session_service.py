@@ -796,6 +796,7 @@ class SessionApplicationService:
             or accepted.request.send_confirmation
             or self._email_preparations is None
             or state.get("clarification_request") is not None
+            or state.get("email_dispatch_evidence") is not None
         ):
             return state
 

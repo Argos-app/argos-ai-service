@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.agent_schemas.inputs import QuestionFormattingRequest, QuestionOption
+from app.agent_schemas.synthesis import EmailDispatchEvidence
 from app.application.contracts.interactions import (
     AnswerCommand,
     ChoiceAnswer,
@@ -1083,6 +1084,46 @@ async def test_explicit_send_intent_creates_persisted_confirmation_question():
     assert graph.state_values["email_send_confirmation_report_id"] == str(
         repository.preparations[0].prepared_report.report_id
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatched_explicit_send_does_not_attach_a_late_confirmation_question():
+    principal = _principal()
+    graph = FakeSendConfirmationGraph()
+    repository = FakePreparedEmailRepository()
+    service, _, _, _ = _service(graph, email_preparations=repository)
+    session = await service.create_session(principal)
+    repository.preparations = (_prepared_email(principal.user_id, session.session_id),)
+    accepted = SimpleNamespace(
+        request=SimpleNamespace(
+            send_intent_requested=True,
+            confirmed_send_question_id=None,
+            send_confirmation=False,
+            recipient_selectors={},
+        ),
+        principal=principal,
+        session=session,
+        graph=graph,
+        running=SimpleNamespace(interaction_id=uuid4()),
+    )
+    context = SimpleNamespace(graph_config={"configurable": {"thread_id": str(session.session_id)}})
+    state = {
+        "final_answer": "O provedor aceitou o despacho.",
+        "email_dispatch_evidence": EmailDispatchEvidence(
+            status="accepted",
+            confirmed=True,
+            operation_id=str(uuid4()),
+            report_id=str(repository.preparations[0].prepared_report.report_id),
+            recipient_count=1,
+            message="O provedor aceitou o despacho.",
+        ),
+    }
+
+    updated = await service._attach_send_confirmation(accepted, context, state)
+
+    assert updated is state
+    assert "clarification_request" not in updated
+    assert graph.updates == []
 
 
 class FakeSummaryRepository:
