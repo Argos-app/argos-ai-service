@@ -92,6 +92,7 @@ Thumbs.db
 !docs/plano-persistencia-sessoes-memoria.md
 !docs/configuracao-mongodb.md
 !docs/docker-local.md
+!docs/deploy-render.md
 !docs/kubernetes-local.md
 !docs/api-main-api.md
 !docs/dicionario-mongodb-bi.md

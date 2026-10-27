@@ -120,15 +120,20 @@ operação não ocorreu. Mongo não aplica TTL à collection de observabilidade;
 retenção e exclusão são decisão operacional.
 
 O Redis mantém um hash por `user_id`, compartilhado pelo `main_api` e pelo A2A.
-Cada requisição com identidade válida incrementa `calls`; cada observação
-terminal de modelo/embedding incrementa `model_calls` e soma os tokens
-conhecidos. Quando o provider não retorna tokens completos, o sistema soma o que
-conhece e incrementa `unknown_token_calls`. Os tokens são deduplicados pelo ID
-da observação. O hash expira 24 horas depois do último incremento; cada
-atualização renova o TTL. Isso mede uso acumulado durante a atividade recente do
-usuário, e não uma janela móvel exata de 24 horas. Os contadores são
-independentes do registro Mongo, mas são best effort: falhas Redis,
-encerramentos antes do flush da fila ou reinício do Redis podem perder
+O hash também armazena `name` e `email`, atualizados pelo `main_api` a partir do
+cadastro PostgreSQL carregado em cada requisição autenticada. Esses campos
+acompanham o TTL do hash; atualizações de tokens pelo A2A preservam a
+identidade. Hashes antigos ou criados somente por observações podem não ter
+esses campos: o ranking retorna `null` até a próxima chamada autenticada do
+usuário. Cada requisição com identidade válida incrementa `calls`; cada
+observação terminal de modelo/embedding incrementa `model_calls` e soma os
+tokens conhecidos. Quando o provider não retorna tokens completos, o sistema
+soma o que conhece e incrementa `unknown_token_calls`. Os tokens são
+deduplicados pelo ID da observação. O hash expira 24 horas depois do último
+incremento; cada atualização renova o TTL. Isso mede uso acumulado durante a
+atividade recente do usuário, e não uma janela móvel exata de 24 horas. Os
+contadores são independentes do registro Mongo, mas são best effort: falhas
+Redis, encerramentos antes do flush da fila ou reinício do Redis podem perder
 incrementos. O Redis do Compose local não persiste em disco.
 
 Para execução individual, configure `MAIN_API_OBSERVABILITY_REDIS_URL` e/ou
@@ -147,10 +152,11 @@ $env:USER_USAGE_REDIS_KEY_PREFIX = "argos:usage:users:v1"
 python scripts/observability/rank_usage_24h.py
 ```
 
-O relatório fornece ordenações por chamadas e por tokens, além de chamadas de
-modelo com contagem de tokens incompleta. Ele inclui somente usuários cujas
-chaves ainda não expiraram e marca `completeness=best_effort_incomplete`; não é
-um ledger de faturamento nem um histórico durável.
+O relatório inclui nome e e-mail e fornece ordenações por chamadas e por tokens,
+além de chamadas de modelo com contagem de tokens incompleta. Ele inclui somente
+usuários cujas chaves ainda não expiraram e marca
+`completeness=best_effort_incomplete`; não é um ledger de faturamento nem um
+histórico durável.
 
 Para exportação de BI, use o contrato e a paginação idempotente descritos em
 [observabilidade-extracao-mongo.md](observabilidade-extracao-mongo.md). Para

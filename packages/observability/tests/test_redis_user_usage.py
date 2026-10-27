@@ -20,14 +20,14 @@ class _Pipeline:
         return None
 
     def __getattr__(self, command):
-        def add(*args):
-            self.commands.append((command, args))
+        def add(*args, **kwargs):
+            self.commands.append((command, args, kwargs))
 
         return add
 
     async def execute(self):
-        for command, args in self.commands:
-            getattr(self.client, command)(*args)
+        for command, args, kwargs in self.commands:
+            getattr(self.client, command)(*args, **kwargs)
 
 
 class _Redis:
@@ -42,6 +42,9 @@ class _Redis:
     def hincrby(self, key, field, amount):
         values = self.hashes.setdefault(key, {})
         values[field] = int(values.get(field, 0)) + amount
+
+    def hset(self, key, *, mapping):
+        self.hashes.setdefault(key, {}).update(mapping)
 
     def expire(self, key, ttl):
         self.expirations[key] = ttl
@@ -110,11 +113,62 @@ def test_calls_and_reported_tokens_share_a_24_hour_user_key():
 
         assert row == {
             "user_id": str(user_id),
+            "name": None,
+            "email": None,
             "calls": 1,
             "tokens": 21,
             "model_calls": 3,
             "unknown_token_calls": 2,
         }
         assert redis.expirations[usage.key_for(user_id)] == 86_400
+
+    asyncio.run(run())
+
+
+def test_identity_refresh_preserves_counters_and_survives_model_updates():
+    async def run():
+        redis = _Redis()
+        usage = RedisUserUsageCounter(redis)
+        user_id = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad102")
+        await usage.increment_call(user_id, name="José Antigo", email="antigo@example.test")
+        await usage.record_model_usage(user_id, {"total_tokens": 10}, observation_id="model-1")
+        await usage.increment_call(user_id, name="José Atual", email="atual@example.test")
+        await usage.record_model_usage(user_id, {"total_tokens": 5}, observation_id="a2a-1")
+
+        [row] = await usage.list_users()
+        assert row == {
+            "user_id": str(user_id),
+            "name": "José Atual",
+            "email": "atual@example.test",
+            "calls": 2,
+            "tokens": 15,
+            "model_calls": 2,
+            "unknown_token_calls": 0,
+        }
+        assert redis.expirations[usage.key_for(user_id)] == 86_400
+
+    asyncio.run(run())
+
+
+def test_ranking_decodes_identity_bytes_and_keeps_legacy_users_without_identity():
+    async def run():
+        redis = _Redis()
+        usage = RedisUserUsageCounter(redis)
+        identified = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad102")
+        legacy = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad103")
+        redis.hashes[usage.key_for(identified)] = {
+            b"name": "José".encode(),
+            b"email": b"jose@example.test",
+            b"tokens": b"42",
+        }
+        redis.hashes[usage.key_for(legacy)] = {b"calls": b"3"}
+
+        first, second = await usage.list_users()
+        assert first["name"] == "José"
+        assert first["email"] == "jose@example.test"
+        assert first["tokens"] == 42
+        assert second["name"] is None
+        assert second["email"] is None
+        assert second["calls"] == 3
 
     asyncio.run(run())

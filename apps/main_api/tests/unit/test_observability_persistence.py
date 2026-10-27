@@ -272,6 +272,32 @@ async def test_writer_limits_pending_items_and_drains_on_close():
 
 
 @pytest.mark.asyncio
+async def test_writer_flushes_each_observation_once_in_multi_item_batch():
+    repository = FakeRepository()
+    writer = MongoObservationWriter(
+        repository,
+        max_items=10,
+        max_bytes=64 * 1024,
+        max_document_bytes=16 * 1024,
+        batch_size=10,
+        batch_interval_ms=250,
+        max_attempts=1,
+    )
+    started = _observation()
+    terminal = _observation(status=ObservationStatus.SUCCEEDED, operation_id=started.id)
+    independent = _observation(status=ObservationStatus.SUCCEEDED)
+    await writer.start()
+    for observation in (started, terminal, independent):
+        assert writer.try_submit(observation) == SubmissionResult.ACCEPTED
+    await writer.close()
+
+    assert len(repository.documents) == 3
+    assert [
+        document["status"] for document in repository.documents if document["_id"] == started.id
+    ] == ["started", "succeeded"]
+
+
+@pytest.mark.asyncio
 async def test_writer_limits_queued_bytes_per_process():
     repository = FakeRepository()
     observation = _observation()

@@ -198,7 +198,7 @@ class MongoObservationWriter:
         groups: dict[str, list[_QueuedDocument]] = {}
         for item in batch:
             groups.setdefault(item.document["_id"], []).append(item)
-            await asyncio.gather(*(self._write_group(items) for items in groups.values()))
+        await asyncio.gather(*(self._write_group(items) for items in groups.values()))
 
     async def _write_group(self, items: list[_QueuedDocument]) -> None:
         for item in items:
