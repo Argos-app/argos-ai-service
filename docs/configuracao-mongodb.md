@@ -41,26 +41,27 @@ passados aos containers.
 
 Os nomes são fixos no código e não podem ser sobrescritos por ambiente:
 
-| Sufixo                          | Padrão                             | Conteúdo                                                                              |
-| ------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------- |
-| `SESSIONS`                      | `ai_sessions`                      | Sessões e estado de acesso.                                                           |
-| `INTERACTIONS`                  | `ai_interactions`                  | Interações e estado de execução; também usada pelo repositório de trabalho da sessão. |
-| `MESSAGES`                      | `ai_messages`                      | Mensagens públicas da conversa; também usada pelo repositório de trabalho da sessão.  |
-| `EXECUTION_EVENTS`              | `ai_execution_events`              | Eventos de execução.                                                                  |
-| `SESSION_SUMMARIES`             | `ai_session_summaries`             | Resumos progressivos.                                                                 |
-| `USER_MEMORY`                   | `ai_user_memory`                   | Preferências limitadas do usuário.                                                    |
-| `REPORT_ARTIFACTS`              | `ai_report_artifacts`              | Artefatos de relatório.                                                               |
-| `EMAIL_PREPARATIONS`            | `ai_email_preparations`            | Preparações de e-mail criadas pelo principal.                                         |
-| `PENDING_RECIPIENT_RESOLUTIONS` | `ai_pending_recipient_resolutions` | Resoluções pendentes de destinatário.                                                 |
-| `EMAIL_SEND_AUTHORIZATIONS`     | `ai_email_send_authorizations`     | Autorizações de envio.                                                                |
-| `EMAIL_OPERATION_REFERENCES`    | `ai_email_operation_references`    | Referências idempotentes e último estado conhecido das operações de e-mail.           |
-| `LANGGRAPH_CHECKPOINTS`         | `ai_langgraph_checkpoints`         | Checkpoints do grafo.                                                                 |
-| `LANGGRAPH_CHECKPOINT_WRITES`   | `ai_langgraph_checkpoint_writes`   | Escritas do checkpointer.                                                             |
+| Sufixo                        | Padrão                           | Conteúdo                                                                              |
+| ----------------------------- | -------------------------------- | ------------------------------------------------------------------------------------- |
+| `SESSIONS`                    | `ai_sessions`                    | Sessões e estado de acesso.                                                           |
+| `INTERACTIONS`                | `ai_interactions`                | Interações e estado de execução; também usada pelo repositório de trabalho da sessão. |
+| `MESSAGES`                    | `ai_messages`                    | Mensagens públicas da conversa; também usada pelo repositório de trabalho da sessão.  |
+| `EXECUTION_EVENTS`            | `ai_execution_events`            | Eventos de execução.                                                                  |
+| `SESSION_SUMMARIES`           | `ai_session_summaries`           | Resumos progressivos.                                                                 |
+| `USER_MEMORY`                 | `ai_user_memory`                 | Preferências limitadas do usuário.                                                    |
+| `REPORT_ARTIFACTS`            | `ai_report_artifacts`            | Artefatos de relatório.                                                               |
+| `EMAIL_WORKFLOWS`             | `ai_email_workflows`             | Preparações, perguntas pendentes, autorizações e referências de operação de e-mail.   |
+| `LANGGRAPH_CHECKPOINTS`       | `ai_langgraph_checkpoints`       | Checkpoints do grafo.                                                                 |
+| `LANGGRAPH_CHECKPOINT_WRITES` | `ai_langgraph_checkpoint_writes` | Escritas do checkpointer.                                                             |
 
 Os nomes são distintos dentro do serviço. A observabilidade principal usa
 `ai_observations`. As collections do MCP de e-mail são
 `ai_email_prepared_reports` e `ai_email_dispatches`, distintas das collections
 internas do principal.
+
+`ai_email_workflows` discrimina os documentos por `record_type` e preserva os
+IDs e prazos de cada tipo. A referência da operação usa `_id="operation:<UUID>"`
+para coexistir com a autorização de mesmo ID. O índice TTL usa `purge_at`.
 
 ## Migração dos dados antigos do MCP de e-mail
 

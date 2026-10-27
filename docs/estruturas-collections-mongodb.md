@@ -15,27 +15,24 @@ string ou UUID BSON, conforme configuração.
 
 ## Inventário
 
-| Serviço       | Collection                         | Acesso                           | Finalidade                                                      |
-| ------------- | ---------------------------------- | -------------------------------- | --------------------------------------------------------------- |
-| `main_api`    | `ai_sessions`                      | Leitura e escrita                | Sessões, titularidade, fazendas e lease de processamento.       |
-| `main_api`    | `ai_interactions`                  | Leitura e escrita                | Entrada, deduplicação, estado e resultado público da interação. |
-| `main_api`    | `ai_messages`                      | Leitura e escrita                | Mensagens sanitizadas da conversa e respostas estruturadas.     |
-| `main_api`    | `ai_execution_events`              | Leitura e escrita                | Eventos sanitizados de execução de agentes e ferramentas.       |
-| `main_api`    | `ai_session_summaries`             | Leitura e escrita                | Resumo corrente de cada sessão.                                 |
-| `main_api`    | `ai_user_memory`                   | Leitura e escrita                | Preferências limitadas do usuário entre sessões.                |
-| `main_api`    | `ai_report_artifacts`              | Leitura e escrita                | Envelopes assinados de relatórios, com escopo e validade.       |
-| `main_api`    | `ai_email_preparations`            | Leitura e escrita                | Relatórios completos preparados para envio.                     |
-| `main_api`    | `ai_pending_recipient_resolutions` | Leitura e escrita                | Perguntas pendentes para resolver destinatários.                |
-| `main_api`    | `ai_email_send_authorizations`     | Leitura e escrita                | Autorizações imutáveis para operações de envio.                 |
-| `main_api`    | `ai_email_operation_references`    | Leitura e escrita                | Vínculo da autorização local à operação do MCP de e-mail.       |
-| `main_api`    | `ai_langgraph_checkpoints`         | Leitura e escrita pelo LangGraph | Checkpoints de estado do grafo.                                 |
-| `main_api`    | `ai_langgraph_checkpoint_writes`   | Leitura e escrita pelo LangGraph | Escritas pendentes/associadas aos checkpoints.                  |
-| `main_api`    | `ai_observations`                  | Leitura e escrita                | Observabilidade técnica do serviço principal.                   |
-| MCP de e-mail | `ai_email_prepared_reports`        | Leitura e escrita                | Relatórios e anexos prontos para envio.                         |
-| MCP de e-mail | `ai_email_dispatches`              | Leitura e escrita                | Estado e idempotência das tentativas de envio.                  |
-| MCP de dados  | `cattle_documents`                 | Somente leitura                  | Histórico documental de bovinos por propriedade.                |
-| MCP de dados  | `medicine_documents`               | Somente leitura                  | Detalhes documentais de medicamentos.                           |
-| A2A           | `ai_a2a_observations`              | Leitura e escrita                | Observabilidade técnica do serviço A2A.                         |
+| Serviço       | Collection                       | Acesso                           | Finalidade                                                      |
+| ------------- | -------------------------------- | -------------------------------- | --------------------------------------------------------------- |
+| `main_api`    | `ai_sessions`                    | Leitura e escrita                | Sessões, titularidade, fazendas e lease de processamento.       |
+| `main_api`    | `ai_interactions`                | Leitura e escrita                | Entrada, deduplicação, estado e resultado público da interação. |
+| `main_api`    | `ai_messages`                    | Leitura e escrita                | Mensagens sanitizadas da conversa e respostas estruturadas.     |
+| `main_api`    | `ai_execution_events`            | Leitura e escrita                | Eventos sanitizados de execução de agentes e ferramentas.       |
+| `main_api`    | `ai_session_summaries`           | Leitura e escrita                | Resumo corrente de cada sessão.                                 |
+| `main_api`    | `ai_user_memory`                 | Leitura e escrita                | Preferências limitadas do usuário entre sessões.                |
+| `main_api`    | `ai_report_artifacts`            | Leitura e escrita                | Envelopes assinados de relatórios, com escopo e validade.       |
+| `main_api`    | `ai_email_workflows`             | Leitura e escrita                | Preparações, perguntas, autorizações e recibos de envio.        |
+| `main_api`    | `ai_langgraph_checkpoints`       | Leitura e escrita pelo LangGraph | Checkpoints de estado do grafo.                                 |
+| `main_api`    | `ai_langgraph_checkpoint_writes` | Leitura e escrita pelo LangGraph | Escritas pendentes/associadas aos checkpoints.                  |
+| `main_api`    | `ai_observations`                | Leitura e escrita                | Observabilidade técnica do serviço principal.                   |
+| MCP de e-mail | `ai_email_prepared_reports`      | Leitura e escrita                | Relatórios e anexos prontos para envio.                         |
+| MCP de e-mail | `ai_email_dispatches`            | Leitura e escrita                | Estado e idempotência das tentativas de envio.                  |
+| MCP de dados  | `cattle_documents`               | Somente leitura                  | Histórico documental de bovinos por propriedade.                |
+| MCP de dados  | `medicine_documents`             | Somente leitura                  | Detalhes documentais de medicamentos.                           |
+| A2A           | `ai_a2a_observations`            | Leitura e escrita                | Observabilidade técnica do serviço A2A.                         |
 
 Os nomes, database compartilhado e configurações estão em
 [`configuracao-mongodb.md`](configuracao-mongodb.md). O dicionário voltado a BI
@@ -115,13 +112,13 @@ resposta; não substitui nem altera o contrato HTTP de perguntas e respostas.
 
 ### `ai_execution_events`
 
-Um documento por chamada de agente ou ferramenta. Armazena apenas conteúdo
-sanitizado; não é a coleção de métricas de custo. `messages` pode registrar
-chamadas e respostas de ferramentas dentro da execução.
+Um documento por chamada de agente ou ferramenta. Começa com `started` e recebe
+o resultado terminal no mesmo `_id` (UUID da invocação); os dois identificadores
+devem ser iguais.
 
 ```jsonc
 {
-	"_id": "<event UUID>",
+	"_id": "<invocation UUID>",
 	"invocation_id": "<invocation UUID>",
 	"session_id": "<session UUID>",
 	"interaction_id": "<interaction UUID>",
@@ -229,15 +226,17 @@ usado pelo índice TTL e fica um dia após `expires_at`.
 }
 ```
 
-### `ai_email_preparations`
+### `ai_email_workflows`
 
-Guarda a preparação completa de e-mail no principal, vinculada ao artefato
-original e ao escopo de usuário/sessão. `prepared_report` segue o contrato
-`PreparedReport`; `purge_at` permite remoção TTL um dia depois da validade.
+Consolida os quatro tipos de estado de e-mail da Main API. `record_type`
+identifica preparação, pergunta pendente, autorização ou referência de operação.
+Os campos e prazos individuais são preservados e o índice TTL remove registros
+conforme `purge_at`. Os MCPs mantêm suas collections próprias.
 
 ```jsonc
 {
 	"_id": "<preparation reference UUID>",
+	"record_type": "preparation",
 	"principal_user_id": "<internal user UUID>",
 	"session_id": "<session UUID>",
 	"interaction_id": "<interaction UUID>",
@@ -270,7 +269,13 @@ original e ao escopo de usuário/sessão. `prepared_report` segue o contrato
 }
 ```
 
-### `ai_pending_recipient_resolutions`
+As perguntas pendentes usam `record_type: "pending_resolution"` e
+`_id=question_id`. Autorizações usam `record_type: "authorization"` e
+`_id=authorization_id`. Referências usam `record_type: "operation_reference"` e
+`_id="operation:<authorization UUID>"`. Os campos específicos permanecem iguais
+aos modelos atuais.
+
+### Campos de pergunta pendente
 
 Armazena uma pergunta pendente de resolução de destinatário. As opções mantêm um
 rótulo de apresentação e um `RecipientSelector`; o prazo de validade também é
@@ -299,7 +304,7 @@ usado para rejeitar respostas atrasadas. `purge_at` é um dia após a validade.
 }
 ```
 
-### `ai_email_send_authorizations`
+### Campos de autorização
 
 Registra uma autorização imutável para uma ação de envio específica. Os
 fingerprints impedem trocar a preparação, o conteúdo ou os destinatários após a
@@ -324,25 +329,6 @@ ficam vinculados à autorização.
 	"question_id": "<question UUID or null>",
 	"question_expires_at": "<BSON UTC datetime or null>",
 	"purge_at": "<expires_at plus one day>",
-}
-```
-
-### `ai_email_operation_references`
-
-Liga a autorização local à operação canônica criada pelo MCP de e-mail. O status
-é apenas o último estado conhecido pelo principal; `purge_at` fica 31 dias
-depois do registro.
-
-```jsonc
-{
-	"_id": "<authorization UUID>",
-	"principal_user_id": "<internal user UUID>",
-	"session_id": "<session UUID>",
-	"operation_id": "<MCP operation UUID>",
-	"recorded_at": "<BSON UTC datetime>",
-	"last_known_status": "pending | accepted | partial | failed | unknown | null",
-	"last_known_updated_at": "<BSON UTC datetime or null>",
-	"purge_at": "<recorded_at plus 31 days>",
 }
 ```
 
@@ -469,8 +455,8 @@ configuração de conexão.
 ### `ai_email_prepared_reports`
 
 Documento canônico do relatório preparado no MCP de e-mail. Contém corpo,
-destinatários e anexos codificados em Base64. Documentos antigos podem não ter
-`attachments`; o leitor trata esse campo como lista vazia.
+destinatários e anexos codificados em Base64. `attachments` e `state` são campos
+obrigatórios no documento persistido.
 
 ```jsonc
 {
@@ -631,8 +617,7 @@ documento de origem são ignorados pelo modelo.
 - A documentação registra os documentos que o código serializa ou valida; os
   exemplos não criam validação adicional nem alteram contratos de API.
 - Campos opcionais podem ser persistidos como `null` em serializers do
-  `main_api`; observabilidade omite campos nulos. Documentos legados também
-  podem não conter campos introduzidos depois, como `attachments`.
+  `main_api`; observabilidade omite campos nulos.
 - Índices, unicidade, TTL e transações continuam definidos pelo bootstrap e
   pelos repositórios. Consulte os adapters antes de planejar uma migração.
 - Não aplique atualizações manuais ao formato interno do checkpointer. Para

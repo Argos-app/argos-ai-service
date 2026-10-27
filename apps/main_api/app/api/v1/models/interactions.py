@@ -6,31 +6,31 @@ from uuid import UUID
 
 from pydantic import Field, model_validator
 
-from app.api.v1.models.base import StrictModel
+from app.application.contracts.base import ApplicationModel
 
 
-class QuestionOption(StrictModel):
+class QuestionOption(ApplicationModel):
     option_id: str
     label: str
 
 
-class MessageInteraction(StrictModel):
+class MessageInteraction(ApplicationModel):
     kind: Literal["message"]
     client_message_id: UUID
     message: str = Field(min_length=1, max_length=8000)
 
 
-class AnswerText(StrictModel):
+class AnswerText(ApplicationModel):
     kind: Literal["text"]
     text: str = Field(min_length=1, max_length=8000)
 
 
-class AnswerChoice(StrictModel):
+class AnswerChoice(ApplicationModel):
     kind: Literal["choice"]
     option_id: str = Field(min_length=1, max_length=128)
 
 
-class AnswerConfirmation(StrictModel):
+class AnswerConfirmation(ApplicationModel):
     kind: Literal["confirmation"]
     confirm: bool
 
@@ -41,7 +41,7 @@ AnswerValue = Annotated[
 ]
 
 
-class AnswerInteraction(StrictModel):
+class AnswerInteraction(ApplicationModel):
     kind: Literal["answer"]
     interaction_id: UUID
     question_id: UUID
@@ -54,7 +54,7 @@ InteractionInput = Annotated[
 ]
 
 
-class QuestionResponse(StrictModel):
+class QuestionResponse(ApplicationModel):
     kind: Literal["question"]
     question_id: UUID
     input_type: Literal["free_text", "single_choice", "confirmation"]
@@ -75,7 +75,7 @@ class QuestionResponse(StrictModel):
         return self
 
 
-class AnswerResponse(StrictModel):
+class AnswerResponse(ApplicationModel):
     kind: Literal["answer"]
     text: str
 
@@ -86,7 +86,7 @@ ResponseValue = Annotated[
 ]
 
 
-class InteractionResult(StrictModel):
+class InteractionResult(ApplicationModel):
     schema_version: Literal["1"] = "1"
     status: Literal["completed", "degraded"] = "completed"
     degradation_reasons: list[str] = Field(default_factory=list)
@@ -97,13 +97,13 @@ class InteractionResult(StrictModel):
     response: ResponseValue
 
 
-class InteractionAccepted(StrictModel):
+class InteractionAccepted(ApplicationModel):
     operation_id: UUID
     status: Literal["accepted"] = "accepted"
     poll_after_ms: int = 1000
 
 
-class InteractionOperationStatus(StrictModel):
+class InteractionOperationStatus(ApplicationModel):
     operation_id: UUID
     status: Literal["accepted", "running", "completed", "degraded", "failed", "interrupted"]
     result: InteractionResult | None = None

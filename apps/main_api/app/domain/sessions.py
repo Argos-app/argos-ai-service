@@ -184,6 +184,8 @@ class ExecutionEvent:
     completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        if self.event_id != self.invocation_id:
+            raise ValueError("event_id deve ser igual a invocation_id")
         require_utc(self.created_at, "created_at")
         if self.completed_at is not None:
             require_utc(self.completed_at, "completed_at")

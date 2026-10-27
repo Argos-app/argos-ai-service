@@ -12,3 +12,6 @@
 !packages/contracts/**
 !packages/security/
 !packages/security/**
+!packages/observability/
+!packages/observability/**
+!packages/model_options.py

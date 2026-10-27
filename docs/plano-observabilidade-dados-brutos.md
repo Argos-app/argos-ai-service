@@ -145,9 +145,9 @@ válidos em outros checkouts do repositório.
    workflow/checkpoint durante esclarecimentos.
 9. **A2A isolado:** SDK oficial, autenticação/delegação, Documental, Legal e
    Mixed, geração e embeddings HTTP OpenAI-compatible, PostgreSQL e Qdrant.
-10. **Persistência funcional adicional:** `ai_report_artifacts`,
-    `ai_email_preparations`, `ai_pending_recipient_resolutions`,
-    `ai_email_send_authorizations` e `ai_email_operation_references`.
+10. **Persistência funcional adicional:** `ai_report_artifacts` e
+    `ai_email_workflows` (preparações, resolução de destinatário, autorização e
+    recibo de operação, discriminados por `record_type`).
 
 ### 2.3. Lacunas
 
@@ -356,7 +356,7 @@ Exemplo ilustrativo; não representa operação real já coletada:
 ```json
 {
 	"_id": "c29b7f6d-fbd4-4d70-b1e9-a1f9067c86b0",
-	"schema_version": "1",
+	"schema_version": "2",
 	"service": "main_api",
 	"environment": "test",
 	"operation_kind": "mcp",

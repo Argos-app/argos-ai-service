@@ -199,7 +199,7 @@ class Observation(_ObservabilityModel):
     """
 
     id: str = Field(alias="_id", min_length=36, max_length=36)
-    schema_version: Literal["1", "2"] = "2"
+    schema_version: Literal["2"] = "2"
     correlation_id: UUID | None = None
     parent_observation_id: UUID | None = None
     session_id: UUID | None = None

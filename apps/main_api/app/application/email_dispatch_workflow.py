@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from app.application.email_workflow import _fingerprint, _payload
+from app.application.email_helpers import _fingerprint, _payload, _recipient_selectors_match
 from app.application.operation_observation import observe_operation
 from app.application.report_artifact_service import validate_report_source
 from app.domain.email_preparations import (
@@ -22,7 +22,6 @@ from app.ports.report_artifact_repository import ReportArtifactRepository
 from packages.contracts import (
     DispatchStatus,
     PreparedReportStatus,
-    RecipientRef,
     ReportStatusRequest,
     ReportStatusResult,
     SendReportRequest,
@@ -38,36 +37,6 @@ from packages.observability import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _recipient_selectors_match(
-    selectors: dict[str, Any], recipients: tuple[RecipientRef, ...]
-) -> bool:
-    def normalize(value: str) -> str:
-        apostrophes = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "＇": "'"})
-        return value.strip().translate(apostrophes).casefold()
-
-    if len(selectors) != len(recipients):
-        return False
-    unmatched = set(range(len(recipients)))
-    for selector in selectors.values():
-        if not isinstance(selector, dict):
-            return False
-        kind = selector.get("kind")
-        value = selector.get("value")
-        if kind not in {"name", "email"} or not isinstance(value, str):
-            return False
-        normalized = normalize(value)
-        matches = [
-            index
-            for index in unmatched
-            if normalized
-            == normalize(recipients[index].name if kind == "name" else recipients[index].email)
-        ]
-        if len(matches) != 1:
-            return False
-        unmatched.remove(matches[0])
-    return not unmatched
 
 
 def _safe_result(

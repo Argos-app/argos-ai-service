@@ -15,8 +15,8 @@ from app.application.contracts.sessions import SessionView
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.identity import ActorContext
 from app.application.message_history_service import MessageHistoryService
+from app.application.operation_observation import active_collector
 from app.application.session_service import SessionApplicationService
-from app.infrastructure.observability.recording import active_collector
 
 
 class SessionService(Protocol):
@@ -49,8 +49,9 @@ def _graph_provider(request: Request):
     observation_collector = active_collector(getattr(app_state, "observability_collector", None))
     if app_state.agent_graph is not None:
         return app_state.agent_graph
-    from app.agents.specialists import build_agent_factory
-    from app.graph.workflow import build_graph, synthesis_timeout_with_runtime_grace
+    from app.graph.workflow import build_graph
+    from app.graph.workflow_nodes import synthesis_timeout_with_runtime_grace
+    from app.infrastructure.agents.specialists import build_agent_factory
 
     models = getattr(app_state, "models", None)
     if models is None:
@@ -186,6 +187,8 @@ def get_session_service(request: Request) -> SessionService:
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
+    from app.graph.conversation_flow import LangGraphConversationFlow
+
     return SessionApplicationService(
         sessions=persistence.sessions,
         interactions=persistence.interactions,
@@ -206,7 +209,7 @@ def get_session_service(request: Request) -> SessionService:
         summary_generator_provider=lambda: _summary_generator_provider(request),
         user_memory_extractor_provider=lambda: _user_memory_extractor_provider(request),
         background_task_scheduler=schedule_background_task,
-        graph_provider=lambda: _graph_provider(request),
+        graph_provider=lambda: LangGraphConversationFlow(_graph_provider(request)),
         execution_max_model_calls=getattr(
             getattr(request.app.state, "settings", None), "execution_max_model_calls", 12
         ),

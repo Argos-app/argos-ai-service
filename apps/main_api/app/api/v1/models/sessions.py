@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from app.api.v1.models.base import StrictModel
+from app.application.contracts.base import ApplicationModel
 
 
-class Session(StrictModel):
+class Session(ApplicationModel):
     schema_version: Literal["1"] = "1"
     session_id: UUID
     farm_ids: list[UUID]

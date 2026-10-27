@@ -4,10 +4,10 @@ from uuid import uuid4
 
 import pytest
 from app.agent_schemas.inputs import SpecialistInput
-from app.agents import specialists
 from app.agents.registry import ModelPolicyId
-from app.agents.specialists import build_agent_factory
+from app.infrastructure.agents import specialists
 from app.infrastructure.agents.langchain_factory import AgentResponseError
+from app.infrastructure.agents.specialists import build_agent_factory
 from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.ports.agent import AgentId
 

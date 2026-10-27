@@ -8,6 +8,7 @@ from uuid import UUID
 
 from langchain_core.callbacks import AsyncCallbackHandler
 
+from app.application.operation_observation import OperationRecorder
 from packages.observability import (
     ErrorOrigin,
     ExecutionMode,
@@ -18,8 +19,6 @@ from packages.observability import (
     OperationPhase,
     ResultMetadata,
 )
-
-from .recording import OperationRecorder
 
 _SAFE_TOOL_NAME = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
 

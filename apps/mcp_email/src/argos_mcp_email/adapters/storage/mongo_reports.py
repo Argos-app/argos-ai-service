@@ -91,12 +91,12 @@ class MongoReportRepository:
                     content=base64.b64decode(attachment["content_base64"], validate=True),
                     sha256=attachment["sha256"],
                 )
-                for attachment in document.get("attachments", ())
+                for attachment in document["attachments"]
             ),
             source_payload_hash=document["source_payload_hash"],
             created_at=_as_datetime(document["created_at"]),
             expires_at=_as_datetime(document["expires_at"]),
-            state=ReportState(document.get("state", ReportState.PREPARED.value)),
+            state=ReportState(document["state"]),
         )
 
 

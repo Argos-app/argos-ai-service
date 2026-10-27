@@ -45,7 +45,7 @@ def _observation(**overrides) -> dict:
     }
 
 
-def test_started_observation_has_no_end_and_uses_versioned_contract():
+def test_started_observation_has_no_end_and_uses_current_contract():
     observation = Observation(**_observation())
 
     assert observation.schema_version == "2"
@@ -53,6 +53,11 @@ def test_started_observation_has_no_end_and_uses_versioned_contract():
     assert observation.ended_at is None
     assert observation.duration_ms is None
     assert observation.model_dump(by_alias=True)["_id"] == observation.id
+
+
+def test_observation_rejects_obsolete_schema_version():
+    with pytest.raises(ValidationError):
+        Observation(**_observation(schema_version="1"))
 
 
 def test_terminal_success_keeps_individually_measured_duration_in_ms():

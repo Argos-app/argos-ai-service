@@ -19,7 +19,7 @@ from app.application.contracts.interactions import (
 from app.application.contracts.messages import SessionMessagesPageView, SessionMessageView
 from app.application.errors import ApplicationError, ApplicationErrorCode
 from app.application.identity import ActorContext
-from app.application.session_service import _authorized_farm_ids, _has_full_farm_access
+from app.application.session_helpers import _authorized_farm_ids, _has_full_farm_access
 from app.domain.sessions import (
     ConversationMessage,
     MessageKind,

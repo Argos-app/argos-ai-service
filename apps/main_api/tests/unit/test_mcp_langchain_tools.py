@@ -11,7 +11,9 @@ from app.infrastructure.mcp.langchain_tools import (
     McpToolBindingConfigurationError,
     build_mcp_tool_bindings,
 )
+from app.infrastructure.mcp.tool_schemas import MCP_TOOL_PAYLOAD_SCHEMAS
 from app.ports.agent import AgentId
+from pydantic import ValidationError
 
 
 class _FakeClient:
@@ -131,15 +133,6 @@ async def test_lot_tool_exposes_and_sends_the_exact_mcp_contract():
     assert data_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
     assert "code" not in data_client.calls[0]["arguments"]["payload"]
 
-    await tool.ainvoke(
-        {"payload": {"code": "HC-LOTE-031", "property_id": str(property_id)}},
-        config=config,
-    )
-    alias_payload = data_client.calls[1]["arguments"]["payload"]
-    assert alias_payload["lot_code"] == "HC-LOTE-031"
-    assert alias_payload["property_ids"] == [str(property_id)]
-    assert "code" not in alias_payload and "property_id" not in alias_payload
-
 
 @pytest.mark.asyncio
 async def test_medicine_tools_forward_search_and_use_contract_filters():
@@ -166,47 +159,25 @@ async def test_medicine_tools_forward_search_and_use_contract_filters():
     assert "search" not in data_client.calls[1]["arguments"]["payload"]
 
 
-@pytest.mark.asyncio
-async def test_tool_argument_aliases_are_normalized_before_mcp_call():
-    data_client = _FakeClient("data")
-    prediction_client = _FakeClient("prediction")
-    property_id = uuid4()
-    config = {
-        "configurable": {
-            "argos_user_id": str(uuid4()),
-            "argos_firebase_uid": "firebase-user-123",
-            "argos_authorized_property_ids": (str(property_id),),
-            "argos_request_id": str(uuid4()),
-        }
-    }
-    bindings = build_mcp_tool_bindings(
-        McpClients(data=data_client, prediction=prediction_client), _FakeIssuer()
-    )
-
-    await _tool(bindings[AgentId.FARM]["farm_data"], "list_applications").ainvoke(
-        {
-            "payload": {
-                "medication_name": "Ivervet Teste",
-                "property_id": str(property_id),
-            }
-        },
-        config=config,
-    )
-    await _tool(bindings[AgentId.ANALYST]["prediction"], "estimate_medicine_consumption").ainvoke(
-        {
-            "payload": {
-                "medicine_name": "Ivervet Teste",
-                "property_id": str(property_id),
-                "horizon_days": 14,
-            }
-        },
-        config=config,
-    )
-
-    assert data_client.calls[0]["arguments"]["payload"]["medicine_name"] == "Ivervet Teste"
-    assert data_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
-    assert prediction_client.calls[0]["arguments"]["payload"]["medicine_names"] == ["Ivervet Teste"]
-    assert prediction_client.calls[0]["arguments"]["payload"]["property_ids"] == [str(property_id)]
+@pytest.mark.parametrize(
+    ("tool_name", "payload"),
+    [
+        ("list_lots", {"code": "HC-LOTE-031"}),
+        ("list_lots", {"property_id": str(uuid4())}),
+        ("list_applications", {"medication_name": "Ivervet Teste"}),
+        (
+            "estimate_medicine_consumption",
+            {"medicine_name": "Ivervet Teste", "property_ids": [str(uuid4())]},
+        ),
+        (
+            "estimate_medicine_consumption",
+            {"medicine_names": ["Ivervet Teste"], "property_id": str(uuid4())},
+        ),
+    ],
+)
+def test_tool_payload_schemas_reject_obsolete_argument_aliases(tool_name, payload):
+    with pytest.raises(ValidationError):
+        MCP_TOOL_PAYLOAD_SCHEMAS[tool_name].model_validate(payload)
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@ from uuid import UUID
 
 import httpx
 
-from app.infrastructure.observability.recording import active_collector, observe_operation
+from app.application.operation_observation import active_collector, observe_operation
 from app.settings import Settings
 from packages.observability import (
     ErrorOrigin,

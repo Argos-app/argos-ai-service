@@ -53,10 +53,7 @@ class MongoCollectionSettings:
     session_summaries: str = "ai_session_summaries"
     user_memory: str = "ai_user_memory"
     report_artifacts: str = "ai_report_artifacts"
-    email_preparations: str = "ai_email_preparations"
-    pending_recipient_resolutions: str = "ai_pending_recipient_resolutions"
-    email_send_authorizations: str = "ai_email_send_authorizations"
-    email_operation_references: str = "ai_email_operation_references"
+    email_workflows: str = "ai_email_workflows"
     langgraph_checkpoints: str = "ai_langgraph_checkpoints"
     langgraph_checkpoint_writes: str = "ai_langgraph_checkpoint_writes"
 

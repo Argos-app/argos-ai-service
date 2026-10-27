@@ -6,12 +6,12 @@ from uuid import UUID
 
 from pydantic import Field, field_validator, model_serializer, model_validator
 
-from app.api.v1.models.base import StrictModel
 from app.api.v1.models.interactions import AnswerValue, ResponseValue
+from app.application.contracts.base import ApplicationModel
 from app.session_config import DEFAULT_MESSAGES_PAGE_SIZE, MAX_MESSAGES_PAGE_SIZE
 
 
-class MessageHistoryQuery(StrictModel):
+class MessageHistoryQuery(ApplicationModel):
     """Parâmetros validados da consulta; cursor opaco à camada HTTP."""
 
     limit: int = Field(
@@ -22,7 +22,7 @@ class MessageHistoryQuery(StrictModel):
     cursor: str | None = Field(default=None, min_length=1, max_length=2048)
 
 
-class SessionMessage(StrictModel):
+class SessionMessage(ApplicationModel):
     """Mensagem pública, já sanitizada, retornada ao titular da sessão."""
 
     message_id: UUID
@@ -73,7 +73,7 @@ class SessionMessage(StrictModel):
         return serialized
 
 
-class SessionMessagesPage(StrictModel):
+class SessionMessagesPage(ApplicationModel):
     """Página cronológica de mensagens anteriores à fronteira do cursor."""
 
     schema_version: Literal["1"] = "1"

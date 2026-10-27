@@ -24,16 +24,14 @@ from app.graph.specialist_helpers import (
     email_dispatch_recovery_context as _email_dispatch_recovery_context,
 )
 from app.graph.state import AgentState
-from app.graph.workflow import (
+from app.graph.workflow import build_graph, executar_fluxo, executar_resposta
+from app.graph.workflow_nodes import (
     NO_VERIFIED_RESULT_ANSWER,
     ROUTER_UNAVAILABLE_ANSWER,
     SAFE_ANSWER,
     _agent_failure_reason,
     answer_state,
     build_agent_context,
-    build_graph,
-    executar_fluxo,
-    executar_resposta,
     initial_state,
     no_especialista,
     no_formatador,

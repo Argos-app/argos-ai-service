@@ -69,9 +69,10 @@ não ter pai; operações fora de uma interação não têm sessão/interação.
 principal. `correlation_id` identifica a requisição HTTP correlacionada e
 `parent_observation_id` identifica o `_id` do span pai. A2A mantém também a
 observação do próprio protocolo e recebe os IDs funcionais pela delegação
-assinada. Novos documentos usam `schema_version="2"`; consumidores devem
-continuar aceitando documentos legados com `schema_version="1"`. Veja o fluxo e
-as limitações em [operacao-observabilidade.md](operacao-observabilidade.md).
+assinada. Os documentos usam `schema_version="2"`. `session_id` e
+`interaction_id` podem faltar em operações sem sessão, como verificações de
+saúde. Veja o fluxo e as limitações em
+[operacao-observabilidade.md](operacao-observabilidade.md).
 
 Não há índice TTL nem expiração automática configurada para essa coleção.
 Registros só deixam o Mongo por exclusão operacional explícita, fora deste

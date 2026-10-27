@@ -19,7 +19,7 @@ from a2a.utils.constants import TransportProtocol
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from app.infrastructure.observability.recording import observe_operation
+from app.application.operation_observation import observe_operation
 from app.settings import Settings
 from packages.contracts.a2a import (
     DocumentAnswerResponse,

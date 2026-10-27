@@ -14,7 +14,7 @@ from app.domain.report_artifacts import (
     ReportArtifactExpiredError,
     ReportArtifactNotFoundError,
 )
-from app.graph.workflow import no_especialista
+from app.graph.workflow_nodes import no_especialista
 from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
 from app.ports.data_client import ReportLotCandidate, ReportLotResolution

@@ -20,6 +20,7 @@ from packages.contracts import DispatchStatus
 def _document(preparation: EmailPreparation) -> dict[str, Any]:
     return {
         "_id": str(preparation.reference),
+        "record_type": "preparation",
         "principal_user_id": str(preparation.principal_user_id),
         "session_id": str(preparation.session_id),
         "interaction_id": str(preparation.interaction_id),
@@ -50,6 +51,7 @@ def _preparation(document: dict[str, Any]) -> EmailPreparation:
 def _pending_document(resolution: PendingRecipientResolution) -> dict[str, Any]:
     return {
         "_id": str(resolution.question_id),
+        "record_type": "pending_resolution",
         "principal_user_id": str(resolution.principal_user_id),
         "session_id": str(resolution.session_id),
         "interaction_id": str(resolution.interaction_id),
@@ -99,6 +101,7 @@ def _pending_resolution(document: dict[str, Any]) -> PendingRecipientResolution:
 def _send_authorization_document(authorization: EmailSendAuthorization) -> dict[str, Any]:
     return {
         "_id": str(authorization.authorization_id),
+        "record_type": "authorization",
         "principal_user_id": str(authorization.principal_user_id),
         "session_id": str(authorization.session_id),
         "source_interaction_id": str(authorization.source_interaction_id),
@@ -139,7 +142,8 @@ def _send_authorization(document: dict[str, Any]) -> EmailSendAuthorization:
 
 def _operation_reference_document(reference: EmailOperationReference) -> dict[str, Any]:
     return {
-        "_id": str(reference.authorization_id),
+        "_id": f"operation:{reference.authorization_id}",
+        "record_type": "operation_reference",
         "principal_user_id": str(reference.principal_user_id),
         "session_id": str(reference.session_id),
         "operation_id": str(reference.operation_id),
@@ -154,7 +158,7 @@ def _operation_reference_document(reference: EmailOperationReference) -> dict[st
 
 def _operation_reference(document: dict[str, Any]) -> EmailOperationReference:
     return EmailOperationReference(
-        authorization_id=UUID(document["_id"]),
+        authorization_id=UUID(document["_id"].removeprefix("operation:")),
         principal_user_id=UUID(document["principal_user_id"]),
         session_id=UUID(document["session_id"]),
         operation_id=UUID(document["operation_id"]),
@@ -190,69 +194,41 @@ def _same_authorization(stored: EmailSendAuthorization, candidate: EmailSendAuth
 class MongoEmailPreparationRepository:
     """Armazena conteúdo e recibo completo com leitura vinculada ao principal."""
 
-    def __init__(
-        self,
-        collection: Any,
-        pending_resolutions: Any = None,
-        send_authorizations: Any = None,
-        operation_references: Any = None,
-    ) -> None:
+    def __init__(self, collection: Any) -> None:
         self._collection = collection
-        self._pending_resolutions = pending_resolutions
-        self._send_authorizations = send_authorizations
-        self._operation_references = operation_references
 
     async def ensure_indexes(self) -> None:
-        await self._collection.create_index(
-            [
-                ("principal_user_id", 1),
-                ("session_id", 1),
-                ("report_artifact_ref", 1),
-                ("request_fingerprint", 1),
-            ],
-            unique=True,
-            name="uq_email_preparation_request",
-        )
-        await self._collection.create_index(
-            "purge_at",
-            name="ttl_email_preparations",
-            expireAfterSeconds=0,
-        )
-        if self._pending_resolutions is not None:
-            await self._pending_resolutions.create_index(
-                [("principal_user_id", 1), ("session_id", 1), ("interaction_id", 1)],
-                unique=True,
-                name="uq_pending_recipient_question_interaction",
-            )
-            await self._pending_resolutions.create_index(
-                "purge_at",
-                name="ttl_pending_recipient_questions",
-                expireAfterSeconds=0,
-            )
-        if self._send_authorizations is not None:
-            await self._send_authorizations.create_index(
+        for name, keys, record_type in (
+            (
+                "uq_email_workflow_preparation",
                 [
                     ("principal_user_id", 1),
                     ("session_id", 1),
-                    ("source_interaction_id", 1),
+                    ("report_artifact_ref", 1),
+                    ("request_fingerprint", 1),
                 ],
+                "preparation",
+            ),
+            (
+                "uq_email_workflow_pending",
+                [("principal_user_id", 1), ("session_id", 1), ("interaction_id", 1)],
+                "pending_resolution",
+            ),
+            (
+                "uq_email_workflow_authorization",
+                [("principal_user_id", 1), ("session_id", 1), ("source_interaction_id", 1)],
+                "authorization",
+            ),
+        ):
+            await self._collection.create_index(
+                keys,
                 unique=True,
-                name="uq_email_send_authorization_action",
+                name=name,
+                partialFilterExpression={"record_type": record_type},
             )
-            await self._send_authorizations.create_index(
-                "purge_at",
-                name="ttl_email_send_authorizations",
-                expireAfterSeconds=0,
-            )
-        if self._operation_references is not None:
-            await self._operation_references.create_index(
-                [("principal_user_id", 1), ("session_id", 1), ("_id", 1)],
-                unique=True,
-                name="uq_email_operation_reference_scope",
-            )
-            await self._operation_references.create_index(
-                "purge_at", name="ttl_email_operation_references", expireAfterSeconds=0
-            )
+        await self._collection.create_index(
+            "purge_at", name="ttl_email_workflows", expireAfterSeconds=0
+        )
 
     async def find_matching(
         self,
@@ -264,6 +240,7 @@ class MongoEmailPreparationRepository:
     ) -> EmailPreparation | None:
         document = await self._collection.find_one(
             {
+                "record_type": "preparation",
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
                 "report_artifact_ref": str(report_artifact_ref),
@@ -277,6 +254,7 @@ class MongoEmailPreparationRepository:
     ) -> tuple[EmailPreparation, ...]:
         cursor = self._collection.find(
             {
+                "record_type": "preparation",
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
                 "prepared_report.status": "prepared",
@@ -291,6 +269,7 @@ class MongoEmailPreparationRepository:
     async def save(self, preparation: EmailPreparation) -> None:
         await self._collection.replace_one(
             {
+                "record_type": "preparation",
                 "principal_user_id": str(preparation.principal_user_id),
                 "session_id": str(preparation.session_id),
                 "report_artifact_ref": str(preparation.report_artifact_ref),
@@ -305,6 +284,7 @@ class MongoEmailPreparationRepository:
     ) -> EmailPreparation | None:
         document = await self._collection.find_one(
             {
+                "record_type": "preparation",
                 "_id": str(reference),
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
@@ -315,10 +295,19 @@ class MongoEmailPreparationRepository:
     async def save_pending_recipient_resolution(
         self, resolution: PendingRecipientResolution
     ) -> None:
-        if self._pending_resolutions is None:
-            raise RuntimeError("armazenamento de perguntas de destinatário indisponível")
-        await self._pending_resolutions.replace_one(
+        await self._collection.delete_one(
             {
+                "record_type": "pending_resolution",
+                "principal_user_id": str(resolution.principal_user_id),
+                "session_id": str(resolution.session_id),
+                "interaction_id": str(resolution.interaction_id),
+                "_id": {"$ne": str(resolution.question_id)},
+                "expires_at": {"$lte": datetime.now(UTC)},
+            }
+        )
+        await self._collection.replace_one(
+            {
+                "record_type": "pending_resolution",
                 "principal_user_id": str(resolution.principal_user_id),
                 "session_id": str(resolution.session_id),
                 "interaction_id": str(resolution.interaction_id),
@@ -335,9 +324,8 @@ class MongoEmailPreparationRepository:
         interaction_id: UUID,
         question_id: UUID | None = None,
     ) -> PendingRecipientResolution | None:
-        if self._pending_resolutions is None:
-            return None
         query: dict[str, Any] = {
+            "record_type": "pending_resolution",
             "principal_user_id": str(principal_user_id),
             "session_id": str(session_id),
             "interaction_id": str(interaction_id),
@@ -345,22 +333,21 @@ class MongoEmailPreparationRepository:
         }
         if question_id is not None:
             query["_id"] = str(question_id)
-        document = await self._pending_resolutions.find_one(query)
+        document = await self._collection.find_one(query)
         return _pending_resolution(document) if document is not None else None
 
     async def reserve_send_authorization(
         self, authorization: EmailSendAuthorization
     ) -> EmailSendAuthorization:
-        if self._send_authorizations is None:
-            raise RuntimeError("armazenamento de autorizações de envio indisponível")
         scope = {
+            "record_type": "authorization",
             "principal_user_id": str(authorization.principal_user_id),
             "session_id": str(authorization.session_id),
             "source_interaction_id": str(authorization.source_interaction_id),
         }
         document = _send_authorization_document(authorization)
         try:
-            await self._send_authorizations.update_one(
+            await self._collection.update_one(
                 scope,
                 {"$setOnInsert": document},
                 upsert=True,
@@ -368,7 +355,7 @@ class MongoEmailPreparationRepository:
         except Exception as exc:
             if not getattr(exc, "code", None) == 11000:
                 raise
-        stored_document = await self._send_authorizations.find_one(scope)
+        stored_document = await self._collection.find_one(scope)
         if stored_document is None:
             raise RuntimeError("autorização de envio não foi persistida")
         stored = _send_authorization(stored_document)
@@ -388,14 +375,13 @@ class MongoEmailPreparationRepository:
         question_expires_at: datetime,
         now: datetime,
     ) -> EmailSendAuthorization | None:
-        if self._send_authorizations is None:
-            raise RuntimeError("armazenamento de autorizações de envio indisponível")
         scope = {
+            "record_type": "authorization",
             "principal_user_id": str(principal_user_id),
             "session_id": str(session_id),
             "source_interaction_id": str(source_interaction_id),
         }
-        stored_document = await self._send_authorizations.find_one(scope)
+        stored_document = await self._collection.find_one(scope)
         if stored_document is None:
             return None
         stored = _send_authorization(stored_document)
@@ -425,11 +411,11 @@ class MongoEmailPreparationRepository:
         )
         document = _send_authorization_document(confirmed)
         update = {key: value for key, value in document.items() if key != "_id"}
-        await self._send_authorizations.update_one(
+        await self._collection.update_one(
             {**scope, "origin": SendAuthorizationOrigin.EXPLICIT_REQUEST.value},
             {"$set": update},
         )
-        stored_document = await self._send_authorizations.find_one(scope)
+        stored_document = await self._collection.find_one(scope)
         if stored_document is None:
             raise RuntimeError("autorização confirmada não foi persistida")
         stored = _send_authorization(stored_document)
@@ -446,10 +432,9 @@ class MongoEmailPreparationRepository:
         session_id: UUID,
         source_interaction_id: UUID,
     ) -> EmailSendAuthorization | None:
-        if self._send_authorizations is None:
-            return None
-        document = await self._send_authorizations.find_one(
+        document = await self._collection.find_one(
             {
+                "record_type": "authorization",
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
                 "source_interaction_id": str(source_interaction_id),
@@ -460,10 +445,9 @@ class MongoEmailPreparationRepository:
     async def list_send_authorizations(
         self, *, principal_user_id: UUID, session_id: UUID, limit: int = 20
     ) -> tuple[EmailSendAuthorization, ...]:
-        if self._send_authorizations is None:
-            return ()
-        cursor = self._send_authorizations.find(
+        cursor = self._collection.find(
             {
+                "record_type": "authorization",
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
             }
@@ -477,10 +461,9 @@ class MongoEmailPreparationRepository:
     async def get_send_authorization_by_id(
         self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
     ) -> EmailSendAuthorization | None:
-        if self._send_authorizations is None:
-            return None
-        document = await self._send_authorizations.find_one(
+        document = await self._collection.find_one(
             {
+                "record_type": "authorization",
                 "_id": str(authorization_id),
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
@@ -491,11 +474,10 @@ class MongoEmailPreparationRepository:
     async def get_send_operation_reference(
         self, *, authorization_id: UUID, principal_user_id: UUID, session_id: UUID
     ) -> EmailOperationReference | None:
-        if self._operation_references is None:
-            return None
-        document = await self._operation_references.find_one(
+        document = await self._collection.find_one(
             {
-                "_id": str(authorization_id),
+                "record_type": "operation_reference",
+                "_id": f"operation:{authorization_id}",
                 "principal_user_id": str(principal_user_id),
                 "session_id": str(session_id),
             }
@@ -505,14 +487,13 @@ class MongoEmailPreparationRepository:
     async def save_send_operation_reference(
         self, reference: EmailOperationReference
     ) -> EmailOperationReference:
-        if self._operation_references is None:
-            raise RuntimeError("armazenamento de referências de operação indisponível")
         scope = {
-            "_id": str(reference.authorization_id),
+            "record_type": "operation_reference",
+            "_id": f"operation:{reference.authorization_id}",
             "principal_user_id": str(reference.principal_user_id),
             "session_id": str(reference.session_id),
         }
-        existing = await self._operation_references.find_one(scope)
+        existing = await self._collection.find_one(scope)
         if existing is not None:
             stored = _operation_reference(existing)
             if stored.operation_id != reference.operation_id:
@@ -520,7 +501,7 @@ class MongoEmailPreparationRepository:
                     "a autorização já aponta para outra operação"
                 )
             if reference.last_known_status is not None:
-                await self._operation_references.update_one(
+                await self._collection.update_one(
                     scope,
                     {
                         "$set": {
@@ -532,12 +513,12 @@ class MongoEmailPreparationRepository:
             else:
                 return stored
         else:
-            await self._operation_references.update_one(
+            await self._collection.update_one(
                 scope,
                 {"$setOnInsert": _operation_reference_document(reference)},
                 upsert=True,
             )
-        document = await self._operation_references.find_one(scope)
+        document = await self._collection.find_one(scope)
         if document is None:
             raise RuntimeError("referência da operação não foi persistida")
         stored = _operation_reference(document)

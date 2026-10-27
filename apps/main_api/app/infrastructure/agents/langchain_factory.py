@@ -17,11 +17,11 @@ from app.agent_schemas.results import (
 )
 from app.agent_schemas.synthesis import OrchestratorInput, OrchestratorResult
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
+from app.application.operation_observation import OperationRecorder
 from app.infrastructure.agents.execution_limits import ExecutionLimitCallback, ExecutionLimits
 from app.infrastructure.agents.execution_observer import ExecutionObserver
 from app.infrastructure.observability.langchain_callbacks import ObservabilityToolCallback
 from app.infrastructure.observability.model_callbacks import ModelUsageCallback
-from app.infrastructure.observability.recording import OperationRecorder
 from app.ports.agent import Agent, AgentId
 from app.ports.execution_event_repository import ExecutionEventRepository
 from pydantic import BaseModel, ValidationError

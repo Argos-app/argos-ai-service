@@ -11,6 +11,7 @@ from uuid import UUID
 
 from langchain_core.callbacks import AsyncCallbackHandler
 
+from app.application.operation_observation import OperationRecorder
 from packages.observability import (
     Billing,
     CancellationState,
@@ -26,8 +27,6 @@ from packages.observability import (
     billing_with_fallback,
     current_correlation_id,
 )
-
-from .recording import OperationRecorder
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:/-]{1,120}$")
 _PROVIDER_MODULES = {

@@ -8,6 +8,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
 
+from app.application.email_helpers import _fingerprint, _payload
 from app.application.operation_observation import observe_operation
 from app.application.report_artifact_service import validate_report_source
 from app.domain.email_preparations import (
@@ -41,23 +42,6 @@ from packages.observability import (
 )
 
 
-def _payload(result: Any) -> Any:
-    structured = getattr(result, "structuredContent", None)
-    if structured is not None:
-        return structured
-    text_blocks = [
-        block.text
-        for block in getattr(result, "content", ())
-        if isinstance(getattr(block, "text", None), str)
-    ]
-    if len(text_blocks) != 1:
-        raise ValueError("resposta de preparação ausente ou ambígua")
-    try:
-        return json.loads(text_blocks[0])
-    except json.JSONDecodeError as exc:
-        raise ValueError("resposta de preparação não contém JSON válido") from exc
-
-
 def _minimal_result(prepared: PreparedReport, *, reused: bool) -> str:
     if prepared.status == PreparedReportStatus.PREPARED:
         message = "Relatório preparado."
@@ -76,11 +60,6 @@ def _minimal_result(prepared: PreparedReport, *, reused: bool) -> str:
         },
         ensure_ascii=False,
     )
-
-
-def _fingerprint(value: Any) -> str:
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 async def _recipient_question_result(
@@ -322,7 +301,7 @@ class EmailWorkflow:
         if prepared.expires_at > envelope.valid_until:
             prepared = prepared.model_copy(update={"expires_at": envelope.valid_until})
         record = EmailPreparation(
-            reference=uuid4(),
+            reference=existing.reference if existing is not None else uuid4(),
             principal_user_id=principal_user_id,
             session_id=session_id,
             interaction_id=interaction_id,

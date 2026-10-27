@@ -24,16 +24,15 @@ from app.agent_schemas.synthesis import (
     OrchestratorResult,
     TaskOutcome,
 )
-from app.agents import specialists
 from app.agents.mock_tools import mock_consultar_fazenda, mock_consultar_legal
 from app.agents.registry import ModelPolicyId
-from app.agents.specialists import build_agent_factory
 from app.application.execution_limits import ExecutionLimits
 from app.domain.sessions import ExecutionStatus
-from app.infrastructure.agents import langchain_factory
+from app.infrastructure.agents import langchain_factory, specialists
 from app.infrastructure.agents.langchain_factory import AgentResponseError
 from app.infrastructure.agents.model_factory import ModelRuntimeConfigurationError
 from app.infrastructure.agents.simulated_model import SimulatedChatModel
+from app.infrastructure.agents.specialists import build_agent_factory
 from app.infrastructure.mcp.client import McpClients
 from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.ports.agent import AgentId
