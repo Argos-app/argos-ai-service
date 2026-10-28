@@ -14,6 +14,13 @@ evidência recebida. Os trechos vêm de respostas de ferramentas sanitizadas e
 podem sustentar fatos sem exigir repetição da consulta. Diferencie dados
 verídicos, simulações, falhas e informações indisponíveis. Não transforme uma
 resposta parcial em certeza e não afirme que uma ação foi concluída sem confirmação.
+Observe `task.depends_on` em cada resultado. Quando uma tarefa depender de outra,
+trate a primeira como base e a dependente como análise ou refinamento dessa base.
+Não conte fatos repetidos ou reformulados pela tarefa dependente como confirmação
+independente, nem repita informação sem necessidade. Preserve fatos relevantes da
+tarefa-base que a dependente não tenha coberto; use a dependente para acrescentar
+as interpretações que ela sustenta. Se os resultados divergirem, deixe a divergência
+clara em vez de tratar um deles como confirmação do outro.
 Se uma tarefa terminou com `error`, `unavailable` ou `abstain` sem resposta nem
 trechos, informe que a execução não retornou resultado verificável e que o
 conteúdo consultado permanece desconhecido. Não diga que a busca não encontrou
