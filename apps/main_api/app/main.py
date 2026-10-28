@@ -126,6 +126,7 @@ def create_app(
             models, model_initialization_error = create_configured_models(configured)
         except ModelRuntimeConfigurationError:
             model_initialization_error = "model_runtime_invalid_configuration"
+
     else:
         try:
             from app.infrastructure.agents.model_factory import validate_model_capabilities
@@ -202,7 +203,31 @@ def create_app(
                         if isinstance(langsmith_tracing, LangSmithTracing):
                             langsmith_tracing.close()
 
-    app = FastAPI(title="Argos AI Service", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Argos AI Service",
+        summary="API multiagente do Argos",
+        description=(
+            "Gerencia sessões autenticadas e interações com os agentes do Argos. "
+            "Cada resposta inclui o cabeçalho X-Argos-Correlation-ID para diagnóstico."
+        ),
+        version="0.1.0",
+        lifespan=lifespan,
+        openapi_tags=[
+            {
+                "name": "health",
+                "description": "Verificação de disponibilidade e prontidão do serviço.",
+            },
+            {
+                "name": "auth",
+                "description": "Autenticação e emissão de tokens de acesso do serviço.",
+            },
+            {"name": "sessions", "description": "Criação e consulta das sessões do usuário."},
+            {
+                "name": "interactions",
+                "description": "Envio, retomada e consulta de interações em uma sessão.",
+            },
+        ],
+    )
 
     @app.exception_handler(ApplicationError)
     async def handle_application_error(request: Request, error: ApplicationError) -> JSONResponse:
@@ -293,7 +318,13 @@ def create_app(
             response.headers["X-Argos-Correlation-ID"] = str(correlation_id)
             return response
 
-    @app.get("/health/live", tags=["health"])
+    @app.get(
+        "/health/live",
+        tags=["health"],
+        summary="Verificar se o processo está ativo",
+        description="Retorna uma resposta simples quando o processo HTTP está em execução.",
+        responses={200: {"description": "O processo está ativo."}},
+    )
     async def live() -> dict[str, str]:
         return {"status": "ok"}
 
@@ -301,7 +332,15 @@ def create_app(
         "/health/ready",
         tags=["health"],
         response_model=None,
-        responses={503: {"description": "Persistência Mongo indisponível"}},
+        summary="Verificar se o serviço está pronto",
+        description=(
+            "Verifica dependências essenciais, incluindo persistência, autenticação, "
+            "runtime dos agentes e integração documental quando configurada."
+        ),
+        responses={
+            200: {"description": "O serviço está pronto para receber requisições."},
+            503: {"description": "Uma ou mais dependências essenciais estão indisponíveis."},
+        },
     )
     async def ready(request: Request):
         if getattr(app.state, "persistence", None) is None:
@@ -381,10 +420,7 @@ def create_app(
             title=app.title,
             version=app.version,
             routes=app.routes,
-            description=(
-                "Cada resposta da API versionada inclui o cabeçalho "
-                "X-Argos-Correlation-ID para diagnóstico."
-            ),
+            description=app.description,
         )
         correlation_header = {
             "description": "Identificador de correlação desta requisição no serviço Argos.",

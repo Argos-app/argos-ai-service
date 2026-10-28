@@ -18,26 +18,60 @@ class MessageHistoryQuery(ApplicationModel):
         default=DEFAULT_MESSAGES_PAGE_SIZE,
         ge=1,
         le=MAX_MESSAGES_PAGE_SIZE,
+        description="Quantidade máxima de mensagens retornadas na página.",
+        examples=[DEFAULT_MESSAGES_PAGE_SIZE],
     )
-    cursor: str | None = Field(default=None, min_length=1, max_length=2048)
+    cursor: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=2048,
+        description="Cursor opaco retornado em next_cursor para continuar a paginação.",
+        examples=["cursor-opaco-retornado-pela-api"],
+    )
 
 
 class SessionMessage(ApplicationModel):
     """Mensagem pública, já sanitizada, retornada ao titular da sessão."""
 
-    message_id: UUID
-    interaction_id: UUID
-    sequence: int = Field(ge=1)
-    role: Literal["user", "assistant"]
-    kind: Literal["user_input", "assistant_answer", "clarification_question"]
-    content: str = Field(min_length=1, max_length=32_000)
-    created_at: datetime
-    question_id: UUID | None = None
-    answer: AnswerValue | None = None
-    response: ResponseValue | None = None
-    redacted: bool = False
-    status: Literal["completed", "degraded"] | None = None
-    degradation_reasons: list[str] = Field(default_factory=list)
+    message_id: UUID = Field(description="Identificador único da mensagem.")
+    interaction_id: UUID = Field(description="Identificador da interação associada à mensagem.")
+    sequence: int = Field(
+        ge=1, description="Posição cronológica da mensagem na sessão.", examples=[1]
+    )
+    role: Literal["user", "assistant"] = Field(
+        description="Autor da mensagem: usuário ou assistente.", examples=["user"]
+    )
+    kind: Literal["user_input", "assistant_answer", "clarification_question"] = Field(
+        description="Tipo da mensagem armazenada.", examples=["user_input"]
+    )
+    content: str = Field(
+        min_length=1,
+        max_length=32_000,
+        description="Conteúdo público e sanitizado da mensagem.",
+        examples=["Quantos animais há no lote 12?"],
+    )
+    created_at: datetime = Field(
+        description="Data e hora de criação em UTC.", examples=["2026-10-27T12:00:00Z"]
+    )
+    question_id: UUID | None = Field(
+        default=None, description="Identificador da pergunta pendente, quando aplicável."
+    )
+    answer: AnswerValue | None = Field(
+        default=None, description="Resposta do usuário vinculada a uma pergunta, quando aplicável."
+    )
+    response: ResponseValue | None = Field(
+        default=None,
+        description="Pergunta ou resposta produzida pelo assistente, quando aplicável.",
+    )
+    redacted: bool = Field(
+        default=False, description="Indica se dados sensíveis foram removidos do conteúdo."
+    )
+    status: Literal["completed", "degraded"] | None = Field(
+        default=None, description="Estado da interação concluída, quando aplicável."
+    )
+    degradation_reasons: list[str] = Field(
+        default_factory=list, description="Códigos das limitações da interação, quando houver."
+    )
 
     @field_validator("created_at")
     @classmethod
@@ -76,11 +110,13 @@ class SessionMessage(ApplicationModel):
 class SessionMessagesPage(ApplicationModel):
     """Página cronológica de mensagens anteriores à fronteira do cursor."""
 
-    schema_version: Literal["1"] = "1"
-    session_id: UUID
-    items: list[SessionMessage]
-    next_cursor: str | None
-    has_more: bool
+    schema_version: Literal["1"] = Field(default="1", description="Versão do contrato da página.")
+    session_id: UUID = Field(description="Identificador da sessão consultada.")
+    items: list[SessionMessage] = Field(description="Mensagens desta página em ordem cronológica.")
+    next_cursor: str | None = Field(
+        description="Cursor opaco para buscar a próxima página; nulo quando não há próxima página."
+    )
+    has_more: bool = Field(description="Indica se há mais mensagens disponíveis.", examples=[False])
 
     @model_validator(mode="after")
     def validate_page(self) -> SessionMessagesPage:

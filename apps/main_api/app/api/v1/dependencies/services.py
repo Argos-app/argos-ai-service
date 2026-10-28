@@ -123,7 +123,7 @@ def _summary_generator_provider(request: Request):
     from app.agents.registry import ModelPolicyId
 
     models = getattr(app_state, "models", None)
-    model = models.get(ModelPolicyId.ROUTER) if models is not None else None
+    model = models.get(ModelPolicyId.FAST) if models is not None else None
     if model is None:
         return None
     from app.infrastructure.agents.session_summary_generator import (
@@ -158,7 +158,7 @@ def _user_memory_extractor_provider(request: Request):
     from app.agents.registry import ModelPolicyId
 
     models = getattr(app_state, "models", None)
-    model = models.get(ModelPolicyId.ROUTER) if models is not None else None
+    model = models.get(ModelPolicyId.FAST) if models is not None else None
     if model is None:
         return None
     from app.infrastructure.agents.user_memory_extractor import LangChainUserMemoryExtractor

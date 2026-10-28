@@ -25,12 +25,35 @@ def _bearer_token(authorization: str | None) -> str:
     return token.strip()
 
 
-@router.post("/firebase", response_model=AccessTokenResponse)
+@router.post(
+    "/firebase",
+    response_model=AccessTokenResponse,
+    summary="Autenticar com Firebase",
+    description=(
+        "Valida um Firebase ID token enviado no cabeçalho Authorization e emite "
+        "um token de acesso do serviço. O token Firebase não deve ser enviado no corpo."
+    ),
+    responses={
+        200: {"description": "Token de acesso do serviço emitido."},
+        401: {"description": "Token ausente, inválido, expirado ou revogado."},
+        403: {"description": "Usuário sem cadastro habilitado ou sem propriedades autorizadas."},
+        503: {"description": "Autenticação Firebase ou consulta cadastral indisponível."},
+    },
+)
 async def authenticate_firebase(
     request: Request,
-    authorization: Annotated[str | None, Header()] = None,
+    authorization: Annotated[
+        str | None,
+        Header(
+            description="Firebase ID token no formato Bearer <token>.",
+            examples=["Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."],
+        ),
+    ] = None,
 ) -> AccessTokenResponse:
-    """Troca Firebase ID token válido por JWT mínimo do serviço de IA."""
+    """Troca Firebase ID token válido por JWT mínimo do serviço de IA.
+
+    O autenticador também consulta o banco; falhas da dependência devem
+    falhar fechadas sem expor detalhes de conexão ou SQL."""
     token = _bearer_token(authorization)
     authenticator = getattr(request.app.state, "firebase_identity_authenticator", None)
     codec = getattr(request.app.state, "access_token_codec", None)
@@ -53,8 +76,6 @@ async def authenticate_firebase(
             detail="Não foi possível validar a identidade no Firebase",
         ) from exc
     except Exception as exc:
-        # O autenticador também consulta o banco; falhas da dependência devem
-        # falhar fechadas sem expor detalhes de conexão ou SQL.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Não foi possível consultar o cadastro de acesso",

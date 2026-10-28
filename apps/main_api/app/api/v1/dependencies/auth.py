@@ -101,7 +101,9 @@ async def get_principal(request: Request) -> AsyncIterator[Principal]:
                 principal.user_id, name=principal.name, email=principal.email
             )
         except Exception:
-            _LOGGER.warning("Redis user call counter increment failed")
+            _LOGGER.warning(
+                "não foi possível incrementar o contador de chamadas do usuário no Redis"
+            )
     with bind_user_id(principal.user_id):
         yield principal
 

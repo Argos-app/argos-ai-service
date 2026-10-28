@@ -30,7 +30,7 @@ token e consulta o PostgreSQL para revalidar cadastro e fazendas autorizadas.
 Nome, e-mail, UID, permissões ou fazendas informados pelo cliente não concedem
 acesso. O modo stub é permitido somente localmente com `APP_ENV=local` e
 `AUTH_MODE=stub`. Detalhes de configuração e política estão em
-[`autenticacao-firebase-identidade.md`](autenticacao-firebase-identidade.md).
+[`firebase-authentication-identity.md`](firebase-authentication-identity.md).
 
 `GET /health/live` e `GET /health/ready` não exigem o JWT da API. Cada resposta
 de `/v1/` inclui `X-Argos-Correlation-ID` (UUID), útil para suporte e
@@ -179,6 +179,6 @@ identificadores e a deduplicação do contrato para reenviar com segurança.
 
 ## Referências
 
-- [Autenticação Firebase e autorização por fazenda](autenticacao-firebase-identidade.md)
-- [Operação e observabilidade](operacao-observabilidade.md)
+- [Autenticação Firebase e autorização por fazenda](firebase-authentication-identity.md)
+- [Operação e observabilidade](observability-operations.md)
 - [OpenAPI versionado](openapi-main-api.json)
