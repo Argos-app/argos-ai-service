@@ -7,6 +7,10 @@ aplicativo Kotlin apresenta respostas e perguntas de esclarecimento.
 Este README distingue o código atual das integrações planejadas. Backend e
 mobile ficam em outros repositórios.
 
+Para navegar pelos componentes e suas instruções de manutenção, consulte o
+[índice de agentes](agent.md). O fluxo de contribuição está em
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 O principal tem contratos HTTP, grafo de agentes, Factory e Registry. Ele usa
 Mongo para sessões, mensagens, eventos de execução, checkpoints, resumos e
 preferências limitadas do usuário. A API valida o JWT próprio emitido após a
@@ -216,7 +220,7 @@ mesmos arquivos Compose descartáveis e publica relatórios JUnit. O build da
 pilha integrada usa os Dockerfiles dos cinco serviços; consulte
 [Docker local](docs/docker-local.md) para executar a pilha e builds individuais.
 
-### Fluxo planejado de relatório de lote
+### Fluxo de relatório de lote
 
 O Roteador cria uma tarefa Fazenda e outra Secretário dependente. Fazenda obtém
 `LotReportEnvelope` pelo MCP de dados; o executor preserva o envelope assinado e
@@ -276,7 +280,8 @@ individual documentado em
 adapters HTTP OpenAI-compatible para embeddings e geração, além de uma consulta
 PostgreSQL somente leitura para autorização documental. Endpoints, modelos,
 papéis autorizados, credenciais e o Qdrant precisam ser configurados no
-deployment. A origem cloud e a chamada real pelo principal seguem pendentes.
+deployment. A Main API possui cliente A2A e pode chamá-lo quando configurado; o
+serviço usa a origem local de documentos implementada neste repositório.
 
 ## Estrutura do projeto
 
@@ -286,23 +291,22 @@ argos-ai-service/
 │   ├── main_api/          # API, sessões, grafo e agentes principais
 │   ├── mcp_data/          # Consultas aos dados de negócio
 │   ├── mcp_email/         # Relatórios e envio de e-mail
-│   ├── mcp_prediction/    # Cálculos, inferência e comandos de treino
+│   ├── mcp_prediction/    # Estimativa determinística de consumo
 │   └── a2a_agent/         # Serviço isolado: especialistas, PDFs, Qdrant e imagem
 ├── packages/
 │   ├── contracts/        # Modelos Pydantic de comunicação
 │   ├── security/         # Validação de identidade e escopo
 │   └── observability/    # Logs, traces, métricas e custos
-├── tests/                # Contratos, integração, E2E, avaliações e fixtures
-├── resources/            # PDFs de teste, templates e manifestos
-├── experiments/          # Dataloads e experimentos de predição
-├── config/               # Modelos e fallbacks fixos por agente
-├── infrastructure/       # Configuração dos serviços locais
-├── docs/                 # Planejamento e documentação
+├── tests/                # Testes transversais de deploy Render
+├── infrastructure/       # PostgreSQL e fixtures locais
+├── k8s/                  # Recursos Kubernetes locais
+├── scripts/              # Scripts de operação local e deploy
+├── docs/                 # Contratos, operação e registros de planejamento
 ├── compose.yaml          # Dependências locais e perfil integrado de serviços
 └── .github/workflows/    # CI no GitHub Actions
 ```
 
-Cada aplicação terá configuração, dependências e execução próprias, com deploy
+Cada aplicação tem configuração, dependências e execução próprias, com deploy
 independente. Os contratos compartilhados precisam acompanhar o artefato de cada
 serviço que os consome; o processo não depende do código de outro serviço
 montado em runtime. O perfil Docker integrado, o schema e os dados sintéticos
@@ -318,9 +322,9 @@ a Factory os instancia com suas dependências.
 
 ## Grafo de agentes
 
-O desenho abaixo representa o fluxo previsto para as integrações. O executor
-atual ordena e executa tarefas sequencialmente; a passagem protegida de
-artefatos de relatório ainda será implementada.
+O desenho abaixo resume o fluxo implementado. O executor ordena e executa
+tarefas sequencialmente e preserva referências aos artefatos assinados de
+relatório para as tarefas dependentes.
 
 ```mermaid
 flowchart TD
@@ -357,13 +361,13 @@ flowchart TD
     Decision -->|Limite ou evidência insuficiente| Partial[Resposta parcial ou abstenção]
 ```
 
-Paralelismo de tarefas independentes e limites gerais de tempo/custo são
-evoluções planejadas. O grafo atual limita a cinco tarefas e uma revisão do
-Juiz. O Juiz revisa a resposta ao chat; a autorização determinística de envio
-deve preceder a chamada ao MCP. A resposta a uma pergunta retoma a sessão após
-nova validação de acesso; falhas não são apresentadas como dados ou operações
-bem-sucedidas. Ao atingir um limite, o controle determinístico encerra a
-execução com conteúdo já validado ou uma mensagem segura.
+O executor não paraleliza tarefas independentes. O grafo atual limita a cinco
+tarefas e uma revisão do Juiz. O Juiz revisa a resposta ao chat; a autorização
+determinística de envio deve preceder a chamada ao MCP. A resposta a uma
+pergunta retoma a sessão após nova validação de acesso; falhas não são
+apresentadas como dados ou operações bem-sucedidas. Ao atingir um limite, o
+controle determinístico encerra a execução com conteúdo já validado ou uma
+mensagem segura.
 
 Para subir a integração em um cluster Kubernetes local, consulte
 [docs/kubernetes-local.md](docs/kubernetes-local.md). O estado e os resultados

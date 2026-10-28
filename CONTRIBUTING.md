@@ -76,7 +76,7 @@ npm run format:check
 Com a `.venv` ativada, execute os testes Python:
 
 ```bash
-python -m pytest apps packages -m "not integration" -q -p no:cacheprovider
+python -m pytest tests apps packages -m "not integration" -q -p no:cacheprovider
 ```
 
 As integrações de cada serviço ficam em `apps/<serviço>/tests/integration`.
@@ -98,9 +98,8 @@ npm run format:write
 
 ## Locks de dependências
 
-O CI e as imagens Docker usam arquivos `pylock.toml` gerados para Linux e
-Python 3.14.3. Para regenerá-los de forma reproduzível, use Docker com pip
-26.2.1:
+O CI e as imagens Docker usam arquivos `pylock.toml` gerados para Linux e Python
+3.14.3. Para regenerá-los de forma reproduzível, use Docker com pip 26.2.1:
 
 ```powershell
 docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" --workdir /workspace python:3.14.3-slim sh -c "python -m pip install --disable-pip-version-check pip==26.2.1 && python scripts/docker/refresh-python-locks.py"
