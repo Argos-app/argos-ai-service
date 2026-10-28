@@ -87,6 +87,8 @@ Thumbs.db
 # ─────────────────────────────────────────────
 *.md
 !README.md
+!agent.md
+!AGENTS.md
 !apps/mcp_data/MCP.md
 !docs/agent-integration-handoff.md
 !docs/session-memory-persistence-plan.md

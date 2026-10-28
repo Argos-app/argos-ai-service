@@ -8,6 +8,10 @@ corpus global de leis e termos/condições. O artefato contém somente
 `apps/a2a_agent` e os contratos e primitivas de segurança compartilhados; não
 instala nem importa o `main_api` ou outros MCPs.
 
+O runtime usa Python 3.14.3, o SDK A2A, Starlette/Uvicorn, Pydantic, HTTPX,
+Qdrant e PostgreSQL. MongoDB, Redis e LangSmith são opcionais para
+observabilidade; as dependências estão em `requirements.txt` e `pylock.toml`.
+
 ## Build e execução
 
 O build é feito na raiz do monorepo para copiar apenas as dependências
@@ -21,10 +25,9 @@ docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml up 
 ```
 
 O Compose publica a porta somente em `127.0.0.1`, usa filesystem raiz somente
-leitura, executa sem root, limita CPU/memória, monta PDFs e código de adapters
-como somente leitura e preserva o manifesto em volume separado. O Qdrant é
-externo ao Compose de produção e precisa expor chaves distintas de leitura e de
-escrita do índice.
+leitura, executa sem root, limita CPU/memória, monta PDFs como somente leitura e
+preserva o manifesto em volume separado. O Qdrant é externo ao Compose de
+produção e precisa expor chaves distintas de leitura e de escrita do índice.
 
 O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
 metadados sintéticos para demonstração e homologação; eles não são leis nem
@@ -42,13 +45,15 @@ URLs base `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL`, os endpoints completos
 `OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL`, além das chaves, nomes dos
 modelos e dimensões dos dois espaços. O código não presume URLs de provedores:
 informe endpoints compatíveis com o protocolo esperado, incluindo gateways como
-OpenRouter quando oferecerem a API adequada. A sincronização indexa os
-documentos em vetores Qdrant nomeados (`openai` e `voyage`); a consulta usa o
-índice correspondente ao provedor que conseguiu gerar o vetor. A revisão dos
-modelos e dimensões participa do fingerprint de indexação; alterá-la força o
-sincronizador a criar uma nova geração compatível com Qdrant. Cada chamada de
-resposta também recebe o teto `A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 1200); o
-deadline delegado e os timeouts existentes limitam a duração da tarefa.
+OpenRouter quando oferecerem a API adequada. Para respostas, o fallback
+Anthropic usa o endpoint `/v1/messages` relativo à base configurada. A
+sincronização indexa os documentos em vetores Qdrant nomeados (`openai` e
+`voyage`); a consulta usa o índice correspondente ao provedor que conseguiu
+gerar o vetor. A revisão dos modelos e dimensões participa do fingerprint de
+indexação; alterá-la força o sincronizador a criar uma nova geração compatível
+com Qdrant. Cada chamada de resposta também recebe o teto
+`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 4096); o deadline delegado e os timeouts
+existentes limitam a duração da tarefa.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
 os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o
@@ -169,8 +174,8 @@ não podem ser retomadas após reinício.
   por página, agregações limitadas a 10.000 documentos/100 grupos, trechos de
   até três páginas e timeout Qdrant de até 30 segundos. Os limites de container
   são 1 CPU e 1 GiB e devem ser revistos com medições do workload.
-- A integração com Informações no principal e a escolha de uma origem cloud
-  ainda são pendências separadas; este container usa o corpus local configurado.
+- O especialista Informações da Main API pode chamar este serviço quando a
+  integração estiver configurada. Este container usa o corpus local configurado.
 
 ## Verificações
 

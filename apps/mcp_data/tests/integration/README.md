@@ -1,9 +1,9 @@
 # Integração do MCP de dados
 
-Os testes desta pasta sobem o serviço MCP real e registram treze ferramentas por
-meio do SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09 dos
-arquivos `infrastructure/docker/postgres/init/01`–`09` deste repositório, criam
-dados sintéticos, inserem documentos de histórico bovino e medicamentos em
+Os testes desta pasta sobem o serviço MCP real e registram catorze ferramentas
+por meio do SDK. Eles carregam em um PostgreSQL descartável os módulos SQL 01–09
+dos arquivos `infrastructure/docker/postgres/init/01`–`09` deste repositório,
+criam dados sintéticos, inserem documentos de histórico bovino e medicamentos em
 coleções Mongo descartáveis e removem os dois bancos ao final. Os documentos
 Mongo são validados estruturalmente e pelo escopo de propriedades; não precisam
 corresponder a linhas relacionais. A integração verifica paginação, seleção de
