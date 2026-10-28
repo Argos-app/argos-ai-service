@@ -398,7 +398,7 @@ class MongoConversationRepository:
         before_sequence: int | None,
         limit: int,
     ) -> tuple[ConversationMessage, ...]:
-        # A API solicita uma linha extra para calcular has_more sem contagem.
+        """A API solicita uma linha extra para calcular has_more sem contagem."""
         if not 1 <= limit <= 101:
             raise ValueError("limit deve estar entre 1 e 101")
         query: dict[str, Any] = {"session_id": str(session_id), "user_id": str(user_id)}
@@ -503,6 +503,7 @@ class MongoExecutionEventRepository:
         )
 
     async def append(self, event: ExecutionEvent) -> None:
+        """Permite novos horários em retentativas, mas exige a mesma identidade e resultado."""
         session = await self._sessions.find_one({"_id": str(event.session_id)})
         if session is None:
             raise KeyError(f"sessão não encontrada: {event.session_id}")
@@ -547,7 +548,7 @@ class MongoExecutionEventRepository:
                 return
             comparable_existing = {key: value for key, value in existing.items()}
             comparable_document = {key: value for key, value in document.items()}
-            # Retries may have new timestamps; identity and result fields must match.
+
             for key in ("created_at", "completed_at"):
                 comparable_existing.pop(key, None)
                 comparable_document.pop(key, None)
@@ -618,7 +619,7 @@ class MongoSessionSummaryRepository:
         self._collection = collection
 
     async def ensure_indexes(self) -> None:
-        # _id is the unique session key; this collection keeps only the current revision.
+        """_id é a chave única da sessão; esta coleção mantém somente a revisão atual."""
         return None
 
     async def get_current(self, session_id: UUID) -> SessionSummary | None:

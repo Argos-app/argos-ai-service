@@ -21,6 +21,8 @@ from packages.observability import (
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_mongo_writer_persists_one_attempt_and_updates_it_idempotently():
+    """Reabre um writer no mesmo repositório para exercitar a atualização terminal
+    and duplicate delivery across separate in-memory batches."""
     mongo_uri = os.getenv("MAIN_API_MONGO_TEST_URI")
     if not mongo_uri:
         pytest.skip("defina MAIN_API_MONGO_TEST_URI para executar a integração Mongo")
@@ -63,8 +65,6 @@ async def test_mongo_writer_persists_one_attempt_and_updates_it_idempotently():
         assert writer.try_submit(started).value == "accepted"
         await writer.close()
 
-        # Reopen a writer against the same repository to exercise terminal update
-        # and duplicate delivery across separate in-memory batches.
         writer = MongoObservationWriter(
             MongoObservationRepository(collection),
             batch_size=1,

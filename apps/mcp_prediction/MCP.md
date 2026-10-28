@@ -113,7 +113,7 @@ O servidor valida os UUIDs, mas
 não grava uma collection própria de observações; a observação de chamada MCP
 fica no principal. Portanto, ausência de registro não prova que não houve
 consulta e desconhecido não é consumo zero. Os IDs não fazem parte do payload
-da ferramenta. Veja [operação de observabilidade](../../docs/operacao-observabilidade.md).
+da ferramenta. Veja [operação de observabilidade](../../docs/observability-operations.md).
 
 ## Execução local
 

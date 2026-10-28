@@ -88,7 +88,7 @@ def synthesis_timeout_with_runtime_grace(
 
 
 def _judge_outcome_summaries(outcomes: tuple[TaskOutcome, ...]) -> tuple[TaskOutcome, ...]:
-    """Avoids duplicating full source excerpts in the Judge's complete evidence list."""
+    """Evita repetir trechos completos de fontes na lista de evidências do Juiz."""
     return tuple(
         outcome.model_copy(
             update={
@@ -294,7 +294,7 @@ def _canonicalize_sources(
     return tuple(canonical_by_reference[reference] for reference in requested_references)
 
 
-def no_guardrail_entrada(state: AgentState) -> dict:
+def run_input_guardrail_node(state: AgentState) -> dict:
     messages = state.get("messages", [])
     message = messages[-1] if messages else None
     if not isinstance(message, HumanMessage) or not isinstance(message.content, str):
@@ -429,7 +429,7 @@ def no_guardrail_entrada(state: AgentState) -> dict:
     }
 
 
-async def no_roteador(
+async def run_router_node(
     state: AgentState,
     *,
     factory: AgentFactory,
@@ -451,7 +451,7 @@ async def no_roteador(
     except Exception as exc:
         failure_reason = _agent_failure_reason(AgentId.ROUTER.value, exc)
         _LOGGER.warning(
-            "agent execution failed: %s",
+            "falha na execução do agente: %s",
             type(exc).__name__,
             extra={"agent": AgentId.ROUTER.value, "failure_reason": failure_reason},
         )
@@ -481,7 +481,7 @@ async def no_roteador(
     return update
 
 
-async def no_especialista(
+async def run_specialist_node(
     state: AgentState,
     *,
     factory: AgentFactory,
@@ -504,7 +504,7 @@ async def no_especialista(
     )
 
 
-async def no_orquestrador(
+async def run_orchestrator_node(
     state: AgentState,
     *,
     factory: AgentFactory,
@@ -543,7 +543,7 @@ async def no_orquestrador(
     except Exception as exc:
         failure_reason = _agent_failure_reason(AgentId.ORCHESTRATOR.value, exc)
         _LOGGER.warning(
-            "agent execution failed: %s",
+            "falha na execução do agente: %s",
             type(exc).__name__,
             extra={"agent": AgentId.ORCHESTRATOR.value, "failure_reason": failure_reason},
         )
@@ -563,7 +563,7 @@ async def no_orquestrador(
     return {"called_agents": called, "draft_result": draft}
 
 
-async def no_juiz(
+async def run_judge_node(
     state: AgentState,
     *,
     factory: AgentFactory,
@@ -595,7 +595,7 @@ async def no_juiz(
     except Exception as exc:
         failure_reason = _agent_failure_reason(AgentId.JUDGE.value, exc)
         _LOGGER.warning(
-            "agent execution failed: %s",
+            "falha na execução do agente: %s",
             type(exc).__name__,
             extra={"agent": AgentId.JUDGE.value, "failure_reason": failure_reason},
         )
@@ -641,12 +641,14 @@ async def no_juiz(
     }
 
 
-async def no_formatador(
+async def run_question_formatter_node(
     state: AgentState,
     *,
     factory: AgentFactory,
     config: RunnableConfig | None = None,
 ) -> dict:
+    """Os fluxos de negócio controlam as escolhas confiáveis de destinatário e as confirmações.
+    O formatador cria opções somente para esclarecimentos gerais."""
     request = state.get("clarification_request")
     if request is None:
         return {
@@ -658,8 +660,6 @@ async def no_formatador(
         "RECIPIENT_AMBIGUOUS",
         "RECIPIENT_NOT_FOUND",
     } or request.input_type in {"single_choice", "confirmation"}:
-        # Business workflows own trusted recipient choices and confirmations.
-        # The formatter creates choices only for general clarifications.
         return {
             "clarification_question": request.question_goal,
             "question_id": state.get("question_id") or str(uuid4()),
@@ -695,7 +695,7 @@ async def no_formatador(
     except Exception as exc:
         failure_reason = _agent_failure_reason(AgentId.QUESTION_FORMATTER.value, exc)
         _LOGGER.warning(
-            "agent execution failed: %s",
+            "falha na execução do agente: %s",
             type(exc).__name__,
             extra={"agent": AgentId.QUESTION_FORMATTER.value, "failure_reason": failure_reason},
         )
@@ -716,7 +716,7 @@ async def no_formatador(
     }
 
 
-def no_guardrail_pergunta(state: AgentState) -> dict:
+def run_question_guardrail_node(state: AgentState) -> dict:
     question = minimize_pii(state.get("clarification_question") or SAFE_ANSWER)
     for identifier in build_agent_context(state).values():
         if isinstance(identifier, str) and identifier:
@@ -724,7 +724,7 @@ def no_guardrail_pergunta(state: AgentState) -> dict:
     return {"clarification_question": question, "messages": [AIMessage(content=question)]}
 
 
-def no_guardrail_saida(state: AgentState) -> dict:
+def run_output_guardrail_node(state: AgentState) -> dict:
     review = state.get("judge_result")
     draft = state.get("draft_result")
     email_dispatch_fallback = _confirmed_email_dispatch_fallback(state)
@@ -752,7 +752,7 @@ def no_guardrail_saida(state: AgentState) -> dict:
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
-def no_saida_segura(state: AgentState) -> dict:
+def run_safe_response_node(state: AgentState) -> dict:
     email_dispatch_fallback = _confirmed_email_dispatch_fallback(state)
     if email_dispatch_fallback:
         answer = email_dispatch_fallback
@@ -776,7 +776,7 @@ def _include_email_action_summary(answer: str, summary: str | None) -> str:
 
 
 def _confirmed_email_dispatch_fallback(state: AgentState) -> str | None:
-    """Reports a persisted MCP outcome when the model fails after a dispatch."""
+    """Informa o resultado persistido pelo MCP quando o modelo falha após o despacho."""
     evidence = state.get("email_dispatch_evidence")
     if evidence is None or not evidence.confirmed:
         return None
@@ -814,13 +814,13 @@ def _unverified_result_answer(state: AgentState) -> str:
     return NO_VERIFIED_RESULT_ANSWER
 
 
-def decidir_pos_entrada(state: AgentState) -> str:
+def route_after_input_guardrail(state: AgentState) -> str:
     if state.get("final_answer"):
         return "safe"
     return state.get("resume_target") or "router"
 
 
-def decidir_pos_roteador(state: AgentState) -> str:
+def route_after_router(state: AgentState) -> str:
     if state.get("final_answer"):
         return "safe"
     if state.get("clarification_request"):
@@ -828,7 +828,7 @@ def decidir_pos_roteador(state: AgentState) -> str:
     return state["ordered_tasks"][0].agent.value
 
 
-def decidir_proximo_especialista(state: AgentState) -> str:
+def route_after_specialist(state: AgentState) -> str:
     if state.get("final_answer"):
         return "safe"
     if state.get("clarification_request"):
@@ -839,11 +839,11 @@ def decidir_proximo_especialista(state: AgentState) -> str:
     return "orchestrator"
 
 
-def decidir_pos_orquestrador(state: AgentState) -> str:
+def route_after_orchestrator(state: AgentState) -> str:
     return "safe" if state.get("final_answer") else "judge"
 
 
-def decidir_pos_juiz(state: AgentState) -> str:
+def route_after_judge(state: AgentState) -> str:
     if state.get("final_answer"):
         return "safe"
     review = state.get("judge_result")
@@ -854,5 +854,5 @@ def decidir_pos_juiz(state: AgentState) -> str:
     return "safe"
 
 
-def decidir_pos_formatador(state: AgentState) -> str:
+def route_after_question_formatter(state: AgentState) -> str:
     return "safe" if state.get("final_answer") else "question_guardrail"

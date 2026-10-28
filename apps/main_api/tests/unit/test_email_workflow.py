@@ -53,7 +53,7 @@ class _Artifacts:
     async def get(self, reference, **scope):
         self.scope = (reference, scope)
         if reference != self.artifact.reference:
-            raise LookupError("not found")
+            raise LookupError("não encontrado")
         return self.artifact
 
     async def get_owned(self, *, reference, principal_user_id, session_id):
@@ -62,7 +62,7 @@ class _Artifacts:
             or principal_user_id != self.artifact.principal_user_id
             or session_id != self.artifact.session_id
         ):
-            raise LookupError("not found")
+            raise LookupError("não encontrado")
         return self.artifact
 
 
@@ -146,7 +146,7 @@ class _Preparations:
                 "origin",
             )
             if any(getattr(existing, field) != getattr(authorization, field) for field in fields):
-                raise EmailSendAuthorizationConflictError("authorization conflict")
+                raise EmailSendAuthorizationConflictError("conflito de autorização")
             return existing
         self.authorizations[key] = authorization
         return authorization
@@ -168,7 +168,7 @@ class _Preparations:
         if authorization.origin == SendAuthorizationOrigin.CONFIRMED_QUESTION:
             if authorization.question_id == question_id:
                 return authorization
-            raise EmailSendAuthorizationConflictError("different confirmation")
+            raise EmailSendAuthorizationConflictError("confirmação diferente")
         confirmed = replace(
             authorization,
             origin=SendAuthorizationOrigin.CONFIRMED_QUESTION,
@@ -225,7 +225,7 @@ class _Preparations:
     async def save_send_operation_reference(self, reference):
         existing = self.operation_references.get(reference.authorization_id)
         if existing is not None and existing.operation_id != reference.operation_id:
-            raise EmailSendAuthorizationConflictError("operation conflict")
+            raise EmailSendAuthorizationConflictError("conflito de operação")
         self.operation_references[reference.authorization_id] = reference
         return reference
 
@@ -959,7 +959,7 @@ def test_lost_send_response_retries_with_same_report_and_idempotency_key():
     def respond(name, arguments):
         calls.append(arguments["payload"])
         if len(calls) == 1:
-            raise TimeoutError("response lost after remote operation")
+            raise TimeoutError("resposta perdida após a operação remota")
         return SimpleNamespace(structuredContent=result.model_dump(mode="json"), content=[])
 
     client = _EmailClient(respond)

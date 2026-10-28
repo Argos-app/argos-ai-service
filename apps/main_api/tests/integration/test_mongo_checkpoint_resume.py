@@ -14,7 +14,7 @@ from app.agent_schemas.results import (
 )
 from app.agent_schemas.synthesis import OrchestratorResult
 from app.application.execution_limits import ExecutionLimits, execution_limits_scope
-from app.graph.workflow import build_graph, executar_fluxo, executar_resposta
+from app.graph.workflow import build_graph, execute_workflow, resume_workflow_answer
 from app.infrastructure.checkpoints.mongo import create_mongo_checkpointer
 from app.ports.agent import AgentId
 from app.settings import Settings
@@ -73,7 +73,7 @@ async def test_pending_question_resumes_after_recreating_mongo_saver():
         first_graph = build_graph(
             _factory(router, FakeAgent()), checkpointer=checkpointer_runtime.saver
         )
-        first = await executar_fluxo(
+        first = await execute_workflow(
             first_graph,
             "Quero um relatório",
             user_id=str(uuid4()),
@@ -102,7 +102,7 @@ async def test_pending_question_resumes_after_recreating_mongo_saver():
             checkpointer=checkpointer_runtime.saver,
         )
         with execution_limits_scope(ExecutionLimits(4, 4)):
-            result = await executar_resposta(
+            result = await resume_workflow_answer(
                 resumed_graph,
                 "janeiro",
                 question_id=str(first["question_id"]),

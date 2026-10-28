@@ -90,9 +90,10 @@ class StaticServiceTokenVerifier:
 
 
 def _authenticated_token_from_context(context: Any) -> str | None:
-    """Obtém somente o token que o middleware MCP já validou no transporte."""
+    """Obtém somente o token que o middleware MCP já validou no transporte.
 
-    del context  # Context faz o SDK injetar o escopo da chamada; a auth fica no contextvar.
+    O SDK injeta o escopo da chamada em Context; a autenticação fica no contextvar."""
+    del context
     from mcp.server.auth.middleware.auth_context import get_access_token
 
     access_token = get_access_token()

@@ -233,7 +233,7 @@ class SessionSubmission:
             state = await self._execution._execute_interaction(accepted, context, execution_limits)
         except TimeoutError as exc:
             logger.warning(
-                "session interaction exceeded execution timeout",
+                "a interação da sessão excedeu o tempo limite de execução",
                 extra={"error_type": type(exc).__name__},
             )
             evidence = execution_limits.evidence_snapshot()
@@ -248,7 +248,7 @@ class SessionSubmission:
             failed = True
         except Exception as exc:
             logger.error(
-                "session interaction graph failed",
+                "falha no grafo de interação da sessão",
                 extra={"error_type": type(exc).__name__},
             )
             state = {"final_answer": SAFE_ANSWER, "errors": ["graph_execution_failed"]}
@@ -262,6 +262,9 @@ class SessionSubmission:
         session_id: UUID,
         body: InteractionCommand,
     ) -> AsyncIterator[_AcceptedInteraction | InteractionOutcome]:
+        """O MongoDB armazena datas BSON com precisão de milissegundos. Mantenha
+        essa precisão nos horários persistidos para que uma conclusão rápida
+        não seja arredondada para antes da criação da interação."""
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
             raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
@@ -319,9 +322,6 @@ class SessionSubmission:
                 session, body, graph, new_recipient_selectors=recipient_selectors
             )
 
-        # MongoDB stores BSON datetimes at millisecond precision. Keep every
-        # persisted interaction timestamp at that precision so a fast completion
-        # cannot be rounded to a time before its creation time.
         now = _mongo_utcnow()
         lease = await self._sessions.acquire_lease(
             session_id,

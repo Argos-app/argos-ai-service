@@ -257,4 +257,4 @@ class MongoObservationWriter:
 
     @staticmethod
     def _log_failure(code: str) -> None:
-        _LOGGER.warning("observability writer failed", extra={"failure_code": code})
+        _LOGGER.warning("falha no writer de observabilidade", extra={"failure_code": code})

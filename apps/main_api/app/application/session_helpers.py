@@ -41,7 +41,7 @@ def _utcnow() -> datetime:
 
 
 def _mongo_utcnow() -> datetime:
-    """Use MongoDB's millisecond precision for timestamps returned and persisted together."""
+    """Usa precisão de milissegundos do MongoDB nos horários retornados e persistidos juntos."""
     now = _utcnow()
     return now.replace(microsecond=(now.microsecond // 1000) * 1000)
 
@@ -224,7 +224,7 @@ def _response_from_state(
 
 
 def _hide_report_artifact_refs(text: str, state: dict[str, Any]) -> str:
-    """Remove executor-only artifact references from text returned to the user."""
+    """Remove do texto enviado ao usuário as referências de artefato usadas apenas pelo executor."""
     references_by_task = state.get("report_artifact_refs")
     if not isinstance(references_by_task, dict):
         return text

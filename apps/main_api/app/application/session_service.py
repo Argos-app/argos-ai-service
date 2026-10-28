@@ -170,11 +170,12 @@ class SessionApplicationService:
         return await self._submission.submit_interaction(principal, session_id, body)
 
     async def create_session(self, principal: ActorContext) -> SessionView:
+        """O MongoDB armazena datas BSON com precisão de milissegundos."""
         if not principal.farm_ids:
             raise ApplicationError(
                 ApplicationErrorCode.FORBIDDEN, "O usuário não possui fazendas autorizadas"
             )
-        # MongoDB stores BSON datetimes at millisecond precision.
+
         now = _mongo_utcnow()
         record = SessionRecord(
             session_id=uuid4(),

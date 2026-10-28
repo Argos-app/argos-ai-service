@@ -110,7 +110,10 @@ class ExecutionLimits:
         return tuple(self._evidence.get(agent, ()))
 
     def evidence_snapshot(self) -> tuple[ToolEvidence, ...]:
-        """Returns all verified tool excerpts in execution order for safe fallback."""
+        """Retorna trechos verificados das ferramentas na ordem de execução.
+
+        Esses trechos permitem produzir uma resposta segura quando a síntese falha.
+        """
         evidence = tuple(self._evidence_sequence)
         if evidence and self._evidence_incomplete:
             return (*evidence[:-1], replace(evidence[-1], truncated=True))

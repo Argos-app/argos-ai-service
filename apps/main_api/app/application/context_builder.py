@@ -30,10 +30,11 @@ async def build_session_context(
 ) -> SessionContext:
     """Lê só dados anteriores à entrada atual e pertencentes ao titular.
 
-    O resumo cobre o histórico até ``through_sequence``. Mensagens posteriores
-    só entram quando a interação terminou, evitando reutilizar um turno que foi
-    interrompido. O pedido atual segue separadamente no schema do agente.
-    """
+        O resumo cobre o histórico até ``through_sequence``. Mensagens posteriores
+        só entram quando a interação terminou, evitando reutilizar um turno que foi
+        interrompido. O pedido atual segue separadamente no schema do agente.
+
+    Não percorra um histórico sem limite quando não há resumo ou quando ele está desatualizado."""
 
     summary, memory = await asyncio.gather(
         summaries.get_current(session_id) if summaries else _none(),
@@ -42,7 +43,7 @@ async def build_session_context(
     after_sequence = summary.through_sequence if summary else 0
     through_sequence = before_sequence - 1
     collected: list[ConversationMessage] = []
-    # Do not scan an unbounded transcript when no summary exists or it is stale.
+
     cursor = max(after_sequence, through_sequence - MAX_CONTEXT_SCAN_MESSAGES)
     while cursor < through_sequence:
         page = await conversations.list_after_sequence(

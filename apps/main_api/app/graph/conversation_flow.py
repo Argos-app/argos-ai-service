@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from app.graph.workflow import build_session_config, executar_fluxo, executar_resposta
+from app.graph.workflow import build_session_config, execute_workflow, resume_workflow_answer
 
 
 class LangGraphConversationFlow:
@@ -10,10 +10,10 @@ class LangGraphConversationFlow:
         self._graph = graph
 
     async def execute(self, message: str, **kwargs: Any) -> dict[str, Any]:
-        return await executar_fluxo(self._graph, message, **kwargs)
+        return await execute_workflow(self._graph, message, **kwargs)
 
     async def resume(self, answer: str, **kwargs: Any) -> dict[str, Any]:
-        return await executar_resposta(self._graph, answer, **kwargs)
+        return await resume_workflow_answer(self._graph, answer, **kwargs)
 
     async def read_state(self, session_id: str) -> dict[str, Any]:
         snapshot = await self._graph.aget_state({"configurable": {"thread_id": session_id}})

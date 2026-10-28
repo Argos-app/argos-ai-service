@@ -5,21 +5,21 @@ estado atual.**
 
 **Errata de implementação (18/10/2026):** desde a implementação posterior,
 `packages/observability/billing.py` aceita custo reportado pelo provider e
-estima o custo quando as tarifas globais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
-`MODEL_OUTPUT_COST_PER_MILLION_TOKENS` estão definidas. O schema atual aceita
-`billing.cost_source` igual a `provider` ou `configured_rate`; os valores são
-persistidos nas observações Mongo e propagados aos traces LangSmith. As linhas
-deste plano que registram custo como “não demonstrado” descrevem a análise na
-data do plano, não o estado atual. Use os guias vigentes de operação e extração
-para o contrato atual.
+estima o custo quando as tarifas específicas do perfil/modelo estão definidas
+(`MODEL_FAST_*`, `MODEL_SPECIALIST_*`, seus fallbacks e perfis de embedding). O
+schema atual aceita `billing.cost_source` igual a `provider` ou
+`configured_rate`; os valores são persistidos nas observações Mongo e propagados
+aos traces LangSmith. As linhas deste plano que registram custo como “não
+demonstrado” descrevem a análise na data do plano, não o estado atual. Use os
+guias vigentes de operação e extração para o contrato atual.
 
 O plano foi usado como referência para a implementação posterior. A coleta
 best-effort está implementada no `main_api` e no A2A; correlação de requisição
 entre a API e as chamadas MCP/A2A, ranking exploratório de 24 horas, extração e
 dicionário BI estão documentados em
-[observabilidade-extracao-mongo.md](observabilidade-extracao-mongo.md),
-[dicionario-mongodb-bi.md](dicionario-mongodb-bi.md) e
-[operacao-observabilidade.md](operacao-observabilidade.md). Consulte esses guias
+[mongodb-observability-extraction.md](mongodb-observability-extraction.md),
+[mongodb-analytics-dictionary.md](mongodb-analytics-dictionary.md) e
+[observability-operations.md](observability-operations.md). Consulte esses guias
 como estado vigente. As lacunas descritas abaixo refletem a análise que precedeu
 essas implementações e não devem ser lidas como diagnóstico atual.
 
@@ -97,11 +97,11 @@ válidos em outros checkouts do repositório.
 | Fonte                                                                                                                                                                                      | Evidência e uso no plano                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | [README](../README.md) e [guia de implementação](../agent.md)                                                                                                                              | Aplicações independentes, contratos compartilhados, Factory/Registry e limites entre código atual e integrações planejadas.        |
-| [Planejamento técnico](planejamento-sistema-agentes-argos.md)                                                                                                                              | Arquitetura e backlog. A seção 7.6 e PLN-23/PLN-48 incluem traces, correlação, dashboards e cálculos que ficam fora desta entrega. |
+| [Planejamento técnico](argos-agent-system-plan.md)                                                                                                                                         | Arquitetura e backlog. A seção 7.6 e PLN-23/PLN-48 incluem traces, correlação, dashboards e cálculos que ficam fora desta entrega. |
 | [Handoff dos agentes](agent-integration-handoff.md)                                                                                                                                        | Slots de ferramentas e diferença entre agentes lógicos e chamadas reais aos modelos. Conferir seu conteúdo com o código atual.     |
-| [Plano A2A](plano-implementacao-a2a-informacoes.md) e [README A2A](../apps/a2a_agent/README.md)                                                                                            | Serviço documental isolado, especialistas, Qdrant, autorização e provedores.                                                       |
-| [Plano de sessões e memória](plano-persistencia-sessoes-memoria.md)                                                                                                                        | Persistência conversacional, resumos progressivos, perfil e retomada.                                                              |
-| [Plano de e-mail](plano-integracao-mcp-email-principal.md) e [plano de Dados](plano-implementacao-mcp-dados.md)                                                                            | Contratos funcionais de origem do relatório, autorização, preparação e envio.                                                      |
+| [Plano A2A](a2a-information-implementation-plan.md) e [README A2A](../apps/a2a_agent/README.md)                                                                                            | Serviço documental isolado, especialistas, Qdrant, autorização e provedores.                                                       |
+| [Plano de sessões e memória](session-memory-persistence-plan.md)                                                                                                                           | Persistência conversacional, resumos progressivos, perfil e retomada.                                                              |
+| [Plano de e-mail](main-api-email-mcp-integration-plan.md) e [plano de Dados](mcp-data-implementation-plan.md)                                                                              | Contratos funcionais de origem do relatório, autorização, preparação e envio.                                                      |
 | [Pyproject](../pyproject.toml), [dependências do principal](../apps/main_api/requirements.txt), [dependências A2A](../apps/a2a_agent/requirements.txt) e [CI](../.github/workflows/ci.yml) | Python 3.14.3; FastAPI, LangChain, LangGraph, Motor, checkpointer Mongo, MCP, HTTPX, cryptography, A2A SDK, asyncpg e Qdrant.      |
 
 ### 2.2. Existente
@@ -182,7 +182,7 @@ válidos em outros checkouts do repositório.
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Solicitação HTTP       | [main.py](../apps/main_api/app/main.py), `create_app`                                                                                                                                                                                                   | Instrumentação ASGI proposta: método, rota parametrizada, início, término, duração, HTTP, exceção e cancelamento. Abranger autenticação, validação e limite de corpo. |
 | Interação              | [session_service.py](../apps/main_api/app/application/session_service.py), `create_interaction`                                                                                                                                                         | Estado persistido, resultado `answer`/`question`, replay, conflitos, duração e falha.                                                                                 |
-| Grafo/retomada         | [workflow.py](../apps/main_api/app/graph/workflow.py), `executar_fluxo`/`executar_resposta`                                                                                                                                                             | Duração e resultado da invocação local; excluir espera humana entre requisições.                                                                                      |
+| Grafo/retomada         | [workflow.py](../apps/main_api/app/graph/workflow.py), `execute_workflow`/`resume_workflow_answer`                                                                                                                                                      | Duração e resultado da invocação local; excluir espera humana entre requisições.                                                                                      |
 | Agente                 | [langchain_factory.py](../apps/main_api/app/infrastructure/agents/langchain_factory.py), `_LangChainAgent.run`                                                                                                                                          | Agente, duração, resultado tipado, validação de schema, erro, timeout e cancelamento.                                                                                 |
 | Modelo principal       | Factory e callbacks LangChain                                                                                                                                                                                                                           | Uma observação por chamada real observável, com modelo/provedor, uso e duração.                                                                                       |
 | Tool local             | [execution_observer.py](../apps/main_api/app/infrastructure/agents/execution_observer.py), `_ToolExecutionCallback`                                                                                                                                     | Nome, duração, agente quando conhecido, status e modo real/simulado/indisponível.                                                                                     |

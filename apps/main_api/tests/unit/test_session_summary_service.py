@@ -83,7 +83,7 @@ class FakeGenerator:
         self.calls.append((previous, tuple(messages), tuple(events), through_user_message_number))
         if self.fail:
             self.fail = False
-            raise RuntimeError("simulated generator failure")
+            raise RuntimeError("falha simulada no gerador")
         return SessionSummary(
             session_id=session_id,
             revision=previous.revision + 1 if previous else 1,
@@ -170,7 +170,7 @@ async def test_summary_retries_failed_milestone_without_advancing_coverage():
     )
     assert generator.calls == []
 
-    with pytest.raises(RuntimeError, match="simulated generator failure"):
+    with pytest.raises(RuntimeError, match="falha simulada no gerador"):
         await service.publish_due(
             session_id=session_id,
             user_id=user_id,

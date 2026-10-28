@@ -56,13 +56,13 @@ class MessageHistoryService:
         limit: int,
         cursor: str | None,
     ) -> SessionMessagesPageView:
+        """Mantém a mesma resposta para sessão inexistente e sem escopo atual."""
         session = await self._sessions.get_owned(session_id, principal.user_id)
         if session is None:
             raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
 
         authorized_farms = _authorized_farm_ids(session, principal.farm_ids)
         if not authorized_farms:
-            # Mantém a mesma resposta para sessão inexistente e sem escopo atual.
             raise ApplicationError(ApplicationErrorCode.NOT_FOUND, "Sessão não encontrada")
         access_changed = not _has_full_farm_access(session, principal.farm_ids)
 
@@ -140,6 +140,7 @@ def _binding_id(value: UUID) -> str:
 
 
 def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMessageView:
+    """Um payload interno/corrompido nunca é propagado ao contrato público."""
     content = (
         _REDACTED_CONTENT if redact else minimize_sensitive_memory_input(message.sanitized_content)
     )
@@ -193,7 +194,6 @@ def _public_message(message: ConversationMessage, *, redact: bool) -> SessionMes
                             update={"text": minimize_sensitive_memory_input(response.text)}
                         )
         except AttributeError, KeyError, TypeError, ValueError, ValidationError:
-            # Um payload interno/corrompido nunca é propagado ao contrato público.
             answer = None
             question_id = None
             response = None

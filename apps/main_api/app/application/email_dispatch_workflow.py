@@ -118,6 +118,7 @@ class EmailDispatchWorkflow:
         )
 
     async def _send(self, *, configurable: dict[str, Any]) -> str:
+        """A nova tentativa recupera a mesma operação usando esta autorização e chave."""
         principal_user_id, session_id = self._identity(configurable)
         try:
             source_interaction_id = UUID(
@@ -235,7 +236,6 @@ class EmailDispatchWorkflow:
                 "send_report", {"payload": request.model_dump(mode="json")}
             )
         except Exception:
-            # A nova tentativa recupera a mesma operação usando esta autorização e chave.
             return _safe_unconfirmed()
         result = SendReportResult.model_validate(_payload(response))
         self._validate_result(result, authorization.report_id)
@@ -434,10 +434,10 @@ class EmailDispatchWorkflow:
         )
 
     async def _recover_interaction_outcome(self, *, configurable: dict[str, Any]) -> str | None:
-        """Return structured, authoritative dispatch evidence for this request.
+        """Retorna evidências estruturadas e autoritativas do despacho desta requisição.
 
-        This only reads the authorization/reference already persisted by the main API and asks
-        the MCP for its current status. It never initiates or retries a dispatch.
+        Lê somente a autorização e a referência já persistidas pela Main API e consulta o estado
+        atual no MCP. Não inicia nem repete um despacho.
         """
         try:
             principal_user_id, session_id = self._identity(configurable)
@@ -461,7 +461,8 @@ class EmailDispatchWorkflow:
             return await self._refresh_status(authorization, reference, principal_user_id)
         except Exception as exc:
             _LOGGER.warning(
-                "email dispatch recovery could not load authorization or operation reference",
+                "a recuperação do envio de e-mail não conseguiu carregar a autorização ou "
+                "a referência da operação",
                 extra={"failure_type": type(exc).__name__},
             )
             return _safe_unconfirmed()
@@ -544,6 +545,7 @@ class EmailDispatchWorkflow:
     async def _refresh_status(
         self, authorization, operation_reference, principal_user_id: UUID
     ) -> str:
+        """O estado continua autoritativo quando o repositório não recupera a contagem opcional."""
         request = ReportStatusRequest(
             operation_id=operation_reference.operation_id,
             requested_by=principal_user_id,
@@ -556,7 +558,8 @@ class EmailDispatchWorkflow:
             self._validate_result(result, authorization.report_id)
         except Exception as exc:
             _LOGGER.warning(
-                "email dispatch status lookup failed; using last known provider result",
+                "falha ao consultar o status do envio de e-mail; será usado o último resultado "
+                "conhecido do provedor",
                 extra={"failure_type": type(exc).__name__},
             )
             if operation_reference.last_known_status is not None:
@@ -585,8 +588,6 @@ class EmailDispatchWorkflow:
             if preparation is not None:
                 recipient_count = len(preparation.prepared_report.recipients)
         except Exception:
-            # Status remains authoritative even when the optional count cannot
-            # be recovered from the preparation repository.
             pass
         if (
             result.status != operation_reference.last_known_status
@@ -606,7 +607,8 @@ class EmailDispatchWorkflow:
                 )
             except Exception as exc:
                 _LOGGER.warning(
-                    "email dispatch status could not be stored as last known result",
+                    "não foi possível armazenar o status do envio de e-mail como último "
+                    "resultado conhecido",
                     extra={"failure_type": type(exc).__name__},
                 )
         return _safe_result(

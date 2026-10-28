@@ -53,14 +53,15 @@ class MongoObservationRepository:
         )
 
     async def write_document(self, document: dict[str, Any]) -> None:
-        """Grava início ou término; inserção terminal cobre início perdido."""
+        """Grava início ou término; inserção terminal cobre início perdido.
+
+        Outra gravação do mesmo ID venceu; reler para decidir idempotência."""
         for _ in range(3):
             existing = await self._collection.find_one({"_id": document["_id"]})
             if existing is None:
                 try:
                     await self._collection.insert_one(document)
                 except DuplicateKeyError:
-                    # Outra gravação do mesmo ID venceu; reler para decidir idempotência.
                     continue
                 return
 

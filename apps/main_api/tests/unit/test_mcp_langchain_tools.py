@@ -301,7 +301,7 @@ def test_explicit_empty_mcp_configuration_uses_unavailable_tools_not_secretary_m
 
     secretary_tools = bindings[AgentId.SECRETARY]["report_delivery"]
     assert [tool.name for tool in secretary_tools] == ["mcp_email_unavailable"]
-    assert all(tool.name != "mock_preparar_relatorio" for tool in secretary_tools)
+    assert all(tool.name != "mock_prepare_report" for tool in secretary_tools)
 
 
 def test_configured_mcp_tools_are_bound_to_expected_agents():

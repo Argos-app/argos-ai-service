@@ -1,4 +1,4 @@
-"""Select independent Render deployments from the last successful rollout."""
+"""Seleciona deploys independentes do Render a partir da última publicação bem-sucedida."""
 
 import json
 import os
@@ -16,7 +16,7 @@ def affected_services(paths: list[str]) -> list[str]:
 
 
 def changed_paths(base: str, head: str) -> list[str]:
-    # No rename detection: moves between applications must redeploy both consumers.
+    """Não detecta renomes: mover arquivos entre aplicações exige publicar ambos os consumidores."""
     result = subprocess.run(
         ["git", "diff", "--name-only", "--no-renames", "-z", base, head, "--"],
         check=True,

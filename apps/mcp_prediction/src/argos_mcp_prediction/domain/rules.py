@@ -24,7 +24,7 @@ from .errors import InvalidConsumptionDataError
 
 
 def _annual_start(as_of: date) -> date:
-    # Em 29/02, o aniversário anterior é 28/02. A janela começa no dia seguinte.
+    """Em 29/02, o aniversário anterior é 28/02. A janela começa no dia seguinte."""
     try:
         anniversary = as_of.replace(year=as_of.year - 1)
     except ValueError:

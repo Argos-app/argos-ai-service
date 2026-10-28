@@ -1,4 +1,4 @@
-"""Start one native Render service with the monorepo's shared packages available."""
+"""Inicia um serviço nativo do Render com acesso aos pacotes compartilhados do monorepo."""
 
 import os
 import sys
@@ -15,10 +15,10 @@ MODULES = {
 
 def command(service: str, env: dict[str, str]) -> list[str]:
     if service != "main_api" and service not in MODULES:
-        raise ValueError("Unknown application.")
+        raise ValueError("Aplicação desconhecida.")
     port = int(env.get("PORT", "10000"))
     if not 1 <= port <= 65535:
-        raise ValueError("PORT must be between 1 and 65535.")
+        raise ValueError("PORT deve estar entre 1 e 65535.")
     app_path = ROOT / "apps" / service
     env["PYTHONPATH"] = os.pathsep.join(
         [str(ROOT), str(app_path if service == "main_api" else app_path / "src")]
@@ -47,7 +47,7 @@ def command(service: str, env: dict[str, str]) -> list[str]:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        raise SystemExit("Usage: python scripts/render/start.py <application>")
+        raise SystemExit("Uso: python scripts/render/start.py <application>")
     env = dict(os.environ)
     args = command(sys.argv[1], env)
     os.chdir(ROOT)

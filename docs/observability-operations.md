@@ -99,15 +99,16 @@ em `billing` e propagadas aos traces LangSmith em `metadata.argos_billing`; para
 custo USD, também são preenchidos os campos de custo reconhecidos pelo
 LangSmith. O esquema das observações não muda conforme a origem.
 
-As tarifas opcionais são `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
-`MODEL_OUTPUT_COST_PER_MILLION_TOKENS`, decimais em USD por milhão de tokens.
-São aplicadas uniformemente aos modelos e serviços do processo. O preço
-informado pelo provider tem precedência. Para chat, a estimativa exige contagens
-de entrada e saída e ambas as tarifas, evitando subestimar uso parcial; para
-embeddings, considera somente tokens de entrada e a tarifa de entrada. Sem
-contagens ou tarifa necessária, o custo permanece ausente. Essa estimativa não é
-uma cobrança oficial nem reconcilia faturas. Providers compatíveis com OpenAI,
-incluindo NVIDIA NIM, podem retornar tokens sem preço por chamada. Algumas
+As tarifas são decimais em USD por milhão de tokens e devem acompanhar o preço
+do provider ou gateway configurado: `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
+`MODEL_SPECIALIST_*`, `MODEL_SPECIALIST_FALLBACK_*`,
+`MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS`. Chat exige tokens de
+entrada e saída e ambas as tarifas do perfil; embedding usa somente entrada. O
+custo explícito do provider tem precedência. Sem contagens ou tarifas
+necessárias, o custo fica ausente. A estimativa não reconcilia faturas e não
+considera preços diferenciados de tokens cacheados. Providers compatíveis com
+OpenAI, provedores podem retornar tokens sem preço por chamada. Algumas
 bibliotecas fazem retries internos invisíveis: consulte `attempt_visibility` e
 `attempt_reason` e não interprete contagem de spans como contagem exata de
 chamadas faturadas.
@@ -159,6 +160,6 @@ usuários cujas chaves ainda não expiraram e marca
 histórico durável.
 
 Para exportação de BI, use o contrato e a paginação idempotente descritos em
-[observabilidade-extracao-mongo.md](observabilidade-extracao-mongo.md). Para
+[mongodb-observability-extraction.md](mongodb-observability-extraction.md). Para
 campos e origem de dados de negócio, consulte o
-[dicionário MongoDB para BI](dicionario-mongodb-bi.md).
+[dicionário MongoDB para BI](mongodb-analytics-dictionary.md).

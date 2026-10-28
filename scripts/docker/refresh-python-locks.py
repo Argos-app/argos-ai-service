@@ -1,4 +1,4 @@
-"""Generate Linux/Python 3.14.3 PEP 751 locks for runtime and CI dependencies."""
+"""Gera locks PEP 751 para Linux e Python 3.14.3, usados pelo runtime e pela CI."""
 
 from __future__ import annotations
 

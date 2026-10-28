@@ -9,22 +9,22 @@ from app.graph.state import AgentState
 from app.graph.workflow_nodes import (
     SYNTHESIS_AGENT_TIMEOUT_SECONDS,
     answer_state,
-    decidir_pos_entrada,
-    decidir_pos_formatador,
-    decidir_pos_juiz,
-    decidir_pos_orquestrador,
-    decidir_pos_roteador,
-    decidir_proximo_especialista,
     initial_state,
-    no_especialista,
-    no_formatador,
-    no_guardrail_entrada,
-    no_guardrail_pergunta,
-    no_guardrail_saida,
-    no_juiz,
-    no_orquestrador,
-    no_roteador,
-    no_saida_segura,
+    route_after_input_guardrail,
+    route_after_judge,
+    route_after_orchestrator,
+    route_after_question_formatter,
+    route_after_router,
+    route_after_specialist,
+    run_input_guardrail_node,
+    run_judge_node,
+    run_orchestrator_node,
+    run_output_guardrail_node,
+    run_question_formatter_node,
+    run_question_guardrail_node,
+    run_router_node,
+    run_safe_response_node,
+    run_specialist_node,
 )
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
@@ -33,7 +33,12 @@ from app.ports.report_artifact_repository import ReportArtifactRepository
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-__all__ = ["build_graph", "build_session_config", "executar_fluxo", "executar_resposta"]
+__all__ = [
+    "build_graph",
+    "build_session_config",
+    "execute_workflow",
+    "resume_workflow_answer",
+]
 
 
 def build_graph(
@@ -46,8 +51,8 @@ def build_graph(
     synthesis_agent_timeout_seconds: float = SYNTHESIS_AGENT_TIMEOUT_SECONDS,
 ):
     graph = StateGraph(AgentState)
-    graph.add_node("guardrail_input", no_guardrail_entrada)
-    graph.add_node("router", partial(no_roteador, factory=factory))
+    graph.add_node("guardrail_input", run_input_guardrail_node)
+    graph.add_node("router", partial(run_router_node, factory=factory))
     for agent_id in (
         AgentId.FARM,
         AgentId.DOCTOR,
@@ -58,7 +63,7 @@ def build_graph(
         graph.add_node(
             agent_id.value,
             partial(
-                no_especialista,
+                run_specialist_node,
                 factory=factory,
                 agent_id=agent_id,
                 report_artifacts=report_artifacts,
@@ -69,7 +74,7 @@ def build_graph(
     graph.add_node(
         "orchestrator",
         partial(
-            no_orquestrador,
+            run_orchestrator_node,
             factory=factory,
             timeout_seconds=synthesis_agent_timeout_seconds,
         ),
@@ -77,15 +82,15 @@ def build_graph(
     graph.add_node(
         "judge",
         partial(
-            no_juiz,
+            run_judge_node,
             factory=factory,
             timeout_seconds=synthesis_agent_timeout_seconds,
         ),
     )
-    graph.add_node("question_formatter", partial(no_formatador, factory=factory))
-    graph.add_node("question_guardrail", no_guardrail_pergunta)
-    graph.add_node("guardrail_output", no_guardrail_saida)
-    graph.add_node("safe", no_saida_segura)
+    graph.add_node("question_formatter", partial(run_question_formatter_node, factory=factory))
+    graph.add_node("question_guardrail", run_question_guardrail_node)
+    graph.add_node("guardrail_output", run_output_guardrail_node)
+    graph.add_node("safe", run_safe_response_node)
 
     specialist_routes = {
         "farm": "farm",
@@ -100,7 +105,7 @@ def build_graph(
     graph.add_edge(START, "guardrail_input")
     graph.add_conditional_edges(
         "guardrail_input",
-        decidir_pos_entrada,
+        route_after_input_guardrail,
         {
             "router": "router",
             "farm": "farm",
@@ -111,15 +116,15 @@ def build_graph(
             "safe": "safe",
         },
     )
-    graph.add_conditional_edges("router", decidir_pos_roteador, specialist_routes)
+    graph.add_conditional_edges("router", route_after_router, specialist_routes)
     for specialist in ("farm", "doctor", "analyst", "secretary", "information"):
-        graph.add_conditional_edges(specialist, decidir_proximo_especialista, specialist_routes)
+        graph.add_conditional_edges(specialist, route_after_specialist, specialist_routes)
     graph.add_conditional_edges(
-        "orchestrator", decidir_pos_orquestrador, {"judge": "judge", "safe": "safe"}
+        "orchestrator", route_after_orchestrator, {"judge": "judge", "safe": "safe"}
     )
     graph.add_conditional_edges(
         "judge",
-        decidir_pos_juiz,
+        route_after_judge,
         {
             "orchestrator": "orchestrator",
             "guardrail_output": "guardrail_output",
@@ -128,7 +133,7 @@ def build_graph(
     )
     graph.add_conditional_edges(
         "question_formatter",
-        decidir_pos_formatador,
+        route_after_question_formatter,
         {"question_guardrail": "question_guardrail", "safe": "safe"},
     )
     graph.add_edge("question_guardrail", END)
@@ -137,7 +142,7 @@ def build_graph(
     return graph.compile(checkpointer=checkpointer)
 
 
-async def executar_fluxo(
+async def execute_workflow(
     graph: Any,
     message: str,
     *,
@@ -171,7 +176,7 @@ async def executar_fluxo(
     return await graph.ainvoke(state, config=run_config)
 
 
-async def executar_resposta(
+async def resume_workflow_answer(
     graph: Any,
     answer: str,
     *,
@@ -208,11 +213,12 @@ def build_session_config(
     *,
     checkpoint_namespace: str | None = None,
 ) -> RunnableConfig:
+    """LangGraph usa namespace vazio no grafo raiz. Um namespace próprio impediria
+    o MongoSaver de localizar as gravações por aget_state(thread_id)."""
     merged_config: RunnableConfig = dict(config or {})
     configurable = dict(merged_config.get("configurable") or {})
     configurable["thread_id"] = session_id
-    # LangGraph uses the empty namespace for the root graph. A custom namespace
-    # here makes state writes invisible to aget_state(thread_id) in MongoSaver.
+
     configurable.pop("checkpoint_ns", None)
     merged_config["configurable"] = configurable
     return merged_config

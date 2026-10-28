@@ -119,9 +119,10 @@ class FirebaseIdentityAuthenticator:
         self._users = user_access_repository
 
     async def authenticate(self, id_token: str) -> FirebaseAuthenticationResult:
+        """Email e email_verified são metadados de identidade; nenhum deles é
+        usado para associar ou localizar cadastros legados."""
         identity = await asyncio.to_thread(self._verifier.verify, id_token)
-        # Email e email_verified são metadados de identidade; nenhum deles é
-        # usado para associar ou localizar cadastros legados.
+
         user = await self._users.find_by_firebase_uid(identity.firebase_uid)
         return FirebaseAuthenticationResult(identity=identity, user=user)
 

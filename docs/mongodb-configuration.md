@@ -23,9 +23,9 @@ serviços, migrations operacionais e consultas BI; alterar esses nomes exige uma
 mudança versionada no serviço.
 
 O dicionário das collections, campos, origem, relações e retenção está em
-[dicionario-mongodb-bi.md](dicionario-mongodb-bi.md). A consulta operacional de
-observabilidade está em
-[operacao-observabilidade.md](operacao-observabilidade.md).
+[mongodb-analytics-dictionary.md](mongodb-analytics-dictionary.md). A consulta
+operacional de observabilidade está em
+[observability-operations.md](observability-operations.md).
 
 O `.env` gerado na raiz é a configuração única do Compose integrado; o Compose
 encaminha seletivamente cada variável ao serviço correspondente. O

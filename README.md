@@ -12,14 +12,16 @@ Mongo para sessões, mensagens, eventos de execução, checkpoints, resumos e
 preferências limitadas do usuário. A API valida o JWT próprio emitido após a
 troca do Firebase ID token e carrega do PostgreSQL as fazendas autorizadas em
 cada chamada. Ferramentas LangChain vinculam os MCPs configurados com delegação
-por usuário, propriedade, agente e operação. O runtime principal configura um
-modelo por agente (`MAIN_API_MODEL_ROUTER`, `MAIN_API_MODEL_FARM`,
-`MAIN_API_MODEL_DOCTOR`, `MAIN_API_MODEL_ANALYST`, `MAIN_API_MODEL_SECRETARY`,
-`MAIN_API_MODEL_INFORMATION`, `MAIN_API_MODEL_ORCHESTRATOR`,
-`MAIN_API_MODEL_JUDGE` e `MAIN_API_MODEL_QUESTION_FORMATTER`). URL e chave são
-compartilhadas entre os agentes; cada variável pode apontar para o mesmo modelo
-ou para um modelo diferente. A sumarização de sessão e a extração de memória
-reutilizam o modelo do Router. Sem runtime válido, `/health/ready` retorna
+por usuário, propriedade, agente e operação. A sumarização de sessão e a
+extração de memória reutilizam o modelo rápido. O runtime usa dois papéis
+configuráveis: rápido (`OPENAI_MODEL_FAST`) para roteador, orquestrador, juiz e
+formatador; especialista (`OPENAI_MODEL_SPECIALIST`) para os agentes de domínio.
+Ambos usam a API OpenAI e saída estruturada nativa por JSON Schema. Se
+`ANTHROPIC_API_KEY` estiver configurada, erros transitórios da OpenAI acionam os
+modelos Anthropic de fallback definidos no ambiente para os papéis rápido e
+especialista. A Anthropic recebe a entrada daquela chamada. O A2A guarda
+embeddings OpenAI e Voyage em vetores Qdrant nomeados e usa Voyage quando a
+vetorização OpenAI falha. Sem runtime válido, `/health/ready` retorna
 indisponível. Os testes injetam modelos simulados explicitamente por
 `create_app(models=...)`.
 
@@ -125,19 +127,20 @@ assinados até as observações A2A para junção direta com as conversas no Mon
 correlation ID é enviado às chamadas MCP e segue assinado para Data, Prediction
 e A2A; os MCPs não persistem observações próprias no momento. Filas limitadas
 podem perder observações, então ausência não significa zero uso. Quando há
-contagens de tokens, o custo pode vir do provider ou ser estimado pelas tarifas
-globais opcionais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
-`MODEL_OUTPUT_COST_PER_MILLION_TOKENS`; `billing.cost_source` distingue as
-origens. Os valores estimados são persistidos nas observações Mongo e propagados
-ao LangSmith, mas são indicativos e não substituem a fatura do provider. Sem
-contagens ou tarifas suficientes, custo permanece desconhecido. Operação,
-ranking de chamadas e tokens por usuário e limites estão em
-[`docs/operacao-observabilidade.md`](docs/operacao-observabilidade.md); a
+contagens de tokens, o custo pode vir do provider ou ser estimado por tarifas
+opcionais separadas para `fast`, `specialist`, seus fallbacks, embedding e
+fallback de embedding. `billing.cost_source` distingue as origens. Os valores
+estimados são persistidos nas observações Mongo e propagados ao LangSmith, mas
+são indicativos e não substituem a fatura do provider. Sem contagens ou tarifas
+suficientes, custo permanece desconhecido. Operação, ranking de chamadas e
+tokens por usuário e limites estão em
+[`docs/observability-operations.md`](docs/observability-operations.md); a
 extração e o dicionário BI estão em
-[`docs/observabilidade-extracao-mongo.md`](docs/observabilidade-extracao-mongo.md)
-e [`docs/dicionario-mongodb-bi.md`](docs/dicionario-mongodb-bi.md). Avaliações e
-feedback podem ser feitos sobre traces na plataforma; esta integração não define
-critérios automáticos de qualidade.
+[`docs/mongodb-observability-extraction.md`](docs/mongodb-observability-extraction.md)
+e
+[`docs/mongodb-analytics-dictionary.md`](docs/mongodb-analytics-dictionary.md).
+Avaliações e feedback podem ser feitos sobre traces na plataforma; esta
+integração não define critérios automáticos de qualidade.
 
 As rotas disponíveis incluem `POST /v1/sessions`, `GET /v1/sessions`,
 `POST /v1/sessions/{session_id}/interactions/async` e
@@ -159,8 +162,8 @@ O serviço precisa de Mongo em replica set para transações e checkpointer. Os
 serviços com persistência própria compartilham o banco `argos_ai` e separam os
 dados por collections. A configuração por sistema, variáveis, URIs para host e
 Compose, precedência e migração das collections antigas de e-mail estão em
-[`docs/configuracao-mongodb.md`](docs/configuracao-mongodb.md). O Compose local
-usa um único `.env` gerado por `scripts/docker/create-local-env.py`; os
+[`docs/mongodb-configuration.md`](docs/mongodb-configuration.md). O Compose
+local usa um único `.env` gerado por `scripts/docker/create-local-env.py`; os
 `.env.example` de cada aplicação serve para execução individual. Crie o arquivo
 local de um serviço copiando o exemplo correspondente, por exemplo
 `Copy-Item apps/main_api/.env.example apps/main_api/.env`; esses `.env` locais
@@ -181,7 +184,7 @@ acesso somente leitura ao PostgreSQL e a chave Ed25519 própria do `main_api`; a
 fazendas são carregadas do cadastro em cada chamada. As decisões para a
 integração Firebase, incluindo a associação pelo UID e o tratamento de cadastros
 legados, estão em
-[`docs/autenticacao-firebase-identidade.md`](docs/autenticacao-firebase-identidade.md).
+[`docs/firebase-authentication-identity.md`](docs/firebase-authentication-identity.md).
 
 O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
 aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
@@ -358,7 +361,7 @@ execução com conteúdo já validado ou uma mensagem segura.
 Para subir a integração em um cluster Kubernetes local, consulte
 [docs/kubernetes-local.md](docs/kubernetes-local.md). O estado e os resultados
 de homologação integrada estão em
-[docs/resultado-homologacao-local.md](docs/resultado-homologacao-local.md).
+[docs/local-validation-results.md](docs/local-validation-results.md).
 
 O deploy pelo código-fonte no Render está preparado em
 [docs/deploy-render.md](docs/deploy-render.md): `develop` atualiza HM e `main`

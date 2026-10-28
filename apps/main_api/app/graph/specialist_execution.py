@@ -47,6 +47,8 @@ async def execute_specialist(
     email_preparations: EmailPreparationRepository | None,
     config: RunnableConfig | None,
 ) -> SpecialistExecutionResult:
+    """Preserva resultados externos válidos quando somente a interpretação do modelo falhar.
+    Cancelamento, limite de execução e erros de armazenamento mantêm seus efeitos originais."""
     failure_reason = None
     if blocked:
         result = SpecialistResult(
@@ -180,7 +182,7 @@ async def execute_specialist(
         except Exception as exc:
             failure_reason = agent_failure_reason(agent_id.value, exc)
             _LOGGER.warning(
-                "agent execution failed: %s",
+                "falha na execução do agente: %s",
                 type(exc).__name__,
                 extra={"agent": agent_id.value, "failure_reason": failure_reason},
             )
@@ -210,8 +212,7 @@ async def execute_specialist(
                 answer=answer,
                 error=failure_reason,
             )
-            # Keep successful external results when only model interpretation failed.
-            # Cancellation, budget and storage errors must keep their original semantics.
+
             evidence = (
                 limits.evidence_for(agent_id.value)
                 if isinstance(limits, ExecutionLimits)

@@ -99,15 +99,17 @@ def build_mcp_tool_bindings(
     observation_collector: ObservationCollector | None = None,
     report_signature_checker: Callable[[bytes, str, str], bool] | None = None,
 ) -> dict[AgentId, dict[str, tuple[StructuredTool, ...]]]:
-    """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação."""
+    """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação.
+
+    Receber McpClients indica configuração explícita de produção.
+    Serviços ausentes geram ferramentas indisponíveis, sem fallback silencioso para mocks."""
     if (clients.data is not None or clients.prediction is not None) and delegation_issuer is None:
         raise McpToolBindingConfigurationError(
             "MAIN_API_MCP_DELEGATION_* é obrigatório para os MCPs de dados e predição"
         )
 
     bindings: dict[AgentId, dict[str, tuple[StructuredTool, ...]]] = {}
-    # Receiving an McpClients object is an explicit production configuration.
-    # Missing services get unavailable tools rather than silently falling back to mocks.
+
     mcp_configured = True
     if clients.data is not None:
         farm_tools = tuple(

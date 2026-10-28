@@ -15,12 +15,12 @@ faz parte do plano vigente, conforme decisão de 13/10/2026.
 
 Preserve `usage` e `billing` nos documentos. O custo pode ser reportado pelo
 provider (`billing.cost_source="provider"`) ou estimado pelas tarifas
-configuradas (`billing.cost_source="configured_rate"`). As tarifas opcionais
-`MODEL_INPUT_COST_PER_MILLION_TOKENS` e `MODEL_OUTPUT_COST_PER_MILLION_TOKENS`
-são decimais em USD por milhão de tokens; chat exige contagens completas de
-entrada/saída e as duas tarifas, enquanto embeddings usam somente tokens e
-tarifa de entrada. A tarifa configurada é um fallback uniforme, não um preço
-oficial por modelo. Valores ausentes não significam consumo ou custo zero. A
+configuradas (`billing.cost_source="configured_rate"`). As tarifas são separadas
+para fast, especialista, seus fallbacks e os dois perfis de embedding, em USD
+por milhão de tokens. Chat exige contagens completas de entrada/saída e as duas
+tarifas do perfil, enquanto embeddings usam somente a tarifa de entrada. Os
+valores configurados são estimativas do preço do provider/gateway, não uma
+cobrança oficial. Valores ausentes não significam consumo ou custo zero. A
 extração cobre os documentos efetivamente persistidos; sua retomada não recupera
 observações que nunca chegaram ao Mongo. Totais derivados não comprovam
 faturamento completo.
@@ -72,7 +72,7 @@ observação do próprio protocolo e recebe os IDs funcionais pela delegação
 assinada. Os documentos usam `schema_version="2"`. `session_id` e
 `interaction_id` podem faltar em operações sem sessão, como verificações de
 saúde. Veja o fluxo e as limitações em
-[operacao-observabilidade.md](operacao-observabilidade.md).
+[observability-operations.md](observability-operations.md).
 
 Não há índice TTL nem expiração automática configurada para essa coleção.
 Registros só deixam o Mongo por exclusão operacional explícita, fora deste

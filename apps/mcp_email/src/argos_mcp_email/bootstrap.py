@@ -40,11 +40,12 @@ def build_prepare_report(
 ) -> PrepareReport:
     """Monta o caso de uso com adapters concretos.
 
-    A criação dos clientes Mongo e SQL fica sob responsabilidade do processo de
-    execução; o bootstrap recebe as conexões já configuradas.
-    """
+        A criação dos clientes Mongo e SQL fica sob responsabilidade do processo de
+        execução; o bootstrap recebe as conexões já configuradas.
 
-    del settings  # reservado para TTL e demais configurações do serviço.
+    reservado para TTL e demais configurações do serviço."""
+
+    del settings
     return PrepareReport(
         source_verifier=SignedPayloadVerifier(signature_checker),
         recipient_directory=RelationalRecipientDirectory(sql_executor),

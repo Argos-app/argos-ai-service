@@ -1,4 +1,4 @@
-"""Populate the local MCP business-document collections with synthetic data."""
+"""Preenche as coleções locais de documentos de negócio dos MCPs com dados sintéticos."""
 
 from __future__ import annotations
 

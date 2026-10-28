@@ -38,13 +38,13 @@ class BestEffortObservationCollector(ObservationCollector):
             self._report(result.value)
 
     def _report(self, code: str) -> None:
+        """O canal de diagnóstico também não pode alterar a operação observada."""
         try:
             if self._report_failure is not None:
                 self._report_failure(code)
             else:
                 self._log_failure(code)
         except Exception:
-            # O canal de diagnóstico também não pode alterar a operação observada.
             return
 
     def _log_failure(self, code: str) -> None:
@@ -53,7 +53,7 @@ class BestEffortObservationCollector(ObservationCollector):
         if last_report is not None and now - last_report < 30:
             return
         self._last_report_at[code] = now
-        _LOGGER.warning("observability collection failed", extra={"failure_code": code})
+        _LOGGER.warning("falha ao coletar observabilidade", extra={"failure_code": code})
 
 
 class DisabledObservationCollector(ObservationCollector):

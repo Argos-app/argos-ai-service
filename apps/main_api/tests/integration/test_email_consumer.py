@@ -236,7 +236,10 @@ def _factory(
 async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
     mcp_harness, message, expected_dispatch
 ):
-    """Exercises API → graph → real email MCP → Mongo/Mailpit using a signed fake Farm source."""
+    """Exercita o fluxo API → grafo → MCP de e-mail → Mongo/Mailpit com fonte assinada.
+
+    Uma nova instância da API reproduz a interação HTTP persistida sem chamar o grafo ou o MCP.
+    """
     mongo_uri = os.getenv("MAIN_API_MONGO_TEST_URI")
     if not mongo_uri:
         pytest.skip("defina MAIN_API_MONGO_TEST_URI para executar a integração do consumidor")
@@ -420,7 +423,6 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             ].count_documents({"record_type": "operation_reference"})
             assert stored_action_count == stored_operation_count == expected_count
 
-        # A new API instance replays the persisted HTTP interaction without calling the graph/MCP.
         restarted_app = create_app(settings)
         with TestClient(restarted_app) as restarted_client:
             restarted_app.state.user_access_repository = _UserAccessRepository(users)

@@ -1,4 +1,4 @@
-"""Rollout selection, native entry points and Render API failure handling."""
+"""Seleção de publicações, pontos de entrada nativos e tratamento de falhas da API do Render."""
 
 import json
 import os
@@ -30,7 +30,6 @@ def test_application_change_only_deploys_that_service(service):
     "path",
     [
         "packages/contracts/lot_report.py",
-        "packages/model_options.py",
         "packages/new_package/module.py",
         "scripts/render/build.sh",
         ".github/workflows/deploy.yml",

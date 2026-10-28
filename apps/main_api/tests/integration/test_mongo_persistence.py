@@ -177,6 +177,7 @@ async def test_expired_email_preparation_can_be_refreshed_without_changing_id():
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_mongo_persistence_survives_client_restart_and_enforces_scope():
+    """Novo cliente simula reinicialização do processo contra o mesmo Mongo."""
     mongo_uri = os.getenv("MAIN_API_MONGO_TEST_URI")
     if not mongo_uri:
         pytest.skip("defina MAIN_API_MONGO_TEST_URI para executar a integração Mongo")
@@ -338,7 +339,6 @@ async def test_mongo_persistence_survives_client_restart_and_enforces_scope():
     finally:
         client.close()
 
-    # Novo cliente simula reinicialização do processo contra o mesmo Mongo.
     reopened_client = AsyncIOMotorClient(mongo_uri, tz_aware=True)
     try:
         reopened = MongoPersistence(reopened_client[database_name])

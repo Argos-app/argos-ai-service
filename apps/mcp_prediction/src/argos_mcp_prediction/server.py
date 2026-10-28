@@ -1,4 +1,4 @@
-"""Transporte MCP autenticado e ferramenta read-only de predição."""
+"""Transporte MCP autenticado e ferramenta de predição somente leitura."""
 
 import hmac
 from collections.abc import Mapping
@@ -72,9 +72,10 @@ class McpPredictionServer:
 
 
 def _authorization_from_context(context: Any) -> str | None:
-    """Obtém somente o token que o middleware MCP já validou no transporte."""
+    """Obtém somente o token que o middleware MCP já validou no transporte.
 
-    del context  # Context faz o SDK injetar o escopo da chamada; auth fica no contextvar.
+    O SDK injeta o escopo da chamada em Context; a autenticação fica no contextvar."""
+    del context
     from mcp.server.auth.middleware.auth_context import get_access_token
 
     access_token = get_access_token()
@@ -82,7 +83,7 @@ def _authorization_from_context(context: Any) -> str | None:
 
 
 def create_mcp_server(settings: Settings, service: McpPredictionServer) -> Any:
-    """Cria Streamable HTTP em /mcp e publica a única ferramenta read-only."""
+    """Cria Streamable HTTP em /mcp e publica a única ferramenta somente leitura."""
 
     settings.validate_runtime()
     try:

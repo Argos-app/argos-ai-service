@@ -1,4 +1,4 @@
-"""Contratos read-only das consultas ao corpus global de leis e termos."""
+"""Contratos de somente leitura das consultas ao corpus global de leis e termos."""
 
 from datetime import date, datetime
 from enum import StrEnum

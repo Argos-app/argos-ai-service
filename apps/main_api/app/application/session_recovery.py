@@ -417,7 +417,7 @@ class SessionRecovery:
                     )
                 except Exception as exc:
                     logger.warning(
-                        "session lease renewal failed",
+                        "falha ao renovar o lease da sessão",
                         extra={"session_id": str(session_id), "error_type": type(exc).__name__},
                     )
                     renewed = False

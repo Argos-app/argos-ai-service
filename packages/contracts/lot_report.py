@@ -1,9 +1,8 @@
 """Contrato da projeção de um lote produzida pelo MCP de dados.
 
-The projection is intentionally smaller than the relational schema. It contains
-only the information needed to describe a lot and its medication history in a
-report. The MCP de dados remains responsible for authorization and querying the
-source databases.
+A projeção é intencionalmente menor que o schema relacional. Contém somente os
+dados necessários para descrever o lote e o histórico de medicamentos no relatório.
+O MCP de dados continua responsável por autorizar e consultar os bancos de origem.
 """
 
 from datetime import date, datetime, time

@@ -254,6 +254,8 @@ class SessionExecution:
         context: _InteractionContext,
         state: dict[str, Any],
     ) -> dict[str, Any]:
+        """A expiração é persistida no MongoDB e no payload da interação.
+        Mantém os dois horários iguais após o truncamento de milissegundos do BSON."""
         if (
             not accepted.request.send_intent_requested
             or accepted.request.confirmed_send_question_id is not None
@@ -294,8 +296,7 @@ class SessionExecution:
             preparation.prepared_report.expires_at,
             now + timedelta(seconds=CLARIFICATION_TTL_SECONDS),
         )
-        # The expiry is persisted in both MongoDB and the interaction payload.
-        # Keep them equal after BSON's millisecond precision truncation.
+
         question_expires_at = question_expires_at.replace(
             microsecond=(question_expires_at.microsecond // 1000) * 1000
         )

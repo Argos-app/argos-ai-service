@@ -1,14 +1,28 @@
 # Execução local integrada com Docker
 
-### Thinking e prazo de execução
+### Modelos e prazo de execução
 
-`MAIN_API_MODEL_THINKING=auto` e `A2A_ANSWER_THINKING=auto` desativam thinking
-nos modelos NVIDIA Nemotron 3 Super e 3.5 Super VL quando o endpoint é
-`integrate.api.nvidia.com`. Outros modelos e endpoints não recebem esse
-parâmetro. `enabled` e `disabled` são opções explícitas somente para esses
-modelos suportados; uma combinação não suportada falha na configuração, sem
-enviar parâmetros indevidos. A opção é compartilhada pelos agentes do Principal;
-embeddings não usam thinking.
+No modo `provider`, informe em `.env` as URLs dos providers ou gateways
+escolhidos: `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL` definem as bases dos
+modelos de chat; `OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL` definem os
+endpoints completos de embeddings. Não há fallback de URL no código; com
+providers reais, a aplicação exige as URLs adequadas ao protocolo de cada
+integração. Os nomes de modelos também devem ser preenchidos no ambiente; não há
+nomes padrão no runtime. A Main API usa `OPENAI_MODEL_FAST` para roteador,
+orquestrador, juiz e formatador, e `OPENAI_MODEL_SPECIALIST` para especialistas.
+O A2A usa `OPENAI_MODEL_SPECIALIST` para respostas documentais e
+`OPENAI_EMBEDDINGS_MODEL` para o índice principal do RAG. O fallback usa
+`VOYAGE_EMBEDDINGS_MODEL` e `VOYAGE_API_KEY`. O Qdrant mantém os vetores OpenAI
+e Voyage como vetores nomeados separados na mesma coleção. Saídas estruturadas
+são solicitadas por JSON Schema nativo.
+
+Opcionalmente, `ANTHROPIC_API_KEY` habilita fallback de respostas: configure
+`ANTHROPIC_MODEL_FAST_FALLBACK` para o papel rápido e
+`ANTHROPIC_MODEL_SPECIALIST_FALLBACK` para especialistas da Main API e respostas
+do A2A. O fallback ocorre em falhas transitórias da OpenAI; a Anthropic recebe a
+mesma entrada da chamada que falhou. Se a vetorização OpenAI falhar, a busca usa
+Voyage e o vetor nomeado correspondente. A sincronização prepara os documentos
+nos dois espaços; embeddings de provedores diferentes não são misturados.
 
 No Principal, o roteador, os especialistas e o formatador de perguntas pedem
 saída estruturada pela estratégia de chamada de ferramenta do LangGraph. O
@@ -52,16 +66,17 @@ Para recriá-lo, especifique `--force`; isso invalida as credenciais de uma pilh
 já iniciada. O arquivo `.env.example` da raiz serve como referência; prefira o
 script para gerar o `.env` com as credenciais internas.
 
-Para estimar custos quando o provider não retorna preço, configure
-`MODEL_INPUT_COST_PER_MILLION_TOKENS` e `MODEL_OUTPUT_COST_PER_MILLION_TOKENS`
-como valores decimais em USD por milhão de tokens. As mesmas tarifas são
-aplicadas a todos os modelos e serviços. O custo explícito do provider tem
-precedência; sem uso completo ou tarifa necessária, o custo permanece ausente.
-Embeddings usam somente a tarifa de entrada. O campo `billing.cost_source`
-distingue `provider` de `configured_rate`; o formato das observações Mongo e dos
-metadados LangSmith não muda. A estimativa é indicativa e não substitui a
-cobrança do provider. O script cria essas duas variáveis vazias, então elas não
-ativam estimativas até serem preenchidas.
+Para estimar custos quando o provider não retorna preço, configure tarifas em
+USD por milhão de tokens para os perfis `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
+`MODEL_SPECIALIST_*`, `MODEL_SPECIALIST_FALLBACK_*`,
+`MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS`. O custo explícito do
+provider tem precedência; sem uso completo ou tarifa necessária, o custo fica
+ausente. Embeddings usam somente a tarifa de entrada. O campo
+`billing.cost_source` distingue `provider` de `configured_rate`; o formato das
+observações Mongo e dos metadados LangSmith não muda. A estimativa é indicativa
+e não substitui a cobrança do provider. O script cria essas variáveis vazias,
+então elas não ativam estimativas até serem preenchidas.
 
 Por padrão, o ambiente local usa `AUTH_MODE=stub`, que representa todos os
 requests como um único usuário sintético. Fora desse modo, o serviço aceita
@@ -95,7 +110,7 @@ executa.
 ## Banco PostgreSQL e dados sintéticos
 
 Em um volume PostgreSQL novo, a imagem executa, em ordem, os módulos
-`01_configuracao.sql` até `09_data_mart.sql`, o `10_dataload_completo.sql` e o
+`01_configuration.sql` até `09_data_mart.sql`, o `10_dataload_completo.sql` e o
 `11_prediction_coverage.sql`, `12_local_stub_access.sql`,
 `13_local_prediction_coverage_fixture.sql` e
 `14_local_email_recipient_fixtures.sql` localizados em
@@ -197,12 +212,15 @@ mostra os trechos encontrados e suas citações, sem inventar uma síntese; o mo
 continua voltado a testar contratos e integração, não a qualidade de modelos.
 
 No modo `provider`, preencha os endpoints, nomes e chaves correspondentes em
-`.env`, usando `.env.example` da raiz como referência. Informe
-`A2A_QDRANT_VECTOR_SIZE` com a dimensão do modelo de embeddings escolhido; ela
-precisa corresponder ao índice Qdrant. Recrie o índice se trocar a dimensão ou
-revisão do embedding. Se as credenciais ou os modelos estiverem
-ausentes/inválidos, a prontidão ou as chamadas de modelo falharão. Para execução
-fora do Compose, o padrão de cada aplicação continua sendo `provider`.
+`.env`, usando `.env.example` da raiz como referência. Configure
+`A2A_QDRANT_VECTOR_SIZE` (1536 para `text-embedding-3-small`) e
+`A2A_QDRANT_VOYAGE_VECTOR_SIZE` (1024 para `voyage-4-large`). A primeira
+sincronização após habilitar Voyage reindexa o corpus nos dois espaços e publica
+uma geração nova. A credencial de escrita Qdrant precisa criar a coleção de
+staging e atualizar o alias configurado. Se as credenciais ou os modelos
+estiverem ausentes/inválidos, a prontidão ou as chamadas de modelo falharão.
+Para execução fora do Compose, o padrão de cada aplicação continua sendo
+`provider`.
 
 Depois de mudar `.env`, valide e recrie os serviços:
 

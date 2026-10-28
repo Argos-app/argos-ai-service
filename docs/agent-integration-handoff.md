@@ -56,28 +56,14 @@ grupo seja atribuído a um agente não autorizado.
 
 ## Estratégia de saída estruturada
 
-Os agentes `router`, especialistas e `question_formatter` usam `ToolStrategy`
-explicitamente no LangGraph. O schema aparece para o modelo como uma chamada de
-ferramenta estruturada, separada das ferramentas de negócio listadas nos slots.
-O LangGraph intercepta essa chamada, valida os argumentos contra o schema e
-entrega o objeto em `structured_response`; ela não é encaminhada ao MCP.
+Todos os agentes usam saída estruturada nativa JSON Schema da API OpenAI por
+`ProviderStrategy(strict=True)`. As ferramentas de negócio continuam vinculadas
+separadamente aos especialistas e a resposta estruturada permanece no campo
+`structured_response`; não é encaminhada como ferramenta MCP.
 
-Essa escolha evita depender da saída nativa por JSON Schema no endpoint NVIDIA
-compatível com OpenAI configurado no serviço, que já respondeu HTTP 500 a uma
-requisição com esse formato. O formatador não tem ferramentas de negócio, mas
-usa a mesma estratégia estruturada. O `orchestrator` e o `judge` recebem texto
-normal no provider e têm a resposta interpretada e validada no adaptador; no
-runtime simulado, usam `ToolStrategy`.
-
-Quando um schema é passado diretamente ao `create_agent`, LangGraph pode
-selecionar a estratégia nativa a partir do perfil declarado pelo modelo. Essa
-seleção não é uma tentativa com fallback: uma falha HTTP da chamada nativa não
-faz o LangGraph repetir automaticamente com uma chamada de ferramenta. A
-validação do bootstrap em `model_factory.py` verifica apenas se o objeto
-LangChain permite vincular ferramentas localmente para esses agentes; ela não
-chama o endpoint nem verifica a resposta real do provider. O suporte efetivo do
-provider deve ser verificado por teste de integração com credenciais e endpoint
-de homologação.
+O bootstrap em `model_factory.py` valida localmente o suporte do modelo a saída
+estruturada e, quando necessário, a vinculação de ferramentas. Essa verificação
+não chama o provider nem substitui a validação durante a chamada.
 
 Exemplo de composição quando os adaptadores estiverem disponíveis:
 
@@ -105,9 +91,9 @@ infraestrutura. O exemplo não inicializa servidor nem credenciais.
 ## FastAPI, sessão e retomada
 
 Depois de validar usuário, fazenda e sessão, o serviço da API pode chamar
-`executar_fluxo` para uma nova mensagem ou `executar_resposta` para responder a
-uma pergunta pendente. As duas funções aceitam `RunnableConfig`, preservam
-callbacks, tags e metadados e sempre definem o `thread_id` a partir do
+`execute_workflow` para uma nova mensagem ou `resume_workflow_answer` para
+responder a uma pergunta pendente. As duas funções aceitam `RunnableConfig`,
+preservam callbacks, tags e metadados e sempre definem o `thread_id` a partir do
 `session_id` validado. Para retomar uma pergunta, o grafo precisa ser compilado
 com um checkpointer compartilhado entre as chamadas.
 

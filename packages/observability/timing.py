@@ -45,12 +45,14 @@ class OperationTimer:
         return self._started_at
 
     def finish(self) -> TimingResult:
-        """Finaliza a medição sem derivar duração da diferença entre datetimes."""
+        """Finaliza a medição sem derivar duração da diferença entre datetimes.
+
+        Ajuste de relógio civil não deve produzir uma observação inválida."""
         if self._result is not None:
             return self._result
 
         observed_end = _utc_millisecond(self._clock.now_utc())
-        # Ajuste de relógio civil não deve produzir uma observação inválida.
+
         ended_at = max(self._started_at, observed_end)
         elapsed_ns = max(0, self._clock.monotonic_ns() - self._started_ns)
         self._result = TimingResult(

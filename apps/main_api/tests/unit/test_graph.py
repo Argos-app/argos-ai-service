@@ -24,7 +24,7 @@ from app.graph.specialist_helpers import (
     email_dispatch_recovery_context as _email_dispatch_recovery_context,
 )
 from app.graph.state import AgentState
-from app.graph.workflow import build_graph, executar_fluxo, executar_resposta
+from app.graph.workflow import build_graph, execute_workflow, resume_workflow_answer
 from app.graph.workflow_nodes import (
     NO_VERIFIED_RESULT_ANSWER,
     ROUTER_UNAVAILABLE_ANSWER,
@@ -33,15 +33,15 @@ from app.graph.workflow_nodes import (
     answer_state,
     build_agent_context,
     initial_state,
-    no_especialista,
-    no_formatador,
-    no_guardrail_entrada,
-    no_guardrail_saida,
-    no_juiz,
-    no_orquestrador,
-    no_roteador,
-    no_saida_segura,
     reset_turn_state,
+    run_input_guardrail_node,
+    run_judge_node,
+    run_orchestrator_node,
+    run_output_guardrail_node,
+    run_question_formatter_node,
+    run_router_node,
+    run_safe_response_node,
+    run_specialist_node,
     synthesis_timeout_with_runtime_grace,
 )
 from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
@@ -106,7 +106,7 @@ async def test_router_uses_followup_context_without_keyword_retry():
     state = request_state("Pelo resultado da consulta anterior, qual era a propriedade?")
     state["sanitized_message"] = "Pelo resultado da consulta anterior, qual era a propriedade?"
     state["session_context"] = history
-    update = await no_roteador(state, factory=FakeFactory(router=router))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
     assert update["route"] == ["farm"]
     assert len(router.calls) == 1
     assert router.calls[0][0].session_context.recent_messages == history.recent_messages
@@ -118,7 +118,7 @@ async def test_empty_route_is_not_retried_or_rewritten_by_keyword_rules():
     state = request_state("Qual era o resultado anterior?")
     state["sanitized_message"] = "Qual era o resultado anterior?"
     state["session_context"] = SessionContext(session_summary="Consulta de um lote")
-    update = await no_roteador(state, factory=FakeFactory(router=router))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
     assert len(router.calls) == 1
     assert "missing_fields" not in update
     assert "Não consegui identificar" in update["final_answer"]
@@ -137,7 +137,7 @@ async def test_information_provider_failure_preserves_successful_a2a_evidence():
         reference="tool-call:documental-1",
     )
     with execution_limits_scope(limits):
-        update = await no_especialista(
+        update = await run_specialist_node(
             state,
             agent_id=AgentId.INFORMATION,
             factory=FakeFactory(information=FakeAgent(ProviderStatusError(500))),
@@ -181,7 +181,7 @@ async def test_secretary_invalid_output_recovers_only_current_valid_preparation(
         current_task_index=0,
     )
     secretary = FakeAgent(ValueError("invalid schema"))
-    update = await no_especialista(
+    update = await run_specialist_node(
         state,
         agent_id=AgentId.SECRETARY,
         factory=FakeFactory(secretary=secretary),
@@ -237,7 +237,7 @@ async def test_secretary_failure_uses_persisted_recipient_question():
         ordered_tasks=(task(agent="secretary"),),
         current_task_index=0,
     )
-    update = await no_especialista(
+    update = await run_specialist_node(
         state,
         agent_id=AgentId.SECRETARY,
         factory=FakeFactory(secretary=FakeAgent(ValueError("invalid schema"))),
@@ -267,7 +267,7 @@ async def test_recipient_clarification_uses_persisted_prompt_without_calling_for
         question_id=question_id,
     )
 
-    update = await no_formatador(
+    update = await run_question_formatter_node(
         state,
         factory=FakeFactory(question_formatter=FakeAgent(ValueError("must not run"))),
     )
@@ -278,7 +278,7 @@ async def test_recipient_clarification_uses_persisted_prompt_without_calling_for
 
 
 def test_safe_response_preserves_recovered_email_action_outcome() -> None:
-    result = no_saida_segura(
+    result = run_safe_response_node(
         {
             "final_answer": SAFE_ANSWER,
             "email_action_summary": "O MCP confirmou o recebimento do envio.",
@@ -300,7 +300,7 @@ def test_safe_response_prefers_confirmed_email_dispatch_over_generic_failure() -
         ),
     )
 
-    result = no_saida_segura(state)
+    result = run_safe_response_node(state)
 
     assert "o MCP confirmou" in result["final_answer"]
     assert "O provedor aceitou o despacho" in result["final_answer"]
@@ -332,7 +332,7 @@ def test_output_guardrail_reports_dispatch_when_secretary_answer_is_unavailable(
         draft_result=OrchestratorResult(draft_answer="O envio não aconteceu."),
     )
 
-    result = no_guardrail_saida(state)
+    result = run_output_guardrail_node(state)
 
     assert "O provedor aceitou o despacho" in result["final_answer"]
     assert "O envio não aconteceu" not in result["final_answer"]
@@ -362,7 +362,7 @@ def test_output_guardrail_replaces_unconfirmed_email_preparation_claim() -> None
         ),
     )
 
-    result = no_guardrail_saida(state)
+    result = run_output_guardrail_node(state)
 
     assert "não foi confirmada pelo MCP de e-mail" in result["final_answer"]
     assert "foi preparado e está pronto" not in result["final_answer"]
@@ -396,7 +396,7 @@ def test_output_guardrail_skips_non_text_execution_context_values():
     )
 
     with execution_limits_scope(ExecutionLimits(4, 4)):
-        result = no_guardrail_saida(state)
+        result = run_output_guardrail_node(state)
 
     assert result["final_answer"] == "Consulta local concluída."
 
@@ -419,7 +419,7 @@ def test_output_guardrail_does_not_claim_search_found_nothing_after_agent_failur
     )
 
     with execution_limits_scope(ExecutionLimits(4, 4)):
-        result = no_guardrail_saida(state)
+        result = run_output_guardrail_node(state)
 
     assert result["final_answer"] == NO_VERIFIED_RESULT_ANSWER
 
@@ -428,7 +428,7 @@ def test_output_guardrail_does_not_claim_search_found_nothing_after_agent_failur
 async def test_router_failure_explains_that_no_query_started():
     state = request_state()
     state["sanitized_message"] = "Quais aplicações existem?"
-    result = await no_roteador(
+    result = await run_router_node(
         state,
         factory=FakeFactory(router=FakeAgent(ProviderStatusError(502))),
     )
@@ -460,7 +460,7 @@ async def test_abstention_is_reported_as_degraded():
     )
 
     with execution_limits_scope(ExecutionLimits(4, 4)):
-        result = await no_especialista(
+        result = await run_specialist_node(
             state,
             factory=factory,
             agent_id=AgentId.INFORMATION,
@@ -492,7 +492,7 @@ async def test_tool_abstention_survives_followup_provider_failure():
     )
 
     with execution_limits_scope(limits):
-        update = await no_especialista(
+        update = await run_specialist_node(
             state,
             factory=FakeFactory(information=FakeAgent(ProviderStatusError(502))),
             agent_id=AgentId.INFORMATION,
@@ -516,7 +516,7 @@ async def test_orchestrator_skips_llm_when_every_agent_lacks_verified_evidence()
     )
     orchestrator = FakeAgent()
 
-    result = await no_orquestrador(
+    result = await run_orchestrator_node(
         state,
         factory=FakeFactory(orchestrator=orchestrator),
     )
@@ -544,7 +544,7 @@ async def test_orchestrator_timeout_returns_tool_evidence_and_specific_degradati
     )
 
     with execution_limits_scope(limits):
-        result = await no_orquestrador(
+        result = await run_orchestrator_node(
             state,
             factory=FakeFactory(orchestrator=FakeAgent(TimeoutError())),
         )
@@ -578,7 +578,7 @@ async def test_orchestrator_uses_configured_timeout_and_preserves_tool_evidence(
     )
 
     with execution_limits_scope(limits):
-        result = await no_orquestrador(
+        result = await run_orchestrator_node(
             state,
             factory=FakeFactory(orchestrator=SlowAgent()),
             timeout_seconds=0.001,
@@ -608,7 +608,7 @@ async def test_judge_failure_explains_unverified_result_after_agent_failures():
         called_agents=[],
     )
 
-    result = await no_juiz(
+    result = await run_judge_node(
         state,
         factory=FakeFactory(judge=FakeAgent(ProviderStatusError(502))),
     )
@@ -640,7 +640,7 @@ async def test_judge_provider_failure_preserves_confirmed_secretary_preparation(
     limits = ExecutionLimits(4, 4)
     limits.record_tool_success("farm", "resolve_report_lot_report_source", '{"status":"ok"}')
     with execution_limits_scope(limits):
-        result = await no_juiz(
+        result = await run_judge_node(
             state,
             factory=FakeFactory(judge=FakeAgent(ProviderStatusError(502))),
         )
@@ -683,7 +683,7 @@ async def test_judge_timeout_returns_tool_evidence_and_specific_degradation():
     )
 
     with execution_limits_scope(limits):
-        result = await no_juiz(
+        result = await run_judge_node(
             state,
             factory=FakeFactory(judge=FakeAgent(TimeoutError())),
         )
@@ -723,7 +723,7 @@ async def test_judge_uses_configured_timeout_and_preserves_tool_evidence():
     limits.record_tool_success("farm", "list_lots", source.excerpt, reference=source.reference)
 
     with execution_limits_scope(limits):
-        result = await no_juiz(
+        result = await run_judge_node(
             state,
             factory=FakeFactory(judge=SlowAgent()),
             timeout_seconds=0.001,
@@ -761,7 +761,7 @@ async def test_judge_receives_all_trusted_tool_evidence_even_if_draft_omits_sour
     )
     judge = FakeAgent(JudgeResult(decision="approved", reason="Os dados são compatíveis."))
 
-    result = await no_juiz(state, factory=FakeFactory(judge=judge))
+    result = await run_judge_node(state, factory=FakeFactory(judge=judge))
 
     assert result["judge_result"].decision == "approved"
     judge_input = judge.calls[0][0]
@@ -801,7 +801,7 @@ async def test_judge_receives_structured_dispatch_evidence_separate_from_agent_t
     )
     judge = FakeAgent(JudgeResult(decision="approved", reason="Evidência explícita recebida."))
 
-    await no_juiz(state, factory=FakeFactory(judge=judge))
+    await run_judge_node(state, factory=FakeFactory(judge=judge))
 
     evidence = judge.calls[0][0].outcomes[0].email_dispatch
     assert evidence is not None
@@ -825,7 +825,7 @@ async def test_data_agent_must_have_real_external_tool_evidence():
     factory = FakeFactory(analyst=FakeAgent(result))
 
     with execution_limits_scope(ExecutionLimits(4, 4)):
-        update = await no_especialista(
+        update = await run_specialist_node(
             state,
             factory=factory,
             agent_id=AgentId.ANALYST,
@@ -858,7 +858,7 @@ async def test_successful_external_tool_call_is_attached_as_runtime_evidence():
     )
 
     with execution_limits_scope(limits):
-        update = await no_especialista(
+        update = await run_specialist_node(
             state,
             factory=factory,
             agent_id=AgentId.ANALYST,
@@ -889,7 +889,7 @@ async def test_report_keyword_does_not_inject_farm_into_router_plan():
 
     state = request_state("Envie o relatório do lote HC-LOTE-001 por e-mail.")
     state["sanitized_message"] = "Envie o relatório do lote HC-LOTE-001 por e-mail."
-    update = await no_roteador(state, factory=FakeFactory(router=router))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
 
     assert [item.agent.value for item in update["ordered_tasks"]] == ["secretary"]
 
@@ -904,7 +904,7 @@ async def test_report_keyword_does_not_inject_secretary_into_router_plan():
     state["sanitized_message"] = (
         "Prepare para conferência o relatório do lote HC-LOTE-001 para os usuários informados."
     )
-    update = await no_roteador(state, factory=FakeFactory(router=router))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
 
     assert [item.agent.value for item in update["ordered_tasks"]] == ["farm"]
 
@@ -927,7 +927,7 @@ async def test_router_planned_report_dependency_is_preserved():
     )
 
     state = request_state("Prepare o relatório do lote HC-LOTE-001 para conferência.")
-    update = await no_roteador(state, factory=FakeFactory(router=router))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
 
     assert [item.agent.value for item in update["ordered_tasks"]] == ["farm", "secretary"]
     assert update["ordered_tasks"][1].depends_on == ("farm-source",)
@@ -942,7 +942,7 @@ async def test_confirming_an_existing_report_does_not_create_a_new_farm_task():
 
     state = request_state("Confirme e envie o relatório já preparado.")
     state["sanitized_message"] = "Confirme e envie o relatório já preparado."
-    update = await no_roteador(state, factory=FakeFactory(router=router))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
 
     assert [item.agent.value for item in update["ordered_tasks"]] == ["secretary"]
 
@@ -975,7 +975,7 @@ async def test_secretary_cannot_claim_new_report_prepared_without_mcp_record():
         agent="secretary", status="success", answer="Relatório preparado e pronto para envio."
     )
 
-    update = await no_especialista(
+    update = await run_specialist_node(
         state,
         agent_id=AgentId.SECRETARY,
         factory=FakeFactory(secretary=FakeAgent(result)),
@@ -1140,7 +1140,7 @@ def test_clarification_guardrail_preserves_recipients_and_source_intent():
     }
     state["messages"] = [HumanMessage(content="para Bruno Lima")]
 
-    result = no_guardrail_entrada(state)
+    result = run_input_guardrail_node(state)
 
     assert "Bruno Lima" not in result["sanitized_message"]
     assert "[DESTINATARIO_1]" in result["sanitized_message"]
@@ -1152,7 +1152,7 @@ def test_clarification_guardrail_preserves_recipients_and_source_intent():
 
 
 @pytest.mark.asyncio
-async def test_executar_fluxo_preserves_trace_config_and_uses_trusted_session_id() -> None:
+async def test_execute_workflow_preserves_trace_config_and_uses_trusted_session_id() -> None:
     graph = RecordingGraph()
     config = {
         "configurable": {"thread_id": "untrusted-thread", "checkpoint_ns": "test"},
@@ -1160,7 +1160,7 @@ async def test_executar_fluxo_preserves_trace_config_and_uses_trusted_session_id
         "tags": ["argos"],
     }
 
-    result = await executar_fluxo(
+    result = await execute_workflow(
         graph,
         "Quais aplicações existem?",
         user_id="user-demo",
@@ -1180,11 +1180,11 @@ async def test_executar_fluxo_preserves_trace_config_and_uses_trusted_session_id
 
 
 @pytest.mark.asyncio
-async def test_executar_fluxo_restores_saved_recipients_for_explicit_send_confirmation() -> None:
+async def test_execute_workflow_restores_saved_recipients_for_explicit_send_confirmation() -> None:
     selectors = {"[DESTINATARIO_1]": {"kind": "name", "value": "Ana Silva"}}
     graph = RecordingGraph(values={"recipient_selectors": selectors})
 
-    await executar_fluxo(
+    await execute_workflow(
         graph,
         "Envie o relatório do lote HC-01 agora.",
         user_id="user-demo",
@@ -1200,11 +1200,11 @@ async def test_executar_fluxo_restores_saved_recipients_for_explicit_send_confir
 
 
 @pytest.mark.asyncio
-async def test_executar_resposta_resumes_the_requested_question_thread() -> None:
+async def test_resume_workflow_answer_resumes_the_requested_question_thread() -> None:
     graph = RecordingGraph()
     question_id = "2c18f674-5608-4af2-a40c-b0fb1d6f0441"
 
-    state = await executar_resposta(
+    state = await resume_workflow_answer(
         graph,
         "Quero consultar setembro.",
         question_id=question_id,
@@ -1223,7 +1223,7 @@ async def test_executar_resposta_resumes_the_requested_question_thread() -> None
 @pytest.mark.asyncio
 async def test_session_checkpoint_uses_root_namespace_for_reliable_resume() -> None:
     graph = RecordingGraph()
-    await executar_fluxo(
+    await execute_workflow(
         graph,
         "Quais aplicações existem?",
         user_id="user-demo",
@@ -1231,7 +1231,7 @@ async def test_session_checkpoint_uses_root_namespace_for_reliable_resume() -> N
         session_id="session-demo",
         interaction_id="message-interaction",
     )
-    await executar_resposta(
+    await resume_workflow_answer(
         graph,
         "setembro",
         question_id="question-demo",

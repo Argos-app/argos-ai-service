@@ -53,7 +53,7 @@ def merge_recipient_selectors(
     incoming: dict[str, dict[str, str]],
     text: str,
 ) -> tuple[dict[str, dict[str, str]], str]:
-    """Merge refs without allowing a clarification to overwrite an older value."""
+    """Combina referências sem permitir que um esclarecimento substitua um valor anterior."""
     merged = dict(existing)
     sanitized = text
     for reference, selector in incoming.items():
@@ -80,13 +80,17 @@ def merge_recipient_selectors(
 
 
 def protect_user_input(text: str) -> ProtectedInput:
-    """Extrai e-mails como seletores sem ocultá-los; minimiza outras PII."""
+    """Extrai e-mails como seletores sem ocultá-los; minimiza outras PII.
+
+    Endereços são capturados como seletores independentemente da formulação
+    ao redor. A Secretaria ainda resolve cada seletor no diretório; capturar
+    um endereço nunca autoriza preparação ou envio.
+    Nomes, com ou sem aspas, só são seletores no contexto de uma
+    operação de e-mail. Assim, "para Ivervet Teste" numa consulta de catálogo
+    permanece texto de negócio, não vira um destinatário."""
     candidates: list[tuple[int, int, str, str]] = []
     send_requested = _has_positive_send_intent(text)
     for match in EMAIL_PATTERN.finditer(text):
-        # Endereços são capturados como seletores independentemente da formulação
-        # ao redor. A Secretaria ainda resolve cada seletor no diretório; capturar
-        # um endereço nunca autoriza preparação ou envio.
         prefix_start = max(0, match.start() - 32)
         prefix = text[prefix_start : match.start()]
         destination = re.search(
@@ -110,9 +114,7 @@ def protect_user_input(text: str) -> ProtectedInput:
         candidates.append((match.start(), end, "email", match.group()))
 
     name_patterns = []
-    # Nomes, com ou sem aspas, só são seletores no contexto de uma
-    # operação de e-mail. Assim, "para Ivervet Teste" numa consulta de catálogo
-    # permanece texto de negócio, não vira um destinatário.
+
     if _EMAIL_WORKFLOW_CONTEXT_PATTERN.search(text):
         name_patterns.extend((_QUOTED_NAME_PATTERN, _UNQUOTED_NAME_PATTERN))
     for pattern in name_patterns:
