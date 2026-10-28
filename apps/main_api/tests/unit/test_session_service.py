@@ -627,7 +627,7 @@ async def test_lease_loss_cancels_processing_before_finalization(
     assert len(conversations.messages) == 1
     assert next(iter(interactions.records.values())).status == InteractionStatus.RUNNING
     if renewal != "refused":
-        assert "session lease renewal failed" in caplog.text
+        assert "falha ao renovar o lease" in caplog.text
 
 
 @pytest.mark.asyncio

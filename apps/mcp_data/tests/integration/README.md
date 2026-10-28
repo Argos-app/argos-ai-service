@@ -26,7 +26,7 @@ docker compose -f apps/mcp_data/tests/integration/compose.yaml down -v
 ```
 
 Sem `MCP_DATA_RUN_INTEGRATION=1`, a fixture pula os testes. As portas locais
-reservadas são `54329` (PostgreSQL) e `27029` (MongoDB). Não aponte essa suíte
+reservadas são `54331` (PostgreSQL) e `27029` (MongoDB). Não aponte essa suíte
 para bancos compartilhados ou de produção: ela cria e remove bancos com prefixo
 `mcp_data_it_`.
 

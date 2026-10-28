@@ -15,13 +15,13 @@ from uuid import uuid4
 import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parents[4]
-SQL_ADMIN_DSN = "postgresql://mcp_data_test:mcp_data_test_local_only@127.0.0.1:54329/mcp_data_test"
+SQL_ADMIN_DSN = "postgresql://mcp_data_test:mcp_data_test_local_only@127.0.0.1:54331/mcp_data_test"
 MONGO_URI = "mongodb://127.0.0.1:27029"
 SCHEMA_MODULES = tuple(
     ROOT / "infrastructure" / "docker" / "postgres" / "init" / f"{index:02d}_{name}.sql"
     for index, name in enumerate(
         (
-            "configuracao",
+            "configuration",
             "tabelas",
             "dados_iniciais",
             "indices",
