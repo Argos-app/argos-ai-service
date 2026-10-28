@@ -8,5 +8,8 @@ dados sintéticos como dados de produção.
 Ao mudar schema, permissões, ordem dos scripts ou fixtures, revise o Compose da
 raiz, o script de seed, o MCP de dados, o MCP de predição e seus testes de
 integração. O leitor dos serviços usa acesso limitado; não remova os controles
-read-only. Comandos e contexto em [Docker local](../docs/docker-local.md) e nos
+read-only. Comandos e contexto em [Docker local](docker/docker-local.md) e nos
 READMEs de integração dos serviços.
+
+O [guia de Docker](docker/agent.md) trata da pilha integrada; o
+[guia Mongo](mongodb/agent.md) reúne configuração, estrutura e consumo de dados.

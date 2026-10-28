@@ -1,9 +1,9 @@
 # Kubernetes local — guia para agentes
 
-`local/` contém recursos Kustomize para namespace, storage, PostgreSQL,
+Este diretório contém recursos Kustomize para namespace, storage, PostgreSQL,
 dependências, aplicações e probes locais. A preparação de segredos e o build das
 imagens ficam em `scripts/kubernetes`; siga
-[o guia Kubernetes](../docs/kubernetes-local.md) para pré-requisitos e comandos.
+[o guia Kubernetes](kubernetes-local.md) para pré-requisitos e comandos.
 
 Preserve os limites entre segredos locais e configuração versionada. Mudanças em
 portas, imagens, probes ou dependências devem ser conferidas contra Dockerfiles,

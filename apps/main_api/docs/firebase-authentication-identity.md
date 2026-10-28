@@ -38,8 +38,8 @@ O PostgreSQL é consultado por uma credencial read-only configurada por
 `MAIN_API_AUTH_DATABASE_URL`. O Firebase usa `MAIN_API_FIREBASE_PROJECT_ID` e
 Application Default Credentials ou `MAIN_API_FIREBASE_CREDENTIALS_FILE`. O JWT
 próprio requer chave privada Ed25519 e ID de chave do serviço; suas variáveis
-estão no [.env.example](../apps/main_api/.env.example). `AUTH_MODE=stub` só é
-permitido com `APP_ENV=local`.
+estão no [.env.example](../.env.example). `AUTH_MODE=stub` só é permitido com
+`APP_ENV=local`.
 
 ## Chamadas entre serviços
 
@@ -58,5 +58,5 @@ python -m pytest apps/main_api/tests/unit/test_auth.py apps/main_api/tests/unit/
 
 Esses testes usam doubles para Firebase e banco. A consulta PostgreSQL real é
 coberta com infraestrutura descartável conforme o
-[guia de integração da Main API](../apps/main_api/tests/integration/README.md).
-Nenhum desses testes comprova credenciais ou schema de um ambiente implantado.
+[guia de integração da Main API](../tests/integration/README.md). Nenhum desses
+testes comprova credenciais ou schema de um ambiente implantado.

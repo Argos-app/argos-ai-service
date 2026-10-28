@@ -16,9 +16,9 @@ $env:PYTHONPATH = "apps/mcp_prediction/src"
 python -m argos_mcp_prediction
 ```
 
-Consulte [Docker local](../../docs/docker-local.md) para a pilha integrada e
-[tests/integration/README.md](tests/integration/README.md) para a validação
-isolada. Testes unitários:
+Consulte [Docker local](../../infrastructure/docker/docker-local.md) para a
+pilha integrada e [tests/integration/README.md](tests/integration/README.md)
+para a validação isolada. Testes unitários:
 
 ```powershell
 python -m pytest apps/mcp_prediction/tests/unit -q

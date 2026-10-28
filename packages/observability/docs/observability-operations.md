@@ -161,7 +161,7 @@ histórico durável.
 Para exportação de BI, use o contrato e a paginação idempotente descritos em
 [mongodb-observability-extraction.md](mongodb-observability-extraction.md). Para
 campos e origem de dados de negócio, consulte o
-[dicionário MongoDB para BI](mongodb-analytics-dictionary.md).
+[dicionário MongoDB para BI](../../../infrastructure/mongodb/mongodb-analytics-dictionary.md).
 
 ## Estimar custo e retorno
 

@@ -2,8 +2,9 @@
 
 A Main API persiste estado conversacional no MongoDB e usa o checkpointer Mongo
 do LangGraph. Este guia resume a implementação atual; os formatos e índices
-estão em [estruturas Mongo](mongodb-collection-structures.md) e as rotas em
-[API principal](api-main-api.md).
+estão em
+[estruturas Mongo](../../../infrastructure/mongodb/mongodb-collection-structures.md)
+e as rotas em [API principal](api-main-api.md).
 
 ## Sessão e interação
 
@@ -57,7 +58,7 @@ resumos e memória não têm TTL configurado nesses repositórios.
 ## Verificação
 
 Execute `python -m pytest apps/main_api/tests/unit -q`. O
-[guia de integração](../apps/main_api/tests/integration/README.md) descreve
-Mongo replica set, PostgreSQL e MCP de e-mail descartáveis para persistência,
-concorrência, autenticação e retomada. Esses testes não substituem validação de
-credenciais ou dados de produção.
+[guia de integração](../tests/integration/README.md) descreve Mongo replica set,
+PostgreSQL e MCP de e-mail descartáveis para persistência, concorrência,
+autenticação e retomada. Esses testes não substituem validação de credenciais ou
+dados de produção.

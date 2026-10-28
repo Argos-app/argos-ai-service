@@ -17,7 +17,8 @@ python -m argos_mcp_data
 ```
 
 O processo exige serviços e credenciais configurados. A execução integrada e o
-build estão em [Docker local](../../docs/docker-local.md). Para validar:
+build estão em [Docker local](../../infrastructure/docker/docker-local.md). Para
+validar:
 
 ```powershell
 python -m pytest apps/mcp_data/tests/unit -q

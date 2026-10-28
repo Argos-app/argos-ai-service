@@ -13,8 +13,8 @@ real do trecho alterado.
 `graph/workflow.py` compõe guardrails, roteador, os especialistas Fazenda,
 Doutor, Analista, Secretário e Informações, Orquestrador, Juiz e formatador de
 perguntas. A rota é executada conforme o estado e as dependências das tarefas;
-consulte o [guia do fluxo](../../docs/agent-workflow.md), o grafo e seus testes
-antes de alterar a ordem.
+consulte o [guia do fluxo](docs/agent-workflow.md), o grafo e seus testes antes
+de alterar a ordem.
 
 ## Pontos de atenção
 
@@ -28,8 +28,8 @@ antes de alterar a ordem.
 - O resumo e a memória usam modelos configurados; mantenha a contagem de tokens,
   fallback, limites e observabilidade ao alterar `model_factory.py`.
 - Campos HTTP e Mongo são contratos; confira consumidores, índices e
-  [documentação Mongo](../../docs/mongodb-collection-structures.md) antes de
-  alterá-los.
+  [documentação Mongo](../../infrastructure/mongodb/mongodb-collection-structures.md)
+  antes de alterá-los.
 
 ## Dependências e verificações
 
@@ -37,6 +37,11 @@ MongoDB fornece persistência e checkpointer; PostgreSQL consulta cadastro e
 permissões; Redis é usado no ranking de uso quando configurado. O processo chama
 MCPs de dados, e-mail e predição, e o A2A documental; também pode chamar
 providers e LangSmith. Compartilha `packages/contracts`, `security` e
-`observability`. O [guia de sessões e memória](../../docs/session-memory.md)
-descreve os limites e a retomada. Comandos e contrato em [README.md](README.md);
-testes de integração usam serviços descartáveis conforme seu README.
+`observability`. O [guia de sessões e memória](docs/session-memory.md) descreve
+os limites e a retomada. Comandos e contrato em [README.md](README.md); testes
+de integração usam serviços descartáveis conforme seu README.
+
+O [contrato HTTP](docs/api-main-api.md), o
+[OpenAPI versionado](docs/openapi-main-api.json) e o
+[guia de autenticação](docs/firebase-authentication-identity.md) acompanham esta
+aplicação. Atualize o snapshot OpenAPI e seus testes ao alterar o contrato.

@@ -16,10 +16,9 @@ de entrada do Mailpit são efêmeros; tarefas A2A em andamento continuam em
 memória e não são recuperadas após reinício, conforme o contrato atual. Remover
 o cluster remove os dados hospedados dentro do nó.
 
-O Compose atual não inclui Collector OpenTelemetry, Prometheus, Grafana ou
-Tempo, apesar de esses componentes aparecerem na descrição histórica do plano
-geral. Esta configuração Kubernetes também não os inclui. A telemetria da
-aplicação mantém as configurações locais atuais e não depende do LangSmith.
+O Compose e esta configuração Kubernetes não incluem Collector OpenTelemetry,
+Prometheus, Grafana ou Tempo. A telemetria da aplicação mantém as configurações
+locais atuais e não depende do LangSmith.
 
 ## Pré-requisitos
 
@@ -148,12 +147,12 @@ kubectl -n argos-local port-forward service/mailpit 8025:8025 1025:1025
 ```
 
 Use o fluxo autenticado de sessão e interação descrito em
-[docs/api-main-api.md](api-main-api.md). No modo local `AUTH_MODE=stub`, envie
-`Authorization: Bearer local-dev`; a identidade é fornecida pelo stub e não deve
-ser usada fora do ambiente descartável. Use a UI do Mailpit em
-`http://127.0.0.1:8025` para conferir o e-mail simulado. A aplicação só envia se
-o fluxo e os dados de destinatário autorizados permitirem; subir Mailpit não
-cria documentos de negócio.
+[contrato da API](../../apps/main_api/docs/api-main-api.md). No modo local
+`AUTH_MODE=stub`, envie `Authorization: Bearer local-dev`; a identidade é
+fornecida pelo stub e não deve ser usada fora do ambiente descartável. Use a UI
+do Mailpit em `http://127.0.0.1:8025` para conferir o e-mail simulado. A
+aplicação só envia se o fluxo e os dados de destinatário autorizados permitirem;
+subir Mailpit não cria documentos de negócio.
 
 A configuração não carrega automaticamente documentos empresariais para as
 collections `cattle_documents` e `medicine_documents`; o Compose também não as

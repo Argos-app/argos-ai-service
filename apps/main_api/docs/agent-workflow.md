@@ -1,8 +1,8 @@
 # Fluxo dos agentes e integrações
 
 Este guia descreve o grafo atual da Main API. Para execução e contrato HTTP,
-consulte [README da Main API](../apps/main_api/README.md); para detalhes de
-sessão e memória, veja [persistência](session-memory.md).
+consulte [README da Main API](../README.md); para detalhes de sessão e memória,
+veja [persistência](session-memory.md).
 
 ## Orquestração
 
@@ -50,4 +50,4 @@ saída estruturada e tools. Contagem de tokens é usada na sumarização. Consul
 `called_agents`, fontes, erros e `retry_count` são estado do grafo;
 `retry_count` acompanha revisões, não todas as tentativas de provider. Para
 traces, latência, uso e custos, veja
-[observabilidade](observability-operations.md).
+[observabilidade](../../../packages/observability/docs/observability-operations.md).

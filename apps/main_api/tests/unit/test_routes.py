@@ -26,7 +26,7 @@ client = TestClient(app)
 
 
 def test_published_openapi_matches_application_schema() -> None:
-    snapshot = Path(__file__).resolve().parents[4] / "docs" / "openapi-main-api.json"
+    snapshot = Path(__file__).resolve().parents[2] / "docs" / "openapi-main-api.json"
     assert json.loads(snapshot.read_text(encoding="utf-8")) == app.openapi()
 
 

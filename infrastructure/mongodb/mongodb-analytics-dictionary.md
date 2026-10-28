@@ -179,7 +179,8 @@ relatório, e-mail e memória tem retenção e risco diferentes; permissões BI 
 ser somente leitura e limitadas às collections/campos aprovados. A
 observabilidade não tem TTL e registros podem faltar por queda ou saturação da
 fila. Veja os guias de [configuração](mongodb-configuration.md),
-[extração](mongodb-observability-extraction.md) e
-[operação](observability-operations.md). Para schemas exatos dos documentos de
-negócio, consulte os modelos/repos/repositórios citados em cada aplicação; as
-collections de origem do MCP de dados exigem confirmação junto ao produtor.
+[extração](../../packages/observability/docs/mongodb-observability-extraction.md)
+e [operação](../../packages/observability/docs/observability-operations.md).
+Para schemas exatos dos documentos de negócio, consulte os
+modelos/repos/repositórios citados em cada aplicação; as collections de origem
+do MCP de dados exigem confirmação junto ao produtor.

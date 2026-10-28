@@ -11,4 +11,5 @@ Esses scripts têm efeitos reais sobre arquivos, bancos, imagens ou deploys.
 Confira argumentos, diretórios e ambiente antes de executá-los; nunca use bases
 de produção como fixtures. Mantenha consistente a lista de serviços e os
 contratos de build com os workflows, Dockerfiles e guias locais. As alterações
-do planejador Render são cobertas em `tests/test_render_deploy.py`.
+do planejador Render são cobertas em `tests/test_render_deploy.py`. Para
+alterações de implantação, leia [render/agent.md](render/agent.md).

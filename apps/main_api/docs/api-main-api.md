@@ -180,5 +180,5 @@ identificadores e a deduplicação do contrato para reenviar com segurança.
 ## Referências
 
 - [Autenticação Firebase e autorização por fazenda](firebase-authentication-identity.md)
-- [Operação e observabilidade](observability-operations.md)
+- [Operação e observabilidade](../../../packages/observability/docs/observability-operations.md)
 - [OpenAPI versionado](openapi-main-api.json)

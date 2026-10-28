@@ -32,10 +32,10 @@ sucesso na mesma branch, incluindo todas as alterações do intervalo:
   `pyproject.toml`, `pylock.toml`, `render.yaml` ou no próprio `deploy.yml`
   atualizam os cinco serviços. A regra de `packages/` é conservadora e inclui
   qualquer pacote compartilhado atual ou futuro.
-- Alterações somente em `docs/`, documentação na raiz, testes da raiz ou
-  infraestrutura local não geram deploy. Um README ou guia dentro de
-  `apps/<serviço>/` seleciona o serviço correspondente; documentação em
-  `packages/` seleciona os cinco serviços.
+- Alterações somente em documentação na raiz, testes da raiz ou infraestrutura
+  local não geram deploy. Um README ou guia dentro de `apps/<serviço>/`
+  seleciona o serviço correspondente; documentação em `packages/` ou
+  `scripts/render/` seleciona os cinco serviços.
 - A primeira execução, a execução após falha/cancelamento e a execução manual
   por `workflow_dispatch` atualizam os cinco serviços. Na execução manual,
   selecione `develop` ou `main`; outras branches são ignoradas e o commit

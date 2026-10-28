@@ -32,6 +32,8 @@ def test_application_change_only_deploys_that_service(service):
         "packages/contracts/lot_report.py",
         "packages/new_package/module.py",
         "scripts/render/build.sh",
+        "scripts/render/deploy-render.md",
+        "packages/observability/docs/observability-operations.md",
         ".github/workflows/deploy.yml",
         ".python-version",
         "pyproject.toml",
@@ -43,7 +45,16 @@ def test_shared_changes_deploy_all_consumers(path):
 
 
 def test_documentation_and_local_infrastructure_do_not_deploy():
-    assert plan.affected_services(["README.md", "docs/api.md", "compose.yaml"]) == []
+    assert (
+        plan.affected_services(
+            ["README.md", "infrastructure/mongodb/mongodb-configuration.md", "compose.yaml"]
+        )
+        == []
+    )
+
+
+def test_service_documentation_selects_its_service():
+    assert plan.affected_services(["apps/main_api/docs/api-main-api.md"]) == ["main_api"]
 
 
 def test_git_range_includes_multiple_commits_deletions_and_cross_service_moves(

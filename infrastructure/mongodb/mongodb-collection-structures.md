@@ -34,7 +34,7 @@ string ou UUID BSON, conforme configuração.
 | MCP de dados  | `medicine_documents`             | Somente leitura                  | Detalhes documentais de medicamentos.                           |
 | A2A           | `ai_a2a_observations`            | Leitura e escrita                | Observabilidade técnica do serviço A2A.                         |
 
-Os nomes, database compartilhado e configurações estão em
+Os nomes, databases e configurações estão em
 [`mongodb-configuration.md`](mongodb-configuration.md). O dicionário voltado a
 BI está em [`mongodb-analytics-dictionary.md`](mongodb-analytics-dictionary.md).
 

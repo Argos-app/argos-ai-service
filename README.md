@@ -138,11 +138,10 @@ estimados são persistidos nas observações Mongo e propagados ao LangSmith, ma
 são indicativos e não substituem a fatura do provider. Sem contagens ou tarifas
 suficientes, custo permanece desconhecido. Operação, ranking de chamadas e
 tokens por usuário e limites estão em
-[`docs/observability-operations.md`](docs/observability-operations.md); a
-extração e o dicionário BI estão em
-[`docs/mongodb-observability-extraction.md`](docs/mongodb-observability-extraction.md)
-e
-[`docs/mongodb-analytics-dictionary.md`](docs/mongodb-analytics-dictionary.md).
+[operação de observabilidade](packages/observability/docs/observability-operations.md);
+a extração e o dicionário BI estão em
+[extração Mongo](packages/observability/docs/mongodb-observability-extraction.md)
+e [dicionário BI](infrastructure/mongodb/mongodb-analytics-dictionary.md).
 Avaliações e feedback podem ser feitos sobre traces na plataforma; esta
 integração não define critérios automáticos de qualidade.
 
@@ -159,14 +158,14 @@ assistente, para que o aplicativo preserve o aviso de resposta parcial ao
 reabrir a conversa.
 
 O contrato OpenAPI e exemplos de autenticação, erros e correlação estão em
-[`docs/api-main-api.md`](docs/api-main-api.md) e
-[`docs/openapi-main-api.json`](docs/openapi-main-api.json).
+[contrato da API](apps/main_api/docs/api-main-api.md) e
+[OpenAPI versionado](apps/main_api/docs/openapi-main-api.json).
 
 O serviço precisa de Mongo em replica set para transações e checkpointer. Os
-serviços com persistência própria compartilham o banco `argos_ai` e separam os
-dados por collections. A configuração por sistema, variáveis, URIs para host e
-Compose, precedência e migração das collections antigas de e-mail estão em
-[`docs/mongodb-configuration.md`](docs/mongodb-configuration.md). O Compose
+serviços usam `argos_ai` como database padrão; o Compose integrado configura o
+mesmo banco local para eles. Cada serviço pode configurar seu próprio database.
+A configuração por sistema, variáveis e URIs para host e Compose estão em
+[configuração Mongo](infrastructure/mongodb/mongodb-configuration.md). O Compose
 local usa um único `.env` gerado por `scripts/docker/create-local-env.py`; os
 `.env.example` de cada aplicação serve para execução individual. Crie o arquivo
 local de um serviço copiando o exemplo correspondente, por exemplo
@@ -188,7 +187,7 @@ acesso somente leitura ao PostgreSQL e a chave Ed25519 própria do `main_api`; a
 fazendas são carregadas do cadastro em cada chamada. As decisões para a
 integração Firebase, incluindo a associação pelo UID e o tratamento de cadastros
 legados, estão em
-[`docs/firebase-authentication-identity.md`](docs/firebase-authentication-identity.md).
+[autenticação Firebase](apps/main_api/docs/firebase-authentication-identity.md).
 
 O tracing LangSmith opcional acompanha uma execução do grafo e suas chamadas
 aninhadas a agentes, modelos e ferramentas; os passos de resumo e memória são
@@ -218,7 +217,8 @@ instruções de integração isolada estão nos diretórios de testes da
 [MCP de predição](apps/mcp_prediction/tests/integration/README.md). A CI usa os
 mesmos arquivos Compose descartáveis e publica relatórios JUnit. O build da
 pilha integrada usa os Dockerfiles dos cinco serviços; consulte
-[Docker local](docs/docker-local.md) para executar a pilha e builds individuais.
+[Docker local](infrastructure/docker/docker-local.md) para executar a pilha e
+builds individuais.
 
 ### Fluxo de relatório de lote
 
@@ -301,7 +301,6 @@ argos-ai-service/
 ├── infrastructure/       # PostgreSQL e fixtures locais
 ├── k8s/                  # Recursos Kubernetes locais
 ├── scripts/              # Scripts de operação local e deploy
-├── docs/                 # Contratos, operação e registros de planejamento
 ├── compose.yaml          # Dependências locais e perfil integrado de serviços
 └── .github/workflows/    # CI no GitHub Actions
 ```
@@ -311,7 +310,7 @@ independente. Os contratos compartilhados precisam acompanhar o artefato de cada
 serviço que os consome; o processo não depende do código de outro serviço
 montado em runtime. O perfil Docker integrado, o schema e os dados sintéticos
 PostgreSQL, e os providers de modelo simulados estão documentados em
-[`docs/docker-local.md`](docs/docker-local.md). O modo simulado permite
+[Docker local](infrastructure/docker/docker-local.md). O modo simulado permite
 exercitar o fluxo sem chaves externas e identifica suas respostas como
 ilustrativas.
 
@@ -370,11 +369,11 @@ controle determinístico encerra a execução com conteúdo já validado ou uma
 mensagem segura.
 
 Para subir a integração em um cluster Kubernetes local, consulte
-[docs/kubernetes-local.md](docs/kubernetes-local.md). Os testes de integração e
-a CI verificam a versão atual conforme os comandos dos guias de cada serviço.
+[Kubernetes local](k8s/local/kubernetes-local.md). Os testes de integração e a
+CI verificam a versão atual conforme os comandos dos guias de cada serviço.
 
 O deploy pelo código-fonte no Render está preparado em
-[docs/deploy-render.md](docs/deploy-render.md): `develop` atualiza HM e `main`
+[deploy Render](scripts/render/deploy-render.md): `develop` atualiza HM e `main`
 atualiza produção após a CI, com cinco serviços independentes por ambiente e
 reimplantação dos consumidores quando `packages/` muda. A ativação depende da
 configuração inicial dos serviços e secrets descrita no guia.

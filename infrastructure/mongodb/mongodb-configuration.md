@@ -17,8 +17,8 @@ permissões de cada serviço.
 A configuração por serviço está nos arquivos `apps/<serviço>/.env.example`. O
 Python lê as variáveis do processo e não carrega esses arquivos automaticamente.
 Para o Compose integrado, gere o `.env` da raiz conforme
-[Docker local](docker-local.md). Em execução pelo host, use um endereço
-acessível e, para o replica set de teste que anuncia DNS interno,
+[Docker local](../docker/docker-local.md). Em execução pelo host, use um
+endereço acessível e, para o replica set de teste que anuncia DNS interno,
 `directConnection=true`.
 
 ## Collections e retenção
@@ -35,4 +35,4 @@ possuem TTL próprio. Consulte
 [estruturas das collections](mongodb-collection-structures.md) para campos e
 índices e o [dicionário de BI](mongodb-analytics-dictionary.md) para origem,
 dados sensíveis e limitações de consumo. A extração das observações está em
-[mongodb-observability-extraction.md](mongodb-observability-extraction.md).
+[mongodb-observability-extraction.md](../../packages/observability/docs/mongodb-observability-extraction.md).

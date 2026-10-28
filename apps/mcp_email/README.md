@@ -17,8 +17,9 @@ $env:PYTHONPATH = "apps/mcp_email/src"
 python -m argos_mcp_email
 ```
 
-A [pilha integrada](../../docs/docker-local.md) usa Mailpit local por padrão.
-Para testes unitários e integração com Mongo, PostgreSQL e Mailpit descartáveis:
+A [pilha integrada](../../infrastructure/docker/docker-local.md) usa Mailpit
+local por padrão. Para testes unitários e integração com Mongo, PostgreSQL e
+Mailpit descartáveis:
 
 ```powershell
 python -m pytest apps/mcp_email/tests/unit -q

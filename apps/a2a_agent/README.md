@@ -88,9 +88,10 @@ O principal inclui correlation ID, ID do span pai, `session_id` e
 `correlation_id`, `parent_observation_id`, `session_id` e `interaction_id` na
 observação A2A e nos spans de execução. O ID de protocolo da task continua
 distinto. A resposta da API principal expõe `X-Argos-Correlation-ID`; veja o
-guia de [operação](../../docs/observability-operations.md) para seguir a
-requisição nas collections de ambos os serviços. A coleta Mongo funciona sem
-LangSmith.
+guia de
+[operação](../../packages/observability/docs/observability-operations.md) para
+seguir a requisição nas collections de ambos os serviços. A coleta Mongo
+funciona sem LangSmith.
 
 O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
 para registrar o despacho do agente A2A e a chamada de geração de resposta no

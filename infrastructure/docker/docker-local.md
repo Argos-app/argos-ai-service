@@ -24,16 +24,11 @@ mesma entrada da chamada que falhou. Se a vetorização OpenAI falhar, a busca u
 Voyage e o vetor nomeado correspondente. A sincronização prepara os documentos
 nos dois espaços; embeddings de provedores diferentes não são misturados.
 
-No Principal, o roteador, os especialistas e o formatador de perguntas pedem
-saída estruturada pela estratégia de chamada de ferramenta do LangGraph. O
-endpoint deve aceitar chamadas de ferramenta; para agentes que também têm
-ferramentas MCP/A2A, deve aceitar as duas classes de ferramentas na mesma
-chamada. O formatador não expõe ferramentas de negócio. O bootstrap verifica se
-o LangChain consegue vincular ferramentas localmente, mas não faz uma chamada ao
-provider; valide a compatibilidade real em homologação. Não passe o schema
-diretamente como `response_format` nesse endpoint sem verificar o perfil e o
-suporte à saída JSON Schema: a seleção nativa automática não troca para chamada
-de ferramenta quando uma requisição nativa falha.
+Na Main API, os agentes usam `ProviderStrategy(strict=True)` para solicitar
+saída estruturada nativa. Especialistas também vinculam suas ferramentas de
+negócio, portanto o endpoint escolhido deve suportar JSON Schema e a combinação
+com tools quando necessário. O bootstrap verifica as interfaces localmente, sem
+fazer uma chamada ao provider; valide a compatibilidade real em homologação.
 
 `MAIN_API_EXECUTION_TIMEOUT_SECONDS=300` define o prazo total de uma interação.
 O timeout de cada chamada, o orçamento de chamadas e a validade das preparações
