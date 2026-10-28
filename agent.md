@@ -21,17 +21,17 @@ repositórios.
 
 ## Pacotes e infraestrutura
 
-| Diretório                | Papel atual                                                     | Guia                                                                                     |
-| ------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `packages/contracts`     | Contratos Pydantic compartilhados.                              | [agent.md](packages/contracts/agent.md) · [README](packages/contracts/README.md)         |
-| `packages/security`      | Autorização, delegação, assinaturas e adapters cadastrais.      | [agent.md](packages/security/agent.md) · [README](packages/security/README.md)           |
-| `packages/observability` | Modelos, coleta e persistência compartilhada de observações.    | [agent.md](packages/observability/agent.md) · [README](packages/observability/README.md) |
-| `infrastructure`         | Imagem PostgreSQL local, schema e dados sintéticos.             | [agent.md](infrastructure/agent.md)                                                      |
-| `k8s/local`              | Recursos para orquestração local.                               | [agent.md](k8s/agent.md) · [guia local](docs/kubernetes-local.md)                        |
-| `scripts`                | Inicialização, locks, dados locais e deploy Render.             | [agent.md](scripts/agent.md)                                                             |
-| `.github/workflows`      | CI, deploy e notificações.                                      | [agent.md](.github/agent.md)                                                             |
-| `tests`                  | Testes transversais de planejamento e deploy.                   | [agent.md](tests/agent.md)                                                               |
-| `docs`                   | Contratos e guias operacionais; há também registros históricos. | [agent.md](docs/agent.md)                                                                |
+| Diretório                | Papel atual                                                  | Guia                                                                                     |
+| ------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `packages/contracts`     | Contratos Pydantic compartilhados.                           | [agent.md](packages/contracts/agent.md) · [README](packages/contracts/README.md)         |
+| `packages/security`      | Autorização, delegação, assinaturas e adapters cadastrais.   | [agent.md](packages/security/agent.md) · [README](packages/security/README.md)           |
+| `packages/observability` | Modelos, coleta e persistência compartilhada de observações. | [agent.md](packages/observability/agent.md) · [README](packages/observability/README.md) |
+| `infrastructure`         | Imagem PostgreSQL local, schema e dados sintéticos.          | [agent.md](infrastructure/agent.md)                                                      |
+| `k8s/local`              | Recursos para orquestração local.                            | [agent.md](k8s/agent.md) · [guia local](docs/kubernetes-local.md)                        |
+| `scripts`                | Inicialização, locks, dados locais e deploy Render.          | [agent.md](scripts/agent.md)                                                             |
+| `.github/workflows`      | CI, deploy e notificações.                                   | [agent.md](.github/agent.md)                                                             |
+| `tests`                  | Testes transversais de planejamento e deploy.                | [agent.md](tests/agent.md)                                                               |
+| `docs`                   | Contratos e guias operacionais do sistema.                   | [agent.md](docs/agent.md)                                                                |
 
 A raiz contém [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 `compose.yaml` para a pilha integrada e `pyproject.toml` para ferramentas e

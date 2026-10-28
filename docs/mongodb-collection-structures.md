@@ -461,7 +461,7 @@ obrigatórios no documento persistido.
 ```jsonc
 {
 	"_id": "<report UUID>",
-	"requested_by": "<user UUID from validated access context>",
+	"requested_by": "<user UUID from the signed report>",
 	"recipients": [
 		{ "recipient_id": "<UUID>", "name": "<name>", "email": "<email>" },
 	],
@@ -470,7 +470,7 @@ obrigatórios no documento persistido.
 	"attachments": [
 		{
 			"filename": "<file name>",
-			"content_type": "application/pdf",
+			"content_type": "text/plain",
 			"content_base64": "<base64 bytes>",
 			"sha256": "<hex digest>",
 		},
@@ -483,7 +483,7 @@ obrigatórios no documento persistido.
 ```
 
 O registro é a origem usada para envio e consulta; `requested_by` é serializado
-como UUID e deve corresponder ao usuário da delegação validada.
+como UUID e vinculado ao titular do envelope de relatório validado.
 
 ### `ai_email_dispatches`
 
@@ -495,7 +495,7 @@ operação pendente reivindicada não é reenviada automaticamente.
 {
 	"_id": "<operation UUID>",
 	"report_id": "<report UUID>",
-	"requested_by": "<user UUID from validated access context>",
+	"requested_by": "<requesting user UUID>",
 	"idempotency_key": "<key>",
 	"state": "pending | accepted | partial | failed | unknown",
 	"provider_message_id": "<provider ID or null>",

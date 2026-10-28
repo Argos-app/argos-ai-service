@@ -4,8 +4,8 @@ Sistema de IA do Argos, plataforma de gerenciamento de aplicações de
 medicamentos em bovinos. O backend chama este serviço em nome do usuário; o
 aplicativo Kotlin apresenta respostas e perguntas de esclarecimento.
 
-Este README distingue o código atual das integrações planejadas. Backend e
-mobile ficam em outros repositórios.
+Este README descreve a implementação atual. Backend e mobile ficam em outros
+repositórios.
 
 Para navegar pelos componentes e suas instruções de manutenção, consulte o
 [índice de agentes](agent.md). O fluxo de contribuição está em
@@ -370,9 +370,8 @@ controle determinístico encerra a execução com conteúdo já validado ou uma
 mensagem segura.
 
 Para subir a integração em um cluster Kubernetes local, consulte
-[docs/kubernetes-local.md](docs/kubernetes-local.md). O estado e os resultados
-de homologação integrada estão em
-[docs/local-validation-results.md](docs/local-validation-results.md).
+[docs/kubernetes-local.md](docs/kubernetes-local.md). Os testes de integração e
+a CI verificam a versão atual conforme os comandos dos guias de cada serviço.
 
 O deploy pelo código-fonte no Render está preparado em
 [docs/deploy-render.md](docs/deploy-render.md): `develop` atualiza HM e `main`

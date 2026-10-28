@@ -107,11 +107,10 @@ do provider ou gateway configurado: `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
 entrada e saída e ambas as tarifas do perfil; embedding usa somente entrada. O
 custo explícito do provider tem precedência. Sem contagens ou tarifas
 necessárias, o custo fica ausente. A estimativa não reconcilia faturas e não
-considera preços diferenciados de tokens cacheados. Providers compatíveis com
-OpenAI, provedores podem retornar tokens sem preço por chamada. Algumas
-bibliotecas fazem retries internos invisíveis: consulte `attempt_visibility` e
-`attempt_reason` e não interprete contagem de spans como contagem exata de
-chamadas faturadas.
+considera preços diferenciados de tokens cacheados. Providers podem retornar
+tokens sem preço por chamada. Algumas bibliotecas fazem retries internos
+invisíveis: consulte `attempt_visibility` e `attempt_reason` e não interprete
+contagem de spans como contagem exata de chamadas faturadas.
 
 As filas são limitadas e mantidas somente em memória. Observações podem se
 perder quando a fila enche, o processo encerra antes do flush, Mongo fica
@@ -163,3 +162,24 @@ Para exportação de BI, use o contrato e a paginação idempotente descritos em
 [mongodb-observability-extraction.md](mongodb-observability-extraction.md). Para
 campos e origem de dados de negócio, consulte o
 [dicionário MongoDB para BI](mongodb-analytics-dictionary.md).
+
+## Estimar custo e retorno
+
+Para cada perfil de chat, estime
+`(tokens de entrada × tarifa de entrada + tokens de saída × tarifa de saída) / 1.000.000`.
+Para embeddings, use os tokens e a tarifa de entrada. Some principal, fallback,
+reindexação e demais chamadas faturáveis; use as tarifas do provider ou gateway
+configurado no ambiente.
+
+Por exemplo, com a hipótese de dez solicitações por usuário ativo por semana,
+100 usuários representam 1.000 solicitações semanais e 1.000 usuários, 10.000.
+Multiplique essas quantidades pelo custo estimado por solicitação e adicione
+infraestrutura, armazenamento, rede e demais despesas medidas. Esses volumes são
+premissas para projeção, não medições da aplicação nem uma cotação.
+
+O custo por resolução exige uma definição e uma contagem confiável de
+resoluções: divida o custo do período pelo número de resoluções nesse período.
+Para ROI, use `(benefício financeiro - custo total) / custo total`. Benefícios e
+custo humano precisam vir de fontes externas; a observabilidade não comprova
+resolução, entrega de e-mail nem retorno financeiro por si só. Spans e valores
+ausentes não equivalem a chamadas ou custos zero.

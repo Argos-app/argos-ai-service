@@ -13,7 +13,8 @@ real do trecho alterado.
 `graph/workflow.py` compõe guardrails, roteador, os especialistas Fazenda,
 Doutor, Analista, Secretário e Informações, Orquestrador, Juiz e formatador de
 perguntas. A rota é executada conforme o estado e as dependências das tarefas;
-consulte o grafo e seus testes antes de alterar a ordem.
+consulte o [guia do fluxo](../../docs/agent-workflow.md), o grafo e seus testes
+antes de alterar a ordem.
 
 ## Pontos de atenção
 
@@ -36,5 +37,6 @@ MongoDB fornece persistência e checkpointer; PostgreSQL consulta cadastro e
 permissões; Redis é usado no ranking de uso quando configurado. O processo chama
 MCPs de dados, e-mail e predição, e o A2A documental; também pode chamar
 providers e LangSmith. Compartilha `packages/contracts`, `security` e
-`observability`. Comandos e contrato em [README.md](README.md); testes de
-integração usam serviços descartáveis conforme seu README.
+`observability`. O [guia de sessões e memória](../../docs/session-memory.md)
+descreve os limites e a retomada. Comandos e contrato em [README.md](README.md);
+testes de integração usam serviços descartáveis conforme seu README.
