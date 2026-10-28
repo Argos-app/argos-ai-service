@@ -36,7 +36,7 @@ def current_interaction_id() -> UUID | None:
 
 
 def correlation_key(correlation_id: UUID | str) -> str:
-    """Stable non-UUID key for correlating traces after UUID anonymization."""
+    """Gera uma chave estável não UUID para correlacionar traces após anonimizar UUIDs."""
     value = str(correlation_id)
     try:
         value = str(UUID(value))
@@ -74,7 +74,7 @@ def bind_user_id(user_id: UUID) -> Iterator[None]:
 
 @contextmanager
 def bind_interaction(session_id: UUID, interaction_id: UUID) -> Iterator[None]:
-    """Bind functional IDs to every technical observation in an interaction."""
+    """Vincula os IDs funcionais a cada observação técnica da interação."""
     session_token = _session_id.set(session_id)
     interaction_token = _interaction_id.set(interaction_id)
     try:

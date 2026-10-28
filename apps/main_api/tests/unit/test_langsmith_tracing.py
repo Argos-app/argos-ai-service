@@ -146,8 +146,8 @@ def test_langsmith_run_includes_provider_billing_as_trace_metadata():
 
 
 def test_langsmith_run_includes_configured_rate_estimate(monkeypatch):
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
     run = _fake_run(
         {
             "generations": [
@@ -168,7 +168,7 @@ def test_langsmith_run_includes_configured_rate_estimate(monkeypatch):
         }
     )
 
-    langsmith_module._attach_provider_billing(run)
+    langsmith_module._attach_provider_billing(run, rate_profile="fast")
 
     assert run.extra["metadata"]["argos_billing"] == {
         "reported_cost": "0.0010",
@@ -182,8 +182,9 @@ def test_langsmith_run_includes_configured_rate_estimate(monkeypatch):
 
 
 def test_langchain_tracer_persists_cost_with_token_usage_in_one_terminal_patch(monkeypatch):
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("OPENAI_MODEL_FAST", "gpt-6-luna")
     patches = []
 
     class FakeClient:
@@ -231,7 +232,13 @@ def test_langchain_tracer_persists_cost_with_token_usage_in_one_terminal_patch(m
                 ]
             ]
         },
-        extra={"metadata": {"existing": "preserved"}},
+        extra={
+            "metadata": {
+                "existing": "preserved",
+                "ls_provider": "openai",
+                "ls_model_name": "gpt-6-luna",
+            }
+        },
         set=lambda *, metadata=None, usage_metadata=None: _set_run_metadata(
             run, metadata=metadata, usage_metadata=usage_metadata
         ),

@@ -15,7 +15,6 @@ COPY apps/main_api/app/ /app/app/
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/security/ /app/packages/security/
 COPY packages/observability/ /app/packages/observability/
-COPY packages/model_options.py /app/packages/model_options.py
 
 RUN addgroup --system --gid 10001 argos \
     && adduser --system --uid 10001 --ingroup argos argos

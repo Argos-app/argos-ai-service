@@ -84,7 +84,7 @@ async def test_tool_callback_marks_mock_and_unavailable_without_storing_content(
     callback = ObservabilityToolCallback(collector, "fazenda")
     mock_run_id = uuid4()
     await callback.on_tool_start(
-        {"name": "mock_consultar_fazenda"},
+        {"name": "mock_query_farm"},
         '{"api_key":"do-not-store"}',
         run_id=mock_run_id,
     )

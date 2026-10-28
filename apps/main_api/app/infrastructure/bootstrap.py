@@ -134,7 +134,7 @@ async def _create_observability_runtime(
         return writer, BestEffortObservationCollector(writer)
     except Exception:
         _LOGGER.warning(
-            "observability disabled because configuration could not be applied",
+            "observabilidade desativada porque não foi possível aplicar a configuração",
             extra={"component": "main_api_observability"},
         )
         return None, DisabledObservationCollector()
@@ -153,5 +153,5 @@ def _create_user_usage_counter(redis_url: str | None) -> RedisUserUsageCounter |
             key_prefix=os.getenv("USER_USAGE_REDIS_KEY_PREFIX", "argos:usage:users:v1"),
         )
     except Exception:
-        _LOGGER.warning("Redis user usage counters could not be configured")
+        _LOGGER.warning("não foi possível configurar os contadores de uso de usuários do Redis")
         return None

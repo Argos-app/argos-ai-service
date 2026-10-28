@@ -42,7 +42,7 @@ from app.prompts.specialists import (
     SECRETARY_SYSTEM_PROMPT,
 )
 from langchain.agents import create_agent
-from langchain.agents.structured_output import ToolStrategy
+from langchain.agents.structured_output import ProviderStrategy
 from langchain_core.tools import BaseTool
 
 from packages.contracts.a2a import DocumentSkill
@@ -124,9 +124,7 @@ def build_agent_factory(
     documental_a2a_client: DocumentA2AClient | None = None,
     use_mock_tools: bool = False,
 ) -> LangChainAgentFactory:
-    orchestrator_model = models.get(ModelPolicyId.ORCHESTRATOR)
-    simulated_runtime = getattr(orchestrator_model, "_llm_type", None) == "argos_simulated"
-    validate_model_capabilities(models, registry=registry, simulated=simulated_runtime)
+    validate_model_capabilities(models, registry=registry)
     overrides: dict[AgentId, dict[str, tuple[BaseTool, ...]]] = {}
     if mcp_clients is not None:
         overrides.update(
@@ -189,89 +187,66 @@ def build_agent_factory(
         )
 
     router_app = create_agent(
-        model=models[ModelPolicyId.ROUTER],
+        model=models[ModelPolicyId.FAST],
         tools=[],
         system_prompt=ROUTER_SYSTEM_PROMPT,
-        # The configured NVIDIA OpenAI-compatible endpoint returns HTTP 500
-        # for RoutePlan's native JSON Schema response, while function calling
-        # accepts the same schema and validates the resulting object.
-        response_format=ToolStrategy(RoutePlan, handle_errors=False),
+        response_format=ProviderStrategy(RoutePlan, strict=True),
     )
 
     farm_app = create_agent(
-        model=models[ModelPolicyId.FARM],
+        model=models[ModelPolicyId.SPECIALIST],
         tools=tools_for(AgentId.FARM),
         system_prompt=FARM_SYSTEM_PROMPT,
-        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
+        response_format=ProviderStrategy(SpecialistResult, strict=True),
     )
 
     doctor_app = create_agent(
-        model=models[ModelPolicyId.DOCTOR],
+        model=models[ModelPolicyId.SPECIALIST],
         tools=tools_for(AgentId.DOCTOR),
         system_prompt=DOCTOR_SYSTEM_PROMPT,
-        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
+        response_format=ProviderStrategy(SpecialistResult, strict=True),
     )
 
     analyst_app = create_agent(
-        model=models[ModelPolicyId.ANALYST],
+        model=models[ModelPolicyId.SPECIALIST],
         tools=tools_for(AgentId.ANALYST),
         system_prompt=ANALYST_SYSTEM_PROMPT,
-        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
+        response_format=ProviderStrategy(SpecialistResult, strict=True),
     )
 
     secretary_app = create_agent(
-        model=models[ModelPolicyId.SECRETARY],
+        model=models[ModelPolicyId.SPECIALIST],
         tools=tools_for(AgentId.SECRETARY),
         system_prompt=SECRETARY_SYSTEM_PROMPT,
-        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
+        response_format=ProviderStrategy(SpecialistResult, strict=True),
     )
 
     information_app = create_agent(
-        model=models[ModelPolicyId.INFORMATION],
+        model=models[ModelPolicyId.SPECIALIST],
         tools=tools_for(AgentId.INFORMATION),
         system_prompt=INFORMATION_SYSTEM_PROMPT,
-        response_format=ToolStrategy(SpecialistResult, handle_errors=False),
-    )
-
-    orchestrator_options = (
-        {"response_format": ToolStrategy(OrchestratorResult, handle_errors=False)}
-        if simulated_runtime
-        else {}
-    )
-    judge_options = (
-        {"response_format": ToolStrategy(JudgeResult, handle_errors=False)}
-        if simulated_runtime
-        else {}
+        response_format=ProviderStrategy(SpecialistResult, strict=True),
     )
 
     orchestrator_app = create_agent(
-        model=models[ModelPolicyId.ORCHESTRATOR],
+        model=models[ModelPolicyId.FAST],
         tools=[],
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-        # The Orchestrator has no tools. Keep its final text/JSON response raw
-        # and validate it in LangChainAgentFactory; ToolStrategy made compatible
-        # providers retry plain answers as synthetic tool calls and consume the
-        # full execution deadline.
-        **orchestrator_options,
+        response_format=ProviderStrategy(OrchestratorResult, strict=True),
     )
 
     judge_app = create_agent(
-        model=models[ModelPolicyId.JUDGE],
+        model=models[ModelPolicyId.FAST],
         tools=[],
         system_prompt=JUDGE_SYSTEM_PROMPT,
-        # Validate JSON or an explicit verdict in LangChainAgentFactory. Asking
-        # the compatible endpoint for native structured output made the judge
-        # fail before the application could validate the same contract.
-        **judge_options,
+        response_format=ProviderStrategy(JudgeResult, strict=True),
     )
 
     question_formatter_app = create_agent(
-        model=models[ModelPolicyId.QUESTION_FORMATTER],
+        model=models[ModelPolicyId.FAST],
         tools=[],
         system_prompt=QUESTION_FORMATTER_SYSTEM_PROMPT,
-        # Fix the strategy explicitly: the configured NVIDIA-compatible endpoint
-        # has failed with provider-native JSON Schema, while tool calling works.
-        response_format=ToolStrategy(QuestionFormatterResult, handle_errors=False),
+        response_format=ProviderStrategy(QuestionFormatterResult, strict=True),
     )
 
     return LangChainAgentFactory(

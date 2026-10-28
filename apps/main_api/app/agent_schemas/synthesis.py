@@ -13,8 +13,9 @@ class _SynthesisModel(BaseModel):
 
 
 class _SynthesisOutput(BaseModel):
-    # Ignore unused fields emitted by provider models; required answer fields
-    # and nested source contracts remain validated.
+    """Ignore unused fields emitted by provider models; required answer fields
+    and nested source contracts remain validated."""
+
     model_config = ConfigDict(extra="ignore", frozen=True, str_strip_whitespace=True)
 
 

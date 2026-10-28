@@ -1,7 +1,6 @@
 """Adapta os contratos Agent e AgentFactory para LangChain."""
 
 import json
-import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
@@ -9,13 +8,11 @@ from typing import Any
 from uuid import UUID
 
 from app.agent_schemas.results import (
-    JudgeResult,
     SourceReference,
     SpecialistAgentId,
     SpecialistResult,
     SpecialistStatus,
 )
-from app.agent_schemas.synthesis import OrchestratorInput, OrchestratorResult
 from app.agents.registry import AgentDefinition, AgentRegistry, ModelPolicyId
 from app.application.operation_observation import OperationRecorder
 from app.infrastructure.agents.execution_limits import ExecutionLimitCallback, ExecutionLimits
@@ -42,80 +39,6 @@ class AgentResponseError(RuntimeError):
     """O agente não retornou uma saída compatível com seu schema."""
 
 
-def _structured_response_from_messages(result: Mapping[str, Any]) -> Any:
-    """Recupera JSON estruturado quando um provider o envia como texto final.
-
-    Alguns endpoints compatíveis com OpenAI ignoram o formato de resposta e
-    devolvem o objeto JSON no conteúdo normal da mensagem. Só aceitamos um
-    objeto JSON completo; prosa livre continua sendo falha de contrato.
-    """
-    structured = result.get("structured_response")
-    if structured is not None:
-        return structured
-
-    messages = result.get("messages")
-    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
-        return None
-    for message in reversed(messages):
-        if isinstance(message, Mapping):
-            role = message.get("role")
-            content = message.get("content")
-        else:
-            role = getattr(message, "type", None)
-            content = getattr(message, "content", None)
-        if role not in {"ai", "assistant"}:
-            continue
-        if isinstance(content, list):
-            content = "\n".join(
-                str(block["text"])
-                for block in content
-                if isinstance(block, Mapping) and isinstance(block.get("text"), str)
-            )
-        if not isinstance(content, str):
-            continue
-        candidate = content.strip()
-        if candidate.startswith("```json") and candidate.endswith("```"):
-            candidate = candidate[7:-3].strip()
-        elif candidate.startswith("```") and candidate.endswith("```"):
-            candidate = candidate[3:-3].strip()
-        if not candidate.startswith("{") or not candidate.endswith("}"):
-            continue
-        try:
-            decoded = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(decoded, Mapping):
-            return decoded
-    return None
-
-
-def _plain_assistant_text(result: Mapping[str, Any]) -> str | None:
-    """Retorna prosa final somente quando a mensagem não contém tool call pendente."""
-    messages = result.get("messages")
-    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
-        return None
-    for message in reversed(messages):
-        if isinstance(message, Mapping):
-            role = message.get("role")
-            content = message.get("content")
-            tool_calls = message.get("tool_calls")
-        else:
-            role = getattr(message, "type", None)
-            content = getattr(message, "content", None)
-            tool_calls = getattr(message, "tool_calls", None)
-        if role not in {"ai", "assistant"} or tool_calls:
-            continue
-        if isinstance(content, list):
-            content = "\n".join(
-                str(block["text"])
-                for block in content
-                if isinstance(block, Mapping) and isinstance(block.get("text"), str)
-            )
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-    return None
-
-
 def _required_tool_evidence(agent_id: AgentId, limits: ExecutionLimits):
     evidence = limits.evidence_for(agent_id.value)
     if agent_id is AgentId.ANALYST:
@@ -124,7 +47,7 @@ def _required_tool_evidence(agent_id: AgentId, limits: ExecutionLimits):
 
 
 def _tool_evidence_answer(agent_id: AgentId, limits: ExecutionLimits) -> str:
-    """Use successful tool output when a provider ends with an empty assistant message."""
+    """Usa a saída válida da ferramenta quando o provider termina com mensagem vazia."""
     evidence = _required_tool_evidence(agent_id, limits)
     return "\n\n".join(
         f"Resultado verificado de {item.tool_name}: {item.excerpt}" for item in evidence
@@ -208,39 +131,6 @@ def _has_complete_prediction_evidence(evidence: Sequence[Any]) -> bool:
     return True
 
 
-_JUDGE_TEXT_PATTERN = re.compile(
-    r"\A\s*(?:(?:decision|verdict|decis[aã]o)\s*[:=]\s*)?"
-    r"(approved|approve|aprovado|aprovada|revise|revisar|rejected|reject|"
-    r"rejeitado|rejeitada|reprovado|reprovada)"
-    r"(?:\s*[-:—]\s*(.+?))?\s*\Z",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
-def _judge_result_from_plain_text(text: str) -> JudgeResult | None:
-    """Aceita somente um veredito textual explícito e inequívoco do Juiz."""
-    match = _JUDGE_TEXT_PATTERN.fullmatch(text)
-    if match is None:
-        return None
-    decision = match.group(1).casefold()
-    normalized = JudgeResult.normalize_decision(decision)
-    reason = match.group(2) or "Veredito textual explícito do Juiz."
-    return JudgeResult(decision=normalized, reason=reason)
-
-
-def _orchestrator_result_from_plain_text(
-    text: str,
-    agent_input: Any,
-) -> OrchestratorResult:
-    """Aceita prosa final e associa somente fontes já recebidas dos especialistas."""
-    sources: dict[str, SourceReference] = {}
-    if isinstance(agent_input, OrchestratorInput):
-        for outcome in agent_input.outcomes:
-            for source in outcome.result.sources:
-                sources.setdefault(source.reference, source)
-    return OrchestratorResult(draft_answer=text, sources=tuple(sources.values()))
-
-
 def _normalized_term(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value.casefold())
     return "".join(
@@ -261,7 +151,7 @@ def _json_contains_value_for_key(value: Any, keys: frozenset[str]) -> bool:
 
 
 def _evidence_covers_missing_fields(missing_fields: Sequence[str], evidence: Sequence[Any]) -> bool:
-    """Detect only explicit cases where a requested field is already in tool output."""
+    """Detecta quando o campo solicitado já aparece na saída da ferramenta."""
     if not missing_fields or not evidence:
         return False
     field_keys = {
@@ -421,47 +311,19 @@ class _LangChainAgent(Agent[Any, BaseModel]):
             if not isinstance(result, Mapping):
                 raise AgentResponseError("LangChain retornou um estado inválido")
             try:
-                raw_response = _structured_response_from_messages(result)
+                raw_response = result.get("structured_response")
                 if raw_response is None:
                     limits = (context or {}).get("argos_execution_limits")
-                    text = _plain_assistant_text(result)
                     if self._output_schema is SpecialistResult and isinstance(
                         limits, ExecutionLimits
                     ):
-                        evidence = _required_tool_evidence(self._agent_id, limits)
-                        response = (
-                            SpecialistResult(
-                                agent=SpecialistAgentId(self._agent_id.value),
-                                status=SpecialistStatus.SUCCESS,
-                                answer=text,
-                                sources=tuple(
-                                    SourceReference(
-                                        title=f"Resultado verificado: {item.tool_name}",
-                                        reference=item.reference,
-                                        excerpt=item.excerpt,
-                                    )
-                                    for item in evidence
-                                ),
-                            )
-                            if text and evidence
-                            else _specialist_evidence_fallback(self._agent_id, limits)
-                        )
+                        response = _specialist_evidence_fallback(self._agent_id, limits)
                         if response is None:
                             raise AgentResponseError(
-                                "LangChain não retornou JSON estruturado nem evidência suficiente"
-                            )
-                    elif self._output_schema is OrchestratorResult and text:
-                        response = _orchestrator_result_from_plain_text(text, validated_input)
-                    elif self._output_schema is JudgeResult and text:
-                        response = _judge_result_from_plain_text(text)
-                        if response is None:
-                            raise AgentResponseError(
-                                "LangChain não retornou um veredito explícito do Juiz"
+                                "LangChain não retornou saída estruturada nem evidência suficiente"
                             )
                     else:
-                        raise AgentResponseError(
-                            "LangChain não retornou JSON estruturado nem evidência suficiente"
-                        )
+                        raise AgentResponseError("LangChain não retornou saída estruturada")
                 else:
                     if (
                         self._output_schema is SpecialistResult
@@ -469,23 +331,11 @@ class _LangChainAgent(Agent[Any, BaseModel]):
                         and "agent" not in raw_response
                     ):
                         raw_response = {**raw_response, "agent": self._agent_id.value}
-                    try:
-                        response = self._output_schema.model_validate(raw_response)
-                    except ValidationError:
-                        text = _plain_assistant_text(result)
-                        if self._output_schema is OrchestratorResult and text:
-                            response = _orchestrator_result_from_plain_text(text, validated_input)
-                        elif self._output_schema is JudgeResult and text:
-                            response = _judge_result_from_plain_text(text)
-                            if response is None:
-                                raise
-                        else:
-                            raise
+                    response = self._output_schema.model_validate(raw_response)
                     limits = (context or {}).get("argos_execution_limits")
                     if isinstance(response, SpecialistResult) and isinstance(
                         limits, ExecutionLimits
                     ):
-                        evidence = _required_tool_evidence(self._agent_id, limits)
                         all_tool_evidence = limits.evidence_for(self._agent_id.value)
                         can_use_evidence = response.status in {
                             SpecialistStatus.ABSTAIN,

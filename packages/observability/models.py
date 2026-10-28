@@ -154,6 +154,8 @@ class ErrorMetadata(_ObservabilityModel):
 
 
 class Usage(_ObservabilityModel):
+    """Nomes originais do provedor para categorias adicionais, com valores apenas numéricos."""
+
     availability: UsageAvailability
     source: UsageSource | None = None
     input_tokens: NonNegativeCount | None = None
@@ -162,7 +164,7 @@ class Usage(_ObservabilityModel):
     cache_read_tokens: NonNegativeCount | None = None
     cache_write_tokens: NonNegativeCount | None = None
     reasoning_tokens: NonNegativeCount | None = None
-    # Nomes originais do provedor para categorias adicionais, com valores apenas numéricos.
+
     details: dict[BoundedName, NonNegativeCount] = Field(default_factory=dict, max_length=32)
 
 

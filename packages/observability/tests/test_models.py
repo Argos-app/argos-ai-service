@@ -169,16 +169,21 @@ def test_provider_billing_uses_only_explicit_provider_cost_and_preserves_precisi
 def test_configured_rates_estimate_chat_and_embedding_costs(monkeypatch):
     from packages.observability import billing_from_usage_payload
 
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
 
-    chat = billing_from_usage_payload({"usage": {"prompt_tokens": 200, "completion_tokens": 50}})
+    chat = billing_from_usage_payload(
+        {"usage": {"prompt_tokens": 200, "completion_tokens": 50}}, rate_profile="fast"
+    )
     assert chat is not None
     assert chat.reported_cost == Decimal("0.001")
     assert chat.currency == "USD"
     assert chat.cost_source == "configured_rate"
 
-    embedding = billing_from_usage_payload({"usage": {"prompt_tokens": 200}}, embedding=True)
+    monkeypatch.setenv("MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    embedding = billing_from_usage_payload(
+        {"usage": {"prompt_tokens": 200}}, embedding=True, rate_profile="embedding"
+    )
     assert embedding is not None
     assert embedding.reported_cost == Decimal("0.0005")
 
@@ -189,13 +194,13 @@ def test_langsmith_usage_metadata_includes_configured_input_and_output_costs(mon
         langsmith_usage_metadata,
     )
 
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
     usage = {"input_tokens": 200, "output_tokens": 50, "total_tokens": 250}
-    billing = billing_from_usage_payload({"usage": usage})
+    billing = billing_from_usage_payload({"usage": usage}, rate_profile="fast")
 
     assert billing is not None
-    assert langsmith_usage_metadata(billing, usage) == {
+    assert langsmith_usage_metadata(billing, usage, rate_profile="fast") == {
         "input_tokens": 200,
         "output_tokens": 50,
         "total_tokens": 250,
@@ -208,8 +213,10 @@ def test_langsmith_usage_metadata_includes_configured_input_and_output_costs(mon
 def test_langsmith_usage_metadata_maps_observation_usage_to_sdk_contract(monkeypatch):
     from packages.observability import configured_rate_billing, langsmith_usage_metadata
 
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    billing = configured_rate_billing(input_tokens=200, output_tokens=None, embedding=True)
+    monkeypatch.setenv("MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    billing = configured_rate_billing(
+        input_tokens=200, output_tokens=None, embedding=True, rate_profile="embedding"
+    )
 
     assert billing is not None
     assert langsmith_usage_metadata(
@@ -223,6 +230,7 @@ def test_langsmith_usage_metadata_maps_observation_usage_to_sdk_contract(monkeyp
             "details": {"provider.extra": 10},
         },
         embedding=True,
+        rate_profile="embedding",
     ) == {
         "input_tokens": 200,
         "total_tokens": 200,
@@ -235,8 +243,8 @@ def test_langsmith_usage_metadata_maps_observation_usage_to_sdk_contract(monkeyp
 def test_provider_cost_precedes_configured_rates_and_incomplete_usage_stays_unknown(monkeypatch):
     from packages.observability import billing_from_usage_payload
 
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
 
     provider = billing_from_usage_payload(
         {
@@ -245,26 +253,33 @@ def test_provider_cost_precedes_configured_rates_and_incomplete_usage_stays_unkn
                 "completion_tokens": 50_000,
                 "cost_usd": "0.123",
             }
-        }
+        },
+        rate_profile="fast",
     )
     assert provider is not None
     assert provider.reported_cost == Decimal("0.123")
     assert provider.cost_source == "provider"
 
     assert billing_from_usage_payload({"usage": {"prompt_tokens": 200}}) is None
-    assert billing_from_usage_payload({"usage": {"prompt_tokens": 200}}, embedding=True) is not None
+    monkeypatch.setenv("MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    assert (
+        billing_from_usage_payload(
+            {"usage": {"prompt_tokens": 200}}, embedding=True, rate_profile="embedding"
+        )
+        is not None
+    )
 
 
 def test_configured_rates_ignore_invalid_or_missing_values(monkeypatch):
     from packages.observability import configured_rate_billing
 
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "-1")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
-    assert configured_rate_billing(input_tokens=10, output_tokens=10) is None
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "-1")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    assert configured_rate_billing(input_tokens=10, output_tokens=10, rate_profile="fast") is None
 
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2")
-    monkeypatch.delenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS")
-    assert configured_rate_billing(input_tokens=10, output_tokens=10) is None
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2")
+    monkeypatch.delenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS")
+    assert configured_rate_billing(input_tokens=10, output_tokens=10, rate_profile="fast") is None
 
 
 def test_observation_accepts_direct_interaction_and_trace_ids():

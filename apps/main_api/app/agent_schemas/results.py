@@ -9,8 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class _AgentOutput(BaseModel):
-    # Model output may contain harmless provider-specific fields; ignore those
-    # while still validating every field used by the application.
+    """Ignore campos extras inofensivos do provider e valide todos os campos usados pela aplicação."""
+
     model_config = ConfigDict(extra="ignore", frozen=True, str_strip_whitespace=True)
 
 
@@ -165,7 +165,7 @@ class RouteTask(_AgentOutput):
     required_evidence: tuple[str, ...] = Field(
         default=(),
         description=(
-            "Evidence the task must produce. For a new report preparation, use "
+            "Evidências que a tarefa deve produzir. Para uma nova preparação de relatório, use "
             "signed_report_source for Farm and confirmed_email_preparation for Secretary."
         ),
     )

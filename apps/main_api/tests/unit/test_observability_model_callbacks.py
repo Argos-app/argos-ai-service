@@ -106,10 +106,10 @@ async def test_callback_falls_back_to_provider_usage_and_records_missing_usage()
 
 @pytest.mark.asyncio
 async def test_callback_prefers_reported_cost_and_estimates_from_configured_rates(monkeypatch):
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
     writer = InMemoryObservationWriter()
-    callback = ModelUsageCallback(BestEffortObservationCollector(writer))
+    callback = ModelUsageCallback(BestEffortObservationCollector(writer), agent="router")
     serialized = {"id": ["langchain", "openai", "ChatOpenAI"], "kwargs": {}}
 
     reported_run = uuid4()
@@ -141,6 +141,34 @@ async def test_callback_prefers_reported_cost_and_estimates_from_configured_rate
     assert terminal[1].billing.reported_cost == Decimal("0.0000325")
     assert terminal[1].billing.currency == "USD"
     assert terminal[1].billing.cost_source == "configured_rate"
+
+
+@pytest.mark.asyncio
+async def test_callback_uses_distinct_fallback_rate_profile_for_anthropic(monkeypatch):
+    monkeypatch.setenv("MODEL_FAST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS", "3")
+    monkeypatch.setenv("MODEL_FAST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS", "4")
+    writer = InMemoryObservationWriter()
+    callback = ModelUsageCallback(BestEffortObservationCollector(writer), agent="router")
+    run_id = uuid4()
+    await callback.on_chat_model_start(
+        {"id": ["langchain", "anthropic", "ChatAnthropic"], "kwargs": {}},
+        [],
+        run_id=run_id,
+    )
+    message = SimpleNamespace(
+        usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        response_metadata={"model_name": "fallback-model"},
+    )
+    await callback.on_llm_end(
+        SimpleNamespace(generations=[[SimpleNamespace(message=message)]], llm_output={}),
+        run_id=run_id,
+    )
+
+    terminal = [item for item in writer.observations if item.status != ObservationStatus.STARTED]
+    assert len(terminal) == 1
+    assert terminal[0].provider == "anthropic"
+    assert terminal[0].billing.reported_cost == Decimal("0.0005")
+    assert terminal[0].billing.cost_source == "configured_rate"
 
 
 @pytest.mark.asyncio

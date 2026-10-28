@@ -5,6 +5,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field, fields
+from urllib.parse import urlsplit
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
 from packages.observability.langsmith_environment import resolve_langsmith_agent_environment
@@ -20,7 +21,7 @@ def _observability_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         _LOGGER.warning(
-            "invalid observability setting; using default",
+            "configuração de observabilidade inválida; usando o valor padrão",
             extra={"setting": name},
         )
         return default
@@ -35,11 +36,19 @@ def _environment_bool(name: str, default: bool = False) -> bool:
         return True
     if value in {"0", "false", "no", "off"}:
         return False
-    _LOGGER.warning("invalid boolean setting; using default", extra={"setting": name})
+    _LOGGER.warning(
+        "configuração booleana inválida; usando o valor padrão",
+        extra={"setting": name},
+    )
     return default
 
 
 _MONGO_COLLECTION_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+
+
+def _env_endpoint(name: str) -> str | None:
+    value = os.getenv(name)
+    return value.rstrip("/") if value and value.strip() else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,22 +123,18 @@ class Settings:
     document_a2a_service_token: str | None = field(default=None, repr=False)
     document_a2a_timeout_seconds: float = 45.0
     document_a2a_response_max_bytes: int = 1_000_000
-    model_api_base_url: str | None = None
     model_mode: str = "provider"
-    model_api_key: str | None = field(default=None, repr=False)
-    model_router_name: str | None = None
-    model_farm_name: str | None = None
-    model_doctor_name: str | None = None
-    model_analyst_name: str | None = None
-    model_secretary_name: str | None = None
-    model_information_name: str | None = None
-    model_orchestrator_name: str | None = None
-    model_judge_name: str | None = None
-    model_question_formatter_name: str | None = None
+    openai_api_key: str | None = field(default=None, repr=False)
+    openai_base_url: str | None = None
+    anthropic_api_key: str | None = field(default=None, repr=False)
+    anthropic_base_url: str | None = None
+    model_fast_name: str | None = None
+    model_specialist_name: str | None = None
+    model_fast_fallback_name: str | None = None
+    model_specialist_fallback_name: str | None = None
     model_timeout_seconds: float = 60.0
     model_max_retries: int = 2
     model_max_output_tokens: int = 4096
-    model_thinking: str = "auto"
     execution_max_model_calls: int = 12
     execution_max_tool_calls: int = 12
     execution_timeout_seconds: float = 300.0
@@ -155,20 +160,6 @@ class Settings:
             raise ValueError(
                 "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve mapear IDs para chaves Base64"
             )
-        raw_report_keys = os.getenv("MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS", "{}")
-        try:
-            report_keys = json.loads(raw_report_keys)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve ser JSON"
-            ) from exc
-        if not isinstance(report_keys, dict) or not all(
-            isinstance(key, str) and isinstance(value, str) for key, value in report_keys.items()
-        ):
-            raise ValueError(
-                "MAIN_API_MCP_DATA_REPORT_TRUSTED_SIGNATURE_KEYS deve mapear IDs para chaves Base64"
-            )
-
         return cls(
             app_env=os.getenv("APP_ENV", "production").strip().casefold(),
             mongo_uri=os.getenv("MAIN_API_MONGO_URI") or None,
@@ -244,22 +235,18 @@ class Settings:
             document_a2a_response_max_bytes=int(
                 os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
             ),
-            model_api_base_url=os.getenv("MAIN_API_MODEL_API_BASE_URL") or None,
             model_mode=os.getenv("MAIN_API_MODEL_MODE", "provider").strip().casefold(),
-            model_api_key=os.getenv("MAIN_API_MODEL_API_KEY") or None,
-            model_router_name=os.getenv("MAIN_API_MODEL_ROUTER") or None,
-            model_farm_name=os.getenv("MAIN_API_MODEL_FARM") or None,
-            model_doctor_name=os.getenv("MAIN_API_MODEL_DOCTOR") or None,
-            model_analyst_name=os.getenv("MAIN_API_MODEL_ANALYST") or None,
-            model_secretary_name=os.getenv("MAIN_API_MODEL_SECRETARY") or None,
-            model_information_name=os.getenv("MAIN_API_MODEL_INFORMATION") or None,
-            model_orchestrator_name=os.getenv("MAIN_API_MODEL_ORCHESTRATOR") or None,
-            model_judge_name=os.getenv("MAIN_API_MODEL_JUDGE") or None,
-            model_question_formatter_name=os.getenv("MAIN_API_MODEL_QUESTION_FORMATTER") or None,
+            openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+            openai_base_url=_env_endpoint("OPENAI_BASE_URL"),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+            anthropic_base_url=_env_endpoint("ANTHROPIC_BASE_URL"),
+            model_fast_name=os.getenv("OPENAI_MODEL_FAST") or None,
+            model_specialist_name=os.getenv("OPENAI_MODEL_SPECIALIST") or None,
+            model_fast_fallback_name=os.getenv("ANTHROPIC_MODEL_FAST_FALLBACK") or None,
+            model_specialist_fallback_name=os.getenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK") or None,
             model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "60")),
             model_max_retries=int(os.getenv("MAIN_API_MODEL_MAX_RETRIES", "2")),
             model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "4096")),
-            model_thinking=os.getenv("MAIN_API_MODEL_THINKING", "auto").strip().casefold(),
             execution_max_model_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "12")),
             execution_max_tool_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "12")),
             execution_timeout_seconds=float(os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "300")),
@@ -275,6 +262,27 @@ class Settings:
         )
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("OPENAI_BASE_URL", self.openai_base_url),
+            ("ANTHROPIC_BASE_URL", self.anthropic_base_url),
+        ):
+            if value is None:
+                continue
+            try:
+                parsed = urlsplit(value)
+                valid = (
+                    parsed.scheme in {"http", "https"}
+                    and bool(parsed.hostname)
+                    and parsed.username is None
+                    and parsed.password is None
+                    and not parsed.query
+                    and not parsed.fragment
+                    and (parsed.port is None or 1 <= parsed.port <= 65535)
+                )
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ValueError(f"{name} deve ser URL HTTP(S) sem credenciais, query ou fragmento")
         if not self.mongo_database.strip():
             raise ValueError("MAIN_API_MONGO_DATABASE não pode estar vazio")
         if self.auth_database_url is not None and not self.auth_database_url.strip():
@@ -308,8 +316,6 @@ class Settings:
             or not 0 < self.auth_database_query_timeout_seconds <= 30
         ):
             raise ValueError("limites e timeouts de conexão PostgreSQL são inválidos")
-        if self.model_thinking not in {"auto", "enabled", "disabled"}:
-            raise ValueError("MAIN_API_MODEL_THINKING deve ser auto, enabled ou disabled")
         if self.observability_collection in {
             getattr(self.mongo_collections, item.name) for item in fields(self.mongo_collections)
         }:
@@ -341,31 +347,6 @@ class Settings:
             raise ValueError("AUTH_MODE deve ser jwt ou stub")
         if self.auth_mode == "stub" and self.app_env != "local":
             raise ValueError("AUTH_MODE=stub só pode ser usado com APP_ENV=local")
-        if self.model_api_base_url is not None:
-            from urllib.parse import urlsplit
-
-            try:
-                parsed_model_url = urlsplit(self.model_api_base_url)
-                local_http = parsed_model_url.scheme == "http" and parsed_model_url.hostname in {
-                    "localhost",
-                    "127.0.0.1",
-                    "::1",
-                }
-                valid_model_url = (
-                    (parsed_model_url.scheme == "https" or local_http)
-                    and bool(parsed_model_url.hostname)
-                    and parsed_model_url.username is None
-                    and parsed_model_url.password is None
-                    and not parsed_model_url.query
-                    and not parsed_model_url.fragment
-                    and (parsed_model_url.port is None or 1 <= parsed_model_url.port <= 65535)
-                )
-            except ValueError:
-                valid_model_url = False
-            if not valid_model_url:
-                raise ValueError(
-                    "MAIN_API_MODEL_API_BASE_URL deve ser HTTPS ou HTTP local sem credenciais"
-                )
         if self.langsmith_capture_content and not self.langsmith_api_key:
             raise ValueError("MAIN_API_LANGSMITH_CAPTURE_CONTENT exige MAIN_API_LANGSMITH_API_KEY")
         if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", self.langsmith_agent_id):
@@ -378,8 +359,6 @@ class Settings:
         }:
             raise ValueError("MAIN_API_LANGSMITH_AGENT_ENVIRONMENT inválido")
         if self.langsmith_endpoint is not None:
-            from urllib.parse import urlsplit
-
             try:
                 parsed_langsmith_endpoint = urlsplit(self.langsmith_endpoint)
                 valid_langsmith_endpoint = (
@@ -405,8 +384,6 @@ class Settings:
                 "devem ser configurados juntos"
             )
         if self.document_a2a_url is not None:
-            from urllib.parse import urlsplit
-
             try:
                 parsed = urlsplit(self.document_a2a_url)
                 local_http = parsed.scheme == "http" and (

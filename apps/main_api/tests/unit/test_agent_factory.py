@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from langchain.agents.structured_output import ToolStrategy
+from langchain.agents.structured_output import ProviderStrategy
 from langchain.tools import tool
 from pydantic import ValidationError
 
@@ -14,17 +14,12 @@ from app.agent_schemas.results import (
     JudgeResult,
     QuestionFormatterResult,
     RoutePlan,
-    RouteTask,
-    SourceReference,
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import (
-    JudgeInput,
-    OrchestratorInput,
     OrchestratorResult,
-    TaskOutcome,
 )
-from app.agents.mock_tools import mock_consultar_fazenda, mock_consultar_legal
+from app.agents.mock_tools import mock_query_farm, mock_query_law
 from app.agents.registry import ModelPolicyId
 from app.application.execution_limits import ExecutionLimits
 from app.domain.sessions import ExecutionStatus
@@ -113,45 +108,41 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
 
     assert len(calls) == 9
     farm_call = next(
-        call
-        for call in calls
-        if [tool.name for tool in call["tools"]] == ["mock_consultar_fazenda"]
+        call for call in calls if [tool.name for tool in call["tools"]] == ["mock_query_farm"]
     )
     assert farm_call["system_prompt"]
     assert farm_call["response_format"].schema is SpecialistResult
     information_call = next(
         call
         for call in calls
-        if [tool.name for tool in call["tools"]]
-        == ["mock_consultar_documental", "mock_consultar_legal"]
+        if [tool.name for tool in call["tools"]] == ["mock_query_documents", "mock_query_law"]
     )
     assert information_call["system_prompt"]
     structured_calls = {
         call["response_format"].schema: call
         for call in calls
-        if isinstance(call.get("response_format"), ToolStrategy)
+        if isinstance(call.get("response_format"), ProviderStrategy)
     }
-    structured_router = structured_calls[RoutePlan]
-    assert structured_router["response_format"].handle_errors is False
+    assert set(structured_calls) == {
+        RoutePlan,
+        SpecialistResult,
+        OrchestratorResult,
+        JudgeResult,
+        QuestionFormatterResult,
+    }
     orchestrator_call = next(
         call for call in calls if "Você é o Orquestrador do sistema." in call["system_prompt"]
     )
-    assert "response_format" not in orchestrator_call
-    assert all(
-        isinstance(call["response_format"], ToolStrategy)
-        for call in calls
-        if call is structured_router
-    )
+    assert isinstance(orchestrator_call["response_format"], ProviderStrategy)
     specialists_with_tools = [
         call
         for call in calls
-        if isinstance(call.get("response_format"), ToolStrategy)
+        if isinstance(call.get("response_format"), ProviderStrategy)
         and call["response_format"].schema is SpecialistResult
     ]
     assert len(specialists_with_tools) == 5
-    assert all(call["response_format"].handle_errors is False for call in specialists_with_tools)
     judge_call = next(call for call in calls if "Você é o Juiz do Argos." in call["system_prompt"])
-    assert "response_format" not in judge_call
+    assert isinstance(judge_call["response_format"], ProviderStrategy)
 
     agent = factory.create(AgentId.FARM)
     result = await agent.run(
@@ -164,7 +155,7 @@ async def test_build_agent_factory_resolves_registry_prompt_and_mock_tool(monkey
     assert result.answer == "Resultado de teste"
 
 
-def test_simulated_factory_uses_structured_outputs_for_orchestrator_and_judge(monkeypatch):
+def test_factory_uses_native_structured_outputs_for_orchestrator_and_judge(monkeypatch):
     calls: list[dict[str, Any]] = []
 
     def fake_create_agent(**kwargs: Any) -> _FakeRunnable:
@@ -199,9 +190,8 @@ def test_build_agent_factory_registers_question_formatter_without_tools(monkeypa
         call for call in calls if "Formatador de Perguntas" in call["system_prompt"]
     )
     assert formatter_call["tools"] == []
-    assert isinstance(formatter_call["response_format"], ToolStrategy)
+    assert isinstance(formatter_call["response_format"], ProviderStrategy)
     assert formatter_call["response_format"].schema is QuestionFormatterResult
-    assert formatter_call["response_format"].handle_errors is False
     assert "Formatador de Perguntas" in formatter_call["system_prompt"]
 
 
@@ -234,7 +224,7 @@ def test_build_agent_factory_rejects_tool_slot_not_allowed_for_agent() -> None:
         build_agent_factory(
             _models(),
             tool_bindings={
-                AgentId.FARM: {"report_delivery": (mock_consultar_fazenda,)},
+                AgentId.FARM: {"report_delivery": (mock_query_farm,)},
             },
             use_mock_tools=True,
         )
@@ -246,7 +236,7 @@ def test_build_agent_factory_rejects_unapproved_secretary_tool_name() -> None:
     ):
         build_agent_factory(
             _models(),
-            tool_bindings={AgentId.SECRETARY: {"report_delivery": (mock_consultar_fazenda,)}},
+            tool_bindings={AgentId.SECRETARY: {"report_delivery": (mock_query_farm,)}},
             use_mock_tools=True,
         )
 
@@ -272,7 +262,7 @@ def test_explicit_mcp_configuration_binds_unavailable_tools_instead_of_mocks(mon
 
 def test_factory_fails_when_model_for_policy_is_missing() -> None:
     models = _models()
-    del models[ModelPolicyId.FARM]
+    del models[ModelPolicyId.SPECIALIST]
 
     with pytest.raises(ModelRuntimeConfigurationError, match="modelo ausente"):
         build_agent_factory(models, use_mock_tools=True)
@@ -288,39 +278,7 @@ async def test_langchain_adapter_rejects_invalid_input(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_accepts_complete_json_text_when_provider_omits_structured_response(
-    monkeypatch,
-) -> None:
-    class JsonTextRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": (
-                            '```json\n{"agent":"farm","status":"success",'
-                            '"answer":"49 bovinos","provider_metadata":{"retry":1}}\n```'
-                        ),
-                    }
-                ]
-            }
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: JsonTextRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
-
-    result = await agent.run(
-        SpecialistInput(
-            task_id="task-1",
-            goal="Consultar registros",
-            brief_sanitized="Consultar registros permitidos",
-        )
-    )
-
-    assert result.answer == "49 bovinos"
-
-
-@pytest.mark.asyncio
-async def test_agent_does_not_treat_free_text_as_structured_success(monkeypatch) -> None:
+async def test_agent_rejects_missing_native_structured_response(monkeypatch) -> None:
     class PlainTextRunnable:
         async def ainvoke(self, _state, config=None):
             return {"messages": [{"role": "assistant", "content": "There are 49 bovines."}]}
@@ -328,7 +286,7 @@ async def test_agent_does_not_treat_free_text_as_structured_success(monkeypatch)
     monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
     agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.FARM)
 
-    with pytest.raises(AgentResponseError, match="JSON estruturado"):
+    with pytest.raises(AgentResponseError, match="saída estruturada"):
         await agent.run(
             SpecialistInput(
                 task_id="task-1",
@@ -363,146 +321,6 @@ async def test_specialist_agent_identity_is_inferred_from_its_registered_agent(m
 
     assert result.agent.value == "farm"
     assert result.answer == "Lote consultado."
-
-
-@pytest.mark.asyncio
-async def test_orchestrator_accepts_plain_text_and_attaches_only_received_sources(monkeypatch):
-    class PlainTextRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {"messages": [{"role": "assistant", "content": "A fazenda tem 49 bovinos."}]}
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
-    source = SourceReference(
-        title="Lote",
-        reference="tool-call:lot-1",
-        excerpt='{"head_count":49}',
-    )
-    outcome = TaskOutcome(
-        task=RouteTask(
-            task_id="farm-1",
-            agent="farm",
-            goal="Consultar lote",
-            brief_sanitized="Consultar dados do lote",
-        ),
-        result=SpecialistResult(
-            agent="farm",
-            status="success",
-            answer="49 bovinos",
-            sources=(source,),
-        ),
-    )
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ORCHESTRATOR)
-
-    result = await agent.run(OrchestratorInput(request="Quantos bovinos?", outcomes=(outcome,)))
-
-    assert result.draft_answer == "A fazenda tem 49 bovinos."
-    assert result.sources == (source,)
-
-
-@pytest.mark.asyncio
-async def test_judge_accepts_only_explicit_plain_text_verdict(monkeypatch):
-    class PlainTextRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {"messages": [{"role": "assistant", "content": "decision: approved"}]}
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
-
-    result = await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
-
-    assert result.decision.value == "approved"
-    assert result.reason == "Veredito textual explícito do Juiz."
-
-
-@pytest.mark.asyncio
-async def test_judge_accepts_json_text_without_provider_structured_response(monkeypatch):
-    class JsonTextRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": (
-                            '{"verdict":"approved",'
-                            '"rationale":"Os valores coincidem com a fonte.",'
-                            '"extra":"ignorado"}'
-                        ),
-                    }
-                ]
-            }
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: JsonTextRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
-
-    result = await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
-
-    assert result.decision.value == "approved"
-    assert result.reason == "Os valores coincidem com a fonte."
-
-
-@pytest.mark.asyncio
-async def test_judge_uses_explicit_verdict_when_provider_structured_payload_is_invalid(monkeypatch):
-    class MixedResponseRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {
-                "structured_response": {"decision": "yes"},
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": "decision: approved - A resposta corresponde às evidências.",
-                    }
-                ],
-            }
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: MixedResponseRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
-
-    result = await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
-
-    assert result.decision.value == "approved"
-    assert "corresponde" in result.reason
-
-
-@pytest.mark.asyncio
-async def test_judge_rejects_ambiguous_plain_text(monkeypatch):
-    class PlainTextRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {"messages": [{"role": "assistant", "content": "This looks okay."}]}
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.JUDGE)
-
-    with pytest.raises(AgentResponseError, match="veredito explícito"):
-        await agent.run(JudgeInput(request="Consulta", draft_answer="Resposta"))
-
-
-@pytest.mark.asyncio
-async def test_agent_accepts_plain_text_only_after_matching_tool_evidence(monkeypatch) -> None:
-    class PlainTextRunnable:
-        async def ainvoke(self, _state, config=None):
-            return {"messages": [{"role": "assistant", "content": "Estimativa: 52,9 ml."}]}
-
-    monkeypatch.setattr(specialists, "create_agent", lambda **_: PlainTextRunnable())
-    agent = build_agent_factory(_models(), use_mock_tools=True).create(AgentId.ANALYST)
-    limits = ExecutionLimits(max_model_calls=5, max_tool_calls=5)
-    limits.record_tool_success(
-        "analyst",
-        "estimate_medicine_consumption",
-        '{"status":"estimated","items":[{"estimated_quantity":"52.9"}]}',
-        reference="tool-call:prediction-1",
-    )
-
-    result = await agent.run(
-        SpecialistInput(
-            task_id="task-1",
-            goal="Estimar consumo",
-            brief_sanitized="Estimar consumo da Vacina Teste A",
-        ),
-        context={"argos_execution_limits": limits},
-    )
-
-    assert result.status.value == "success"
-    assert result.answer == "Estimativa: 52,9 ml."
 
 
 @pytest.mark.asyncio
@@ -676,14 +494,14 @@ async def test_information_agent_can_be_built_with_both_document_and_legal_mocks
     factory = build_agent_factory(_models(), use_mock_tools=True)
     assert factory.create(AgentId.INFORMATION) is not None
 
-    result = await mock_consultar_legal.ainvoke(
+    result = await mock_query_law.ainvoke(
         {"question": "Quais campos registrar?", "jurisdiction": "BR"}
     )
     assert "Nenhuma lei foi consultada" in result
 
 
 @pytest.mark.asyncio
-async def test_analyst_plain_text_requires_prediction_evidence(monkeypatch) -> None:
+async def test_analyst_missing_structured_output_requires_prediction_evidence(monkeypatch) -> None:
     class PlainTextRunnable:
         async def ainvoke(self, _state, config=None):
             return {"messages": [{"role": "assistant", "content": "Estimativa: 52,9 ml."}]}
@@ -787,7 +605,7 @@ async def test_farm_agent_adapter_can_call_mock_tool_with_farm_context(monkeypat
             config: dict[str, Any] | None = None,
         ) -> dict[str, Any]:
             assert state["messages"]
-            answer = mock_consultar_fazenda.invoke({"consulta": "aplicações"}, config=config)
+            answer = mock_query_farm.invoke({"consulta": "aplicações"}, config=config)
             return {
                 "structured_response": SpecialistResult(
                     agent="farm", status="success", answer=answer
