@@ -143,7 +143,7 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         )
 
         def anonymizer(data: Any) -> Any:
-            """Oculta dados pessoais e preserva as chaves técnicas usadas para localizar um trace."""
+            """Oculta dados pessoais e preserva as chaves técnicas do trace."""
             value = deepcopy(data)
             preserved: list[tuple[tuple[Any, ...], str]] = []
 

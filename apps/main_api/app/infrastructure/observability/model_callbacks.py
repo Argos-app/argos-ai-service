@@ -387,7 +387,7 @@ class ModelUsageCallback(AsyncCallbackHandler):
             )
 
     def finish_pending(self, error: BaseException) -> None:
-        """Finaliza observações do provider quando o cancelamento ignora os callbacks do LangChain."""
+        """Finaliza observações quando o cancelamento ignora os callbacks do LangChain."""
         cancelled = isinstance(error, asyncio.CancelledError)
         for run_id, (provider, model) in tuple(self._requests.items()):
             _log_provider_failure(

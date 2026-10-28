@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class _AgentOutput(BaseModel):
-    """Ignore campos extras inofensivos do provider e valide todos os campos usados pela aplicação."""
+    """Ignora campos extras e valida os campos usados pela aplicação."""
 
     model_config = ConfigDict(extra="ignore", frozen=True, str_strip_whitespace=True)
 
