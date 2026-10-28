@@ -97,23 +97,12 @@ imagens:
 O script termina com erro se qualquer build ou o carregamento no Kind falhar. As
 imagens são locais e usam `imagePullPolicy: IfNotPresent`.
 
-Com o Kubernetes do Docker Desktop e provisionador Kubeadm, não use esse
-auxiliar porque ele chama `kind load`. Construa as mesmas imagens diretamente no
-Docker Desktop, cujo image store está disponível ao cluster Kubeadm:
+Com o Kubernetes do Docker Desktop e provisionador Kubeadm, construa as mesmas
+imagens sem executar `kind load`. O image store do Docker Desktop está
+disponível ao cluster Kubeadm:
 
 ```powershell
-$images = @(
-    @{ Name = 'argos-main-api:local'; Dockerfile = 'apps/main_api/Dockerfile' },
-    @{ Name = 'argos-mcp-data:local'; Dockerfile = 'apps/mcp_data/Dockerfile' },
-    @{ Name = 'argos-mcp-prediction:local'; Dockerfile = 'apps/mcp_prediction/Dockerfile' },
-    @{ Name = 'argos-mcp-email:local'; Dockerfile = 'apps/mcp_email/Dockerfile' },
-    @{ Name = 'argos-a2a-agent:local'; Dockerfile = 'apps/a2a_agent/Dockerfile' },
-    @{ Name = 'argos-postgres-init:local'; Dockerfile = 'infrastructure/docker/postgres/Dockerfile.local' }
-)
-foreach ($image in $images) {
-    docker build --tag $image.Name --file $image.Dockerfile .
-    if ($LASTEXITCODE -ne 0) { throw "Falha ao construir $($image.Name)" }
-}
+./scripts/kubernetes/build-load-images.ps1 -SkipKindLoad
 ```
 
 ## Subida e validação

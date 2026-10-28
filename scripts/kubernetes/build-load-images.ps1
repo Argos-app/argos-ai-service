@@ -1,5 +1,6 @@
 param(
-    [string]$ClusterName = 'argos-local'
+    [string]$ClusterName = 'argos-local',
+    [switch]$SkipKindLoad
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,7 +20,9 @@ foreach ($image in $images) {
     if ($LASTEXITCODE -ne 0) { throw "Falha ao construir $($image.Name)" }
 }
 
-foreach ($image in $images) {
-    kind load docker-image --name $ClusterName $image.Name
-    if ($LASTEXITCODE -ne 0) { throw "Falha ao carregar $($image.Name) no cluster Kind" }
+if (-not $SkipKindLoad) {
+    foreach ($image in $images) {
+        kind load docker-image --name $ClusterName $image.Name
+        if ($LASTEXITCODE -ne 0) { throw "Falha ao carregar $($image.Name) no cluster Kind" }
+    }
 }

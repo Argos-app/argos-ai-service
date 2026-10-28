@@ -203,11 +203,18 @@ IDs assinados de correlação e pai permitem relacionar a observação de chamad
 principal às observações A2A quando ambas as persistências estiverem
 habilitadas.
 
-Testes unitários: `python -m pytest apps/main_api/tests/unit -q`. Testes de
-persistência e retomada com Mongo replica set descartável: siga
-[`apps/main_api/tests/integration/README.md`](apps/main_api/tests/integration/README.md).
-O job `Main API Mongo integration tests` da CI executa esses testes e publica o
-relatório JUnit.
+Para executar a mesma suíte unitária da CI em todos os serviços e pacotes, use
+`python -m pytest tests apps packages -m "not integration"`. Para executar
+apenas um serviço, use `python -m pytest apps/<serviço>/tests/unit`. As
+instruções de integração isolada estão nos diretórios de testes da
+[Main API](apps/main_api/tests/integration/README.md),
+[A2A](apps/a2a_agent/tests/integration/README.md),
+[MCP de dados](apps/mcp_data/tests/integration/README.md),
+[MCP de e-mail](apps/mcp_email/tests/integration/README.md) e
+[MCP de predição](apps/mcp_prediction/tests/integration/README.md). A CI usa os
+mesmos arquivos Compose descartáveis e publica relatórios JUnit. O build da
+pilha integrada usa os Dockerfiles dos cinco serviços; consulte
+[Docker local](docs/docker-local.md) para executar a pilha e builds individuais.
 
 ### Fluxo planejado de relatório de lote
 
