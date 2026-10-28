@@ -68,8 +68,10 @@ class EstimateMedicineConsumption:
         context: AccessContext,
         request: EstimateMedicineConsumptionRequest,
     ) -> EstimateMedicineConsumptionResponse:
-        """Autoriza o escopo completo antes de acessar histórico ou cobertura."""
+        """Autoriza o escopo completo antes de acessar histórico ou cobertura.
 
+        Revalidar os tipos aqui protege o caso de uso quando uma implementação
+        falsa ou outro adapter não respeita o contrato Protocol."""
         if not isinstance(context, AccessContext) or context.agent_id != "analista":
             raise AccessDeniedError("ferramenta disponível somente ao agente Analista")
         if not isinstance(request, EstimateMedicineConsumptionRequest):
@@ -82,8 +84,6 @@ class EstimateMedicineConsumption:
         )
         windows = build_prediction_windows(request.as_of, request.horizon_days)
 
-        # Revalidar os tipos aqui protege o caso de uso quando uma implementação
-        # falsa ou outro adapter não respeita o contrato Protocol.
         coverage_records = await self._coverage_repository.get_coverage(
             scope, start=windows.history_start, end=windows.history_end
         )

@@ -1,6 +1,7 @@
 """Verificações da fundação do runtime MCP de dados."""
 
 import base64
+from typing import Any
 
 import pytest
 from argos_mcp_data.application import CattleQueryService
@@ -21,7 +22,7 @@ def complete_settings(**overrides: object) -> Settings:
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
-    values: dict[str, object] = {
+    values: dict[str, Any] = {
         "sql_dsn": "postgresql://readonly@localhost/argos",
         "mongo_uri": "mongodb://readonly@localhost:27017",
         "mongo_database": "argos",
@@ -36,7 +37,7 @@ def complete_settings(**overrides: object) -> Settings:
         "report_signing_private_key": base64.b64encode(signing_key_der).decode("ascii"),
     }
     values.update(overrides)
-    return Settings(**values)  # type: ignore[arg-type]
+    return Settings(**values)
 
 
 def test_mongo_collection_names_are_fixed(monkeypatch):

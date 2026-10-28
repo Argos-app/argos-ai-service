@@ -15,9 +15,10 @@ from argos_mcp_data.domain.cattle import (
     LotRecord,
     Page,
 )
-from argos_mcp_data.ports.access_directory import AccessDirectory
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from packages.security.access_directory import AccessDirectory, UserPropertyAccess
 
 
 class _AccessDirectory(AccessDirectory):
@@ -26,8 +27,6 @@ class _AccessDirectory(AccessDirectory):
         self.user_id = user_id
 
     async def get_user_property_access(self, firebase_uid):
-        from argos_mcp_data.ports.access_directory import UserPropertyAccess
-
         del firebase_uid
         return UserPropertyAccess(user_id=self.user_id, property_ids={self.property_id})
 

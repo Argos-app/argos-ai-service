@@ -1,4 +1,4 @@
-"""HTTP adapter for the shared Ed25519 delegation verifier."""
+"""Adapter HTTP para o verificador compartilhado de delegações Ed25519."""
 
 from uuid import UUID
 

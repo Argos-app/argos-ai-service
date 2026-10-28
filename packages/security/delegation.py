@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from cryptography.exceptions import InvalidSignature
@@ -232,9 +232,7 @@ class GlobalDocumentDelegationTokenVerifier(DelegationTokenVerifier):
         )
 
     def verify(self, token: str) -> DocumentAccessContext:
-        # O método-base valida estrutura, assinatura, tamanho e claims comuns;
-        # a sobrescrita de _parse_claims aplica o formato global sem propriedades.
-        return super().verify(token)  # type: ignore[return-value]
+        return cast(DocumentAccessContext, super().verify(token))
 
     def _parse_claims(self, claims: dict[str, Any]) -> DocumentAccessContext:
         now = int(self._clock())

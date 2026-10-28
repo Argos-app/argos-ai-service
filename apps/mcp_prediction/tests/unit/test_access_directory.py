@@ -9,7 +9,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from argos_mcp_prediction.infrastructure.access_directory import PostgresAccessDirectory
+
+from packages.security.adapters.postgres_access_directory import PostgresAccessDirectory
 
 pytestmark = pytest.mark.asyncio
 
@@ -37,6 +38,7 @@ class FixtureSqlReader:
     ],
 )
 async def test_current_user_and_link_must_be_active(change):
+    """A titularidade continua válida sem vínculo, exceto para entidades inativas ou bloqueadas."""
     user, owner, property_id = uuid4(), uuid4(), uuid4()
     with closing(sqlite3.connect(":memory:")) as database:
         database.row_factory = sqlite3.Row
@@ -81,7 +83,7 @@ async def test_current_user_and_link_must_be_active(change):
             assert access.user_id == user
             assert access.property_ids == {property_id}
         assert await directory.get_user_property_access(f"firebase-{uuid4().hex}") is None
-        # Ownership remains valid without a link, except for inactive/blocked entities.
+
         database.execute("UPDATE property SET user_id = ?", (str(user),))
         if change in (None, "link_inactive", "future_link", "expired_link"):
             access = await directory.get_user_property_access(firebase_uid)

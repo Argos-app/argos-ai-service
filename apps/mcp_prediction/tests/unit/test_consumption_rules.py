@@ -80,6 +80,7 @@ def test_invalid_cutoff_or_horizon_is_rejected(values):
 
 
 def test_daily_means_cover_forecast_crossing_months_and_split_history_month():
+    """March: 16 * 2; April: 12 * 3."""
     selected = group()
     windows = build_prediction_windows(date(2024, 3, 15), today=TODAY)
     records = (record(selected, 3, "62", 31, 62), record(selected, 4, "90", 30, 60))
@@ -87,7 +88,7 @@ def test_daily_means_cover_forecast_crossing_months_and_split_history_month():
         selected, records, coverage=confirmed(selected, windows), windows=windows
     )
     assert result.estimate.state == ConsumptionState.ESTIMATED
-    assert result.estimate.quantity == Decimal(68)  # March: 16 * 2; April: 12 * 3.
+    assert result.estimate.quantity == Decimal(68)
     assert result.estimate.application_events == 28
     assert result.estimate.head_administrations == 56
     assert result.historical_quantity == 152
@@ -207,6 +208,7 @@ def test_no_product_history_is_not_zero_even_with_confirmed_coverage():
 
 
 def test_zero_for_a_missing_month_requires_coverage_confirmation():
+    """Janeiro ausente é considerado sem consumo."""
     selected = group()
     windows = build_prediction_windows(date(2024, 12, 31), today=TODAY)
     records = (record(selected, 2, "29"),)
@@ -214,7 +216,7 @@ def test_zero_for_a_missing_month_requires_coverage_confirmation():
         selected, records, coverage=confirmed(selected, windows), windows=windows
     )
     assert result.estimate.state == ConsumptionState.ESTIMATED
-    assert result.estimate.quantity == 0  # Missing January is assumed to have no consumption.
+    assert result.estimate.quantity == 0
     assert len(result.monthly_history) == 12
     unknown = calculate_consumption(selected, records, coverage=None, windows=windows)
     assert unknown.estimate.quantity is None
@@ -223,6 +225,7 @@ def test_zero_for_a_missing_month_requires_coverage_confirmation():
 
 
 def test_decimal_calculation_is_independent_of_ambient_precision_and_traps():
+    """Contagens fracionárias continuam sendo estimativas."""
     selected = group()
     windows = build_prediction_windows(date(2024, 12, 31), horizon_days=1, today=TODAY)
     records = (record(selected, 1, "0.1234567890123456789"),)
@@ -237,7 +240,7 @@ def test_decimal_calculation_is_independent_of_ambient_precision_and_traps():
     assert actual.historical_quantity == Decimal("0.1234567890123456789")
     assert isinstance(actual.estimate.quantity, Decimal)
     assert actual.estimate.application_events > 0
-    assert actual.estimate.application_events < 1  # Fractional counts remain estimates.
+    assert actual.estimate.application_events < 1
 
 
 @pytest.mark.parametrize(

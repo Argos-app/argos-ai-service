@@ -1,9 +1,14 @@
 """Revalidação relacional de usuário e propriedades atualmente acessíveis."""
 
+from collections.abc import Mapping, Sequence
+from typing import Any, Protocol
 from uuid import UUID
 
-from argos_mcp_prediction.ports.sql_reader import SqlReader
 from packages.security.access_directory import UserPropertyAccess
+
+
+class SqlReader(Protocol):
+    async def fetch_all(self, query: str, *parameters: Any) -> Sequence[Mapping[str, Any]]: ...
 
 
 class PostgresAccessDirectory:
