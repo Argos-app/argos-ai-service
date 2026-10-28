@@ -434,6 +434,8 @@ def create_app(
                     continue
                 for response in operation.get("responses", {}).values():
                     if isinstance(response, dict):
+                        if response.get("description") == "Validation Error":
+                            response["description"] = "Erro de validação"
                         response.setdefault("headers", {})["X-Argos-Correlation-ID"] = (
                             correlation_header
                         )
