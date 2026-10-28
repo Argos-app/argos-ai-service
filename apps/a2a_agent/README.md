@@ -37,13 +37,18 @@ configuração de acesso.
 ## Integrações do runtime
 
 O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
-`/chat/completions`. Configure os endpoints HTTPS, chaves, nomes dos modelos e
-uma revisão imutável do modelo de embeddings. Essa revisão participa do
-fingerprint de indexação; alterá-la força o sincronizador a criar uma nova
-geração compatível com Qdrant. O modelo e a dimensão devem ser os mesmos usados
-para indexar e consultar. Cada chamada de resposta também recebe o teto
-`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 1200); o deadline delegado e os timeouts
-existentes limitam a duração da tarefa.
+`/chat/completions`, e um adapter HTTP para os embeddings Voyage. Configure as
+URLs base `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL`, os endpoints completos
+`OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL`, além das chaves, nomes dos
+modelos e dimensões dos dois espaços. O código não presume URLs de provedores:
+informe endpoints compatíveis com o protocolo esperado, incluindo gateways como
+OpenRouter quando oferecerem a API adequada. A sincronização indexa os
+documentos em vetores Qdrant nomeados (`openai` e `voyage`); a consulta usa o
+índice correspondente ao provedor que conseguiu gerar o vetor. A revisão dos
+modelos e dimensões participa do fingerprint de indexação; alterá-la força o
+sincronizador a criar uma nova geração compatível com Qdrant. Cada chamada de
+resposta também recebe o teto `A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 1200); o
+deadline delegado e os timeouts existentes limitam a duração da tarefa.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
 os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o
@@ -78,7 +83,7 @@ O principal inclui correlation ID, ID do span pai, `session_id` e
 `correlation_id`, `parent_observation_id`, `session_id` e `interaction_id` na
 observação A2A e nos spans de execução. O ID de protocolo da task continua
 distinto. A resposta da API principal expõe `X-Argos-Correlation-ID`; veja o
-guia de [operação](../../docs/operacao-observabilidade.md) para seguir a
+guia de [operação](../../docs/observability-operations.md) para seguir a
 requisição nas collections de ambos os serviços. A coleta Mongo funciona sem
 LangSmith.
 
@@ -96,11 +101,14 @@ endpoint HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`. Para chaves de
 escopo organizacional, configure `A2A_LANGSMITH_WORKSPACE_ID` com o ID do
 workspace. Quando há uso de tokens, o serviço persiste custo explícito do
 provider ou uma estimativa configurada no Mongo e o propaga ao LangSmith. As
-variáveis opcionais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
-`MODEL_OUTPUT_COST_PER_MILLION_TOKENS` são tarifas globais em USD por milhão;
-embeddings usam somente a tarifa de entrada. `billing.cost_source` identifica
-`provider` ou `configured_rate`. Sem uso/tarifa suficientes, o custo fica
-ausente. Consulte o guia operacional para limites e semântica dos valores.
+tarifas opcionais em USD por milhão são configuradas separadamente por
+especialista, fallback especialista, embedding OpenAI e fallback Voyage, pelas
+variáveis `MODEL_SPECIALIST_*`, `MODEL_SPECIALIST_FALLBACK_*`,
+`MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS`. Embeddings usam só
+tarifa de entrada. `billing.cost_source` identifica `provider` ou
+`configured_rate`. Sem uso/tarifa suficientes, o custo fica ausente. Consulte o
+guia operacional para limites e semântica dos valores.
 
 ## Contrato A2A
 

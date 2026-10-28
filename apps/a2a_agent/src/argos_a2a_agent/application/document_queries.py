@@ -80,8 +80,8 @@ class _DocumentQuery:
         context: DocumentAccessContext | None,
         corpus_revision: str,
     ) -> None:
-        # O repositório compara a revisão exigida ao manifesto atual. Assim uma
-        # publicação concorrente invalida a resposta em vez de liberar conteúdo antigo.
+        """O repositório compara a revisão exigida ao manifesto atual. Assim uma
+        publicação concorrente invalida a resposta em vez de liberar conteúdo antigo."""
         await self._repository.count_documents(
             filters=DocumentFilter(corpus_revision=corpus_revision)
         )
@@ -124,15 +124,19 @@ class SearchDocuments(_DocumentQuery):
         ensure_current: EnsureCurrentCorpus,
         repository: DocumentReadRepository,
         embeddings: EmbeddingProvider,
+        voyage_embeddings: EmbeddingProvider | None = None,
     ) -> None:
         super().__init__(ensure_current, repository)
         self._embeddings = embeddings
+        self._voyage_embeddings = voyage_embeddings
 
     async def execute(
         self,
         request: SearchDocumentsRequest,
         context: DocumentAccessContext | None,
     ) -> SearchDocumentsResponse:
+        """Busca um elemento adicional para indicar truncamento quando o
+        limite pedido é inferior ao teto do contrato."""
         current = await self._ensure_ready(context)
         revision = current.corpus_revision
         assert revision is not None
@@ -147,14 +151,14 @@ class SearchDocuments(_DocumentQuery):
             )
             matching_documents = await self._repository.count_documents(filters=filters)
         if matching_documents:
-            vector = await self._embed_query(request.query)
-            # Busca um elemento adicional para indicar truncamento quando o
-            # limite pedido é inferior ao teto do contrato.
+            vector, vector_name = await self._embed_query(request.query)
+
             query_limit = min(request.top_k + 1, _MAX_SEARCH_HITS)
             result_hits = await self._repository.search(
                 vector,
                 filters=filters,
                 limit=query_limit,
+                **({"vector_name": vector_name} if vector_name is not None else {}),
             )
             truncated = (
                 len(result_hits) > request.top_k
@@ -210,9 +214,24 @@ class SearchDocuments(_DocumentQuery):
             return filters
         return replace(filters, document_ids=(explicit_matches[0].document_id,))
 
-    async def _embed_query(self, query: str) -> tuple[float, ...]:
+    async def _embed_query(self, query: str) -> tuple[tuple[float, ...], str | None]:
         try:
-            vectors = await self._embeddings.embed((query,))
+            vector_name = "openai" if self._voyage_embeddings is not None else None
+            return await self._validated_query_vector(self._embeddings, query), vector_name
+        except EmbeddingProviderError:
+            if self._voyage_embeddings is None:
+                raise
+        try:
+            return await self._validated_query_vector(self._voyage_embeddings, query), "voyage"
+        except EmbeddingProviderError as exc:
+            raise EmbeddingProviderError(
+                "provedores OpenAI e Voyage não conseguiram vetorizar a consulta"
+            ) from exc
+
+    @staticmethod
+    async def _validated_query_vector(provider: EmbeddingProvider, query: str) -> tuple[float, ...]:
+        try:
+            vectors = await provider.embed((query,), input_type="query")
         except Exception as exc:
             if isinstance(exc, EmbeddingProviderError):
                 raise

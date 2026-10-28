@@ -108,7 +108,7 @@ class FakeManifestRepository:
 
     async def save(self, manifest):
         if self.fail_save:
-            raise ManifestStoreError("simulated manifest write failure")
+            raise ManifestStoreError("falha simulada ao gravar o manifesto")
         self.saved.append(manifest)
         self.manifest = manifest
 
@@ -157,7 +157,7 @@ class FakeIndexWriter:
         self.copied.append((source_revision, target_revision, dict(documents)))
         source = self.generations.get(source_revision, {})
         if not set(documents) <= set(source):
-            raise CorpusSynchronizationError("missing reusable points")
+            raise CorpusSynchronizationError("pontos reutilizáveis ausentes")
         self.generations[target_revision] = dict(documents)
 
     async def publish(self, corpus_revision):
@@ -166,11 +166,11 @@ class FakeIndexWriter:
         self.published.append(corpus_revision)
         if self.fail_publish_after_switch:
             self.fail_publish_after_switch = False
-            raise RuntimeError("simulated timeout after alias switch")
+            raise RuntimeError("tempo limite simulado após a troca do alias")
 
     async def generation_exists(self, corpus_revision):
         if corpus_revision in self.incompatible_generations:
-            raise IndexWriteError("generation is incompatible with current vector settings")
+            raise IndexWriteError("a geração é incompatível com as configurações atuais do vetor")
         return corpus_revision in self.generations
 
     async def is_published(self, corpus_revision):
@@ -183,7 +183,7 @@ class FakeIndexWriter:
 
     async def discard(self, corpus_revision):
         if self.active_revision == corpus_revision:
-            raise CorpusSynchronizationError("cannot discard active")
+            raise CorpusSynchronizationError("não é possível descartar o índice ativo")
         if corpus_revision in self.generations:
             self.generations.pop(corpus_revision)
             self.discarded.append(corpus_revision)
@@ -387,7 +387,7 @@ def test_processing_failure_discards_staging_without_publishing() -> None:
 
     class FailedProcessor:
         async def execute(self, source_document):
-            raise RuntimeError("simulated embedding failure")
+            raise RuntimeError("falha simulada ao gerar embedding")
 
     failing_sync = make_synchronizer(source, manifests, FailedProcessor(), writer)
     with pytest.raises(CorpusSynchronizationError, match="preparar"):

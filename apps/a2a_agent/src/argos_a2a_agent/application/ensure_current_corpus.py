@@ -62,8 +62,8 @@ class EnsureCurrentCorpus:
         self._clock = clock
 
     async def execute(self, context: DocumentAccessContext | None) -> EnsureCurrentCorpusOutcome:
-        # A autorização acontece antes de chamar qualquer porta capaz de ler
-        # arquivos, consultar manifesto ou escrever no índice.
+        """A autorização acontece antes de chamar qualquer porta capaz de ler
+        arquivos, consultar manifesto ou escrever no índice."""
         await self._access_policy.authorize(context)
 
         try:

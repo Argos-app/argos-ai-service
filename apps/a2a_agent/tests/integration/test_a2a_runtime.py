@@ -119,12 +119,13 @@ class A2AHarness:
         self.permission_file.write_text(json.dumps([str(user) for user in users]), encoding="utf-8")
 
     async def sdk_client(self, *, user_id: UUID | None = None, delegation: str | None = None):
+        """O servidor tem prazo de tarefa de 30 s; o cliente precisa permitir
+        esse prazo mais uma margem para serialização e transporte locais."""
         headers = {
             "Authorization": f"Bearer {SERVICE_TOKEN}",
             "X-Argos-Delegation": delegation or self.delegation(user_id=user_id),
         }
-        # O servidor tem prazo de tarefa de 30 s; o cliente precisa permitir
-        # esse prazo mais uma margem para serialização e transporte locais.
+
         http = httpx.AsyncClient(headers=headers, timeout=35)
         card = create_agent_card(self.endpoint)
         client = await create_client(
@@ -297,6 +298,7 @@ async def a2a_harness(tmp_path: Path):
 async def test_sdk_queries_two_agents_mixed_refresh_restart_and_concurrency(
     a2a_harness: A2AHarness, tmp_path: Path
 ) -> None:
+    """Chamadas simultâneas sobre corpus já publicado não devem misturar tasks ou fontes."""
     harness = a2a_harness
     law_id = "11111111-1111-4111-8111-111111111111"
     terms_id = "22222222-2222-4222-8222-222222222222"
@@ -322,7 +324,6 @@ async def test_sdk_queries_two_agents_mixed_refresh_restart_and_concurrency(
     }
     initial_revision = combined["corpus_revision"]
 
-    # Chamadas simultâneas sobre corpus já publicado não devem misturar tasks ou fontes.
     parallel = await asyncio.gather(
         harness.ask(
             skill="legal",

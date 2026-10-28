@@ -20,6 +20,7 @@ class DocumentReadRepository(Protocol):
         *,
         filters: DocumentFilter,
         limit: int,
+        vector_name: str | None = None,
     ) -> Sequence[DocumentSearchHit]:
         """Busca semântica limitada dentro da revisão global indicada."""
 

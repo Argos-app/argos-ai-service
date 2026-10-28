@@ -49,6 +49,7 @@ class QdrantDocumentReadRepository:
         *,
         filters: DocumentFilter,
         limit: int,
+        vector_name: str | None = None,
     ) -> Sequence[DocumentSearchHit]:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
             raise ValueError("limit deve ser um inteiro entre 1 e 20")
@@ -72,6 +73,7 @@ class QdrantDocumentReadRepository:
                 vector,
                 query_filter=self._qdrant_filter(filters, manifest.corpus_revision),
                 limit=limit,
+                **({"vector_name": vector_name} if vector_name is not None else {}),
             )
         except Exception as exc:
             raise IndexReadError("não foi possível consultar o índice documental") from exc

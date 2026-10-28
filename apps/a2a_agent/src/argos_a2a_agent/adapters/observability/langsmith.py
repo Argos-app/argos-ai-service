@@ -20,8 +20,11 @@ def attach_provider_billing(
     usage: Mapping[str, Any] | None = None,
     *,
     embedding: bool = False,
+    rate_profile: str | None = None,
 ) -> None:
-    """Attach provider cost or a configured-rate estimate to the active run."""
+    """Anexa o custo do provider ou uma estimativa por tarifa à execução ativa.
+
+    O envio ao LangSmith é de melhor esforço; a observação Mongo é gravada separadamente."""
     if billing is None:
         return
     try:
@@ -32,11 +35,15 @@ def attach_provider_billing(
             return
         run_tree.set(
             metadata={"argos_billing": billing.model_dump(mode="json", exclude_none=True)},
-            usage_metadata=langsmith_usage_metadata(billing, usage, embedding=embedding),
+            usage_metadata=langsmith_usage_metadata(
+                billing,
+                usage,
+                embedding=embedding,
+                rate_profile=rate_profile,
+            ),
         )
     except Exception:
-        # LangSmith is best effort; the Mongo observation is written separately.
-        _LOGGER.warning("LangSmith provider-cost annotation failed")
+        _LOGGER.warning("falha ao registrar o custo do provider no LangSmith")
 
 
 @dataclass(slots=True)
@@ -107,7 +114,7 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         )
 
         def anonymizer(data: Any) -> Any:
-            """Mask PII while preserving the technical keys used to find a trace."""
+            """Oculta dados pessoais e preserva as chaves técnicas usadas para localizar um trace."""
             value = deepcopy(data)
             preserved: list[tuple[tuple[Any, ...], str]] = []
 
@@ -151,5 +158,5 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
     except Exception:
         if client is not None:
             client.close()
-        _LOGGER.warning("LangSmith tracing could not be initialized")
+        _LOGGER.warning("não foi possível inicializar o rastreamento do LangSmith")
         return None

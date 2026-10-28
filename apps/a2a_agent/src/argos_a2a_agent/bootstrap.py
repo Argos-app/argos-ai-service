@@ -20,8 +20,10 @@ from argos_a2a_agent.adapters.observability.langsmith import create_langsmith_tr
 from argos_a2a_agent.adapters.providers import (
     OpenAICompatibleAnswerGenerator,
     OpenAICompatibleEmbeddingProvider,
+    ProviderFallbackAnswerGenerator,
     SimulatedAnswerGenerator,
     SimulatedEmbeddingProvider,
+    VoyageEmbeddingProvider,
 )
 from argos_a2a_agent.adapters.storage import LocalDocumentSource, LocalManifestRepository
 from argos_a2a_agent.agents.factory import DocumentAgentFactory
@@ -64,6 +66,8 @@ class RuntimeDependencies:
     embedding_vector_size: int
     answer_generator: DocumentAnswerGenerator
     permission_directory: DocumentPermissionDirectory
+    voyage_embeddings: EmbeddingProvider | None = None
+    voyage_embedding_vector_size: int | None = None
 
     def validate(self) -> None:
         if not isinstance(self.embedding_fingerprint, str) or not _FINGERPRINT.fullmatch(
@@ -78,6 +82,14 @@ class RuntimeDependencies:
             raise ValueError("embedding_vector_size deve ser inteiro positivo")
         if not callable(getattr(self.embeddings, "embed", None)):
             raise ValueError("adapter de embeddings deve implementar embed(texts)")
+        if (self.voyage_embeddings is None) != (self.voyage_embedding_vector_size is None):
+            raise ValueError(
+                "adapter e dimensão dos embeddings Voyage devem ser configurados juntos"
+            )
+        if self.voyage_embeddings is not None and not callable(
+            getattr(self.voyage_embeddings, "embed", None)
+        ):
+            raise ValueError("adapter Voyage deve implementar embed(texts)")
         if not callable(getattr(self.answer_generator, "generate", None)):
             raise ValueError("gerador de respostas deve implementar generate(...)")
         if not callable(
@@ -157,7 +169,7 @@ async def create_runtime_dependencies(
     *,
     observation_collector: ObservationCollector | None = None,
 ) -> RuntimeDependencies:
-    """Cria adapters reais usando APIs OpenAI-compatible e PostgreSQL read-only."""
+    """Cria adapters reais usando APIs compatíveis com OpenAI e PostgreSQL somente leitura."""
 
     try:
         import asyncpg
@@ -184,8 +196,15 @@ async def create_runtime_dependencies(
         )
         if settings.model_mode == "simulated":
             embeddings = SimulatedEmbeddingProvider(settings.qdrant_vector_size)
+            voyage_embeddings = SimulatedEmbeddingProvider(
+                settings.qdrant_voyage_vector_size,
+                namespace="argos-simulated-voyage",
+            )
             answer_generator = SimulatedAnswerGenerator()
-            fingerprint_material = f"argos-simulated-embedding-v2:{settings.qdrant_vector_size}"
+            fingerprint_material = (
+                f"dual-vector-v1:argos-simulated-openai-v2:{settings.qdrant_vector_size};"
+                f"argos-simulated-voyage-v1:{settings.qdrant_voyage_vector_size}"
+            )
             return RuntimeDependencies(
                 embeddings=embeddings,
                 embedding_fingerprint=hashlib.sha256(
@@ -194,28 +213,67 @@ async def create_runtime_dependencies(
                 embedding_vector_size=settings.qdrant_vector_size,
                 answer_generator=answer_generator,
                 permission_directory=permission_directory,
+                voyage_embeddings=voyage_embeddings,
+                voyage_embedding_vector_size=settings.qdrant_voyage_vector_size,
+            )
+
+        if not settings.openai_base_url:
+            raise ValueError("OPENAI_BASE_URL deve ser configurada para o provider selecionado")
+        if not settings.openai_embeddings_url:
+            raise ValueError(
+                "OPENAI_EMBEDDINGS_URL deve ser configurada para o provider selecionado"
+            )
+        if not settings.voyage_embeddings_url:
+            raise ValueError(
+                "VOYAGE_EMBEDDINGS_URL deve ser configurada para o provider selecionado"
             )
 
         embeddings = OpenAICompatibleEmbeddingProvider(
-            settings.embeddings_api_url,
-            settings.embeddings_api_key,
+            settings.openai_embeddings_url,
+            settings.openai_api_key,
             settings.embeddings_model,
             settings.model_timeout_seconds,
             observation_collector=observation_collector,
         )
+        voyage_embeddings = VoyageEmbeddingProvider(
+            settings.voyage_api_key,
+            settings.voyage_embeddings_model,
+            settings.model_timeout_seconds,
+            endpoint=settings.voyage_embeddings_url,
+            observation_collector=observation_collector,
+        )
         provider_resources.append(embeddings)
+        provider_resources.append(voyage_embeddings)
         answer_generator = OpenAICompatibleAnswerGenerator(
-            settings.answer_api_url,
-            settings.answer_api_key,
-            settings.answer_model,
+            f"{settings.openai_base_url}/chat/completions",
+            settings.openai_api_key,
+            settings.model_specialist_name,
             settings.model_timeout_seconds,
             max_output_tokens=settings.model_max_output_tokens,
-            thinking=settings.answer_thinking,
             observation_collector=observation_collector,
         )
         provider_resources.append(answer_generator)
+        if settings.anthropic_api_key:
+            if not settings.anthropic_base_url:
+                raise ValueError(
+                    "ANTHROPIC_BASE_URL deve ser configurada quando o fallback estiver habilitado"
+                )
+            fallback_answer_generator = ProviderFallbackAnswerGenerator(
+                answer_generator,
+                settings.anthropic_api_key,
+                settings.anthropic_model_specialist_fallback,
+                settings.model_timeout_seconds,
+                endpoint=f"{settings.anthropic_base_url}/v1/messages",
+                max_output_tokens=settings.model_max_output_tokens,
+                observation_collector=observation_collector,
+            )
+            provider_resources.append(fallback_answer_generator)
+            answer_generator = fallback_answer_generator
         fingerprint_material = (
-            f"openai-compatible:{settings.embeddings_model}:{settings.embeddings_model_revision}"
+            f"dual-vector-v1:openai:{settings.openai_embeddings_url}:"
+            f"{settings.embeddings_model}:"
+            f"{settings.qdrant_vector_size};voyageai:{settings.voyage_embeddings_model}:"
+            f"{settings.voyage_embeddings_url}:{settings.qdrant_voyage_vector_size}"
         )
         return RuntimeDependencies(
             embeddings=embeddings,
@@ -223,6 +281,8 @@ async def create_runtime_dependencies(
             embedding_vector_size=settings.qdrant_vector_size,
             answer_generator=answer_generator,
             permission_directory=permission_directory,
+            voyage_embeddings=voyage_embeddings,
+            voyage_embedding_vector_size=settings.qdrant_voyage_vector_size,
         )
     except BaseException:
         await _close_resources(provider_resources)
@@ -235,7 +295,13 @@ async def create_runtime(
     *,
     dependencies: RuntimeDependencies | None = None,
 ) -> ServiceRuntime:
-    """Valida e conecta segurança, atualização, consulta, agentes e protocolo."""
+    """Valida e conecta segurança, atualização, consulta, agentes e protocolo.
+
+    Detecta manifesto ilegível/corrompido antes de aceitar tráfego; ausência é
+    válida na primeira inicialização e será criada pelo sincronizador.
+    O writer de credencial distinta só é alcançado pelo sincronizador.
+    Não é passado ao leitor ou ao executor A2A.
+    Os adapters passam à propriedade do runtime depois que a composição tem êxito."""
 
     configured = settings or Settings.from_env()
     configured.validate_runtime(
@@ -269,8 +335,7 @@ async def create_runtime(
         observation_collector,
         operation_prefix="documents.manifest",
     )
-    # Detecta manifesto ilegível/corrompido antes de aceitar tráfego; ausência é
-    # válida na primeira inicialização e será criada pelo sincronizador.
+
     try:
         await manifests.load()
         dependencies = dependencies or await create_runtime_dependencies(
@@ -282,9 +347,16 @@ async def create_runtime(
             dependencies.answer_generator,
             dependencies.permission_directory,
         ]
+        if dependencies.voyage_embeddings is not None:
+            resources.append(dependencies.voyage_embeddings)
         dependencies.validate()
         if dependencies.embedding_vector_size != configured.qdrant_vector_size:
             raise ValueError("dimensão do adapter de embeddings diverge da configuração Qdrant")
+        if (
+            dependencies.voyage_embeddings is not None
+            and dependencies.voyage_embedding_vector_size != configured.qdrant_voyage_vector_size
+        ):
+            raise ValueError("dimensão dos embeddings Voyage diverge da configuração Qdrant")
 
         parser = observe_adapter(
             PyPdfParser(),
@@ -292,7 +364,12 @@ async def create_runtime(
             operation_prefix="documents.pdf_parser",
         )
         chunker = TextChunker()
-        processor = PrepareDocumentForIndex(parser, dependencies.embeddings, chunker)
+        processor = PrepareDocumentForIndex(
+            parser,
+            dependencies.embeddings,
+            chunker,
+            voyage_embeddings=dependencies.voyage_embeddings,
+        )
         delegation_verifier = GlobalDocumentDelegationTokenVerifier(
             dict(configured.trusted_delegation_keys),
             issuer=configured.delegation_issuer,
@@ -334,6 +411,7 @@ async def create_runtime(
                 active_alias=configured.qdrant_collection,
                 vector_size=configured.qdrant_vector_size,
                 distance=configured.qdrant_distance,
+                voyage_vector_size=dependencies.voyage_embedding_vector_size,
             ),
             observation_collector,
             operation_prefix="qdrant.index_writer",
@@ -342,8 +420,6 @@ async def create_runtime(
             source,
             manifests,
             processor,
-            # O writer de credencial distinta só é alcançado pelo sincronizador.
-            # Não é passado ao leitor ou ao executor A2A.
             writer,
             processing_fingerprint=_processing_fingerprint(
                 dependencies.embedding_fingerprint, chunker
@@ -357,6 +433,7 @@ async def create_runtime(
             ensure_current=ensure_current,
             repository=repository,
             embeddings=dependencies.embeddings,
+            voyage_embeddings=dependencies.voyage_embeddings,
             answer_generator=dependencies.answer_generator,
             observation_collector=observation_collector,
         )
@@ -366,6 +443,7 @@ async def create_runtime(
                 reader_client,
                 collection=configured.qdrant_collection,
                 vector_size=configured.qdrant_vector_size,
+                voyage_vector_size=dependencies.voyage_embedding_vector_size,
                 distance=configured.qdrant_distance,
             )
 
@@ -378,7 +456,6 @@ async def create_runtime(
             langsmith_tracing=langsmith_tracing,
         )
 
-        # Os adapters passam à propriedade do runtime depois que a composição tem êxito.
         closers = [observation_client.close] if observation_client is not None else []
         if user_usage_counter is not None:
             closers.append(user_usage_counter.close)
@@ -456,7 +533,9 @@ async def _create_observability_runtime(
                     key_prefix=os.getenv("USER_USAGE_REDIS_KEY_PREFIX", "argos:usage:users:v1"),
                 )
             except Exception:
-                _LOGGER.warning("A2A Redis user usage counters could not be configured")
+                _LOGGER.warning(
+                    "não foi possível configurar os contadores de uso de usuários do Redis no A2A"
+                )
         writer = MongoObservationWriter(
             MongoObservationRepository(database[settings.observability_collection]),
             user_usage_counter=user_usage_counter,
@@ -472,7 +551,7 @@ async def _create_observability_runtime(
         await writer.start()
         return client, writer, user_usage_counter, BestEffortObservationCollector(writer)
     except Exception:
-        _LOGGER.warning("A2A observability persistence could not start")
+        _LOGGER.warning("não foi possível iniciar a persistência de observabilidade do A2A")
         if writer is not None:
             await writer.close()
         if client is not None:

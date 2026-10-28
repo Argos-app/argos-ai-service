@@ -20,11 +20,13 @@ class PrepareDocumentForIndex:
         chunker: TextChunker | None = None,
         *,
         embedding_batch_size: int = 64,
+        voyage_embeddings: EmbeddingProvider | None = None,
     ) -> None:
         if not 1 <= embedding_batch_size <= 128:
             raise ValueError("embedding_batch_size deve estar entre 1 e 128")
         self._parser = parser
         self._embeddings = embeddings
+        self._voyage_embeddings = voyage_embeddings
         self._chunker = chunker or TextChunker()
         self._embedding_batch_size = embedding_batch_size
 
@@ -41,17 +43,42 @@ class PrepareDocumentForIndex:
 
         indexed: list[IndexedDocumentChunk] = []
         dimensions: int | None = None
+        voyage_dimensions: int | None = None
         for start in range(0, len(chunks), self._embedding_batch_size):
             batch = chunks[start : start + self._embedding_batch_size]
             try:
-                vectors = await self._embeddings.embed([chunk.text for chunk in batch])
+                vectors = await self._embeddings.embed(
+                    [chunk.text for chunk in batch], input_type="document"
+                )
             except Exception as exc:
                 raise EmbeddingProviderError("provedor de embeddings indisponível") from exc
             normalized = self._validate_vectors(vectors, len(batch), dimensions)
             dimensions = len(normalized[0])
+            voyage_vectors = None
+            if self._voyage_embeddings is not None:
+                try:
+                    raw_voyage_vectors = await self._voyage_embeddings.embed(
+                        [chunk.text for chunk in batch], input_type="document"
+                    )
+                except Exception as exc:
+                    raise EmbeddingProviderError("fallback de embeddings indisponível") from exc
+                voyage_vectors = self._validate_vectors(
+                    raw_voyage_vectors, len(batch), voyage_dimensions
+                )
+                voyage_dimensions = len(voyage_vectors[0])
             indexed.extend(
-                IndexedDocumentChunk(chunk=chunk, vector=vector, metadata=source.metadata)
-                for chunk, vector in zip(batch, normalized, strict=True)
+                IndexedDocumentChunk(
+                    chunk=chunk,
+                    vector=vector,
+                    metadata=source.metadata,
+                    voyage_vector=voyage_vector,
+                )
+                for chunk, vector, voyage_vector in zip(
+                    batch,
+                    normalized,
+                    voyage_vectors if voyage_vectors is not None else (None,) * len(batch),
+                    strict=True,
+                )
             )
         return tuple(indexed)
 

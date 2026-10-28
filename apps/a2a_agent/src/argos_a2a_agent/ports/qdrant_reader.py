@@ -11,6 +11,7 @@ class QdrantReader(Protocol):
         *,
         query_filter: Mapping[str, Any],
         limit: int,
+        vector_name: str | None = None,
     ) -> Sequence[Mapping[str, Any]]: ...
 
     async def retrieve(self, point_ids: Sequence[str | int]) -> Sequence[Mapping[str, Any]]: ...

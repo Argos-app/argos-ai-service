@@ -14,4 +14,3 @@
 !packages/security/**
 !packages/observability/
 !packages/observability/**
-!packages/model_options.py

@@ -1,8 +1,15 @@
 import json
 from uuid import uuid4
 
+import httpx
 import pytest
-from argos_a2a_agent.adapters.providers.answers import _answer_from_json, _answer_from_response
+from argos_a2a_agent.adapters.providers.answers import (
+    OpenAICompatibleAnswerGenerator,
+    ProviderFallbackAnswerGenerator,
+    _answer_from_json,
+    _answer_from_response,
+    _is_transient_provider_failure,
+)
 from argos_a2a_agent.agents.specialists import _uninterpreted_evidence_answer
 from argos_a2a_agent.domain.agent_answers import AgentEvidence
 
@@ -11,50 +18,47 @@ from packages.contracts.a2a import DocumentAnswerStatus, DocumentSourceReference
 _EVIDENCE_ID = "ev_0123456789abcdef01234567"
 
 
-@pytest.mark.asyncio
-async def test_nvidia_answer_request_disables_optional_thinking(monkeypatch):
+def test_anthropic_fallback_uses_configured_endpoint():
+    primary = OpenAICompatibleAnswerGenerator(
+        "https://openai.example/v1/chat/completions", "key", "model", 1
+    )
+    fallback = ProviderFallbackAnswerGenerator(
+        primary,
+        "key",
+        "model",
+        1,
+        endpoint="https://anthropic.example/v1/messages",
+        max_output_tokens=1024,
+    )
+
+    assert fallback._endpoint == "https://anthropic.example/v1/messages"
+
+
+def test_provider_fallback_classifier_accepts_only_transient_openai_errors():
+    try:
+        raise httpx.ConnectError("connection unavailable")
+    except httpx.ConnectError as cause:
+        transient = RuntimeError("OpenAI transport failed")
+        transient.__cause__ = cause
+
+    assert _is_transient_provider_failure(transient)
+    assert not _is_transient_provider_failure(ValueError("invalid structured response"))
+
+
+def test_openai_answer_uses_native_strict_json_schema():
     from argos_a2a_agent.adapters.providers import answers
 
-    payloads = []
+    response_format = answers._structured_response_format()
 
-    class HTTP:
-        def __init__(self, *args):
-            pass
-
-        async def post_json(self, payload, **kwargs):
-            payloads.append(payload)
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "answer": "Trecho verificável 1.",
-                                    "status": "success",
-                                    "cited_evidence_ids": [f"ev_{1:024x}"],
-                                }
-                            )
-                        }
-                    }
-                ]
-            }
-
-    monkeypatch.setattr(answers, "OpenAICompatibleHTTP", HTTP)
-    generator = answers.OpenAICompatibleAnswerGenerator(
-        "https://integrate.api.nvidia.com/v1/chat/completions",
-        "test-secret",
-        "nvidia/nemotron-3.5-super-vl-120b-a12b",
-        40,
-    )
-    result = await generator.generate(
-        system_prompt="Consulte a evidência.",
-        question="Qual o trecho?",
-        jurisdiction=None,
-        reference_date=None,
-        evidence=(_evidence(),),
-    )
-    assert payloads[0]["chat_template_kwargs"] == {"enable_thinking": False}
-    assert result.status == DocumentAnswerStatus.SUCCESS
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"]["required"] == [
+        "answer",
+        "status",
+        "cited_evidence_ids",
+        "limitations",
+        "missing_fields",
+    ]
 
 
 def _evidence(index: int = 1) -> AgentEvidence:
@@ -72,6 +76,58 @@ def _evidence(index: int = 1) -> AgentEvidence:
     return AgentEvidence(
         evidence_id=f"ev_{index:024x}",
         source=source,
+    )
+
+
+@pytest.mark.asyncio
+async def test_primary_and_fallback_send_the_same_document_context():
+    evidence = (_evidence(),)
+    answer = {
+        "answer": f"Trecho [[{evidence[0].evidence_id}]]",
+        "status": "success",
+        "cited_evidence_ids": [evidence[0].evidence_id],
+        "limitations": [],
+        "missing_fields": [],
+    }
+    requests = {}
+    primary = OpenAICompatibleAnswerGenerator("https://primary.example/chat", "key", "m", 1)
+    fallback = ProviderFallbackAnswerGenerator(
+        primary, "key", "m", 1, endpoint="https://fallback.example/messages", max_output_tokens=1024
+    )
+
+    async def primary_post(payload, **_kwargs):
+        requests["primary"] = payload
+        return {"choices": [{"message": {"content": json.dumps(answer)}}]}
+
+    def fallback_post(request):
+        requests["fallback"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"content": [{"type": "text", "text": json.dumps(answer)}], "usage": {}},
+        )
+
+    primary._http.post_json = primary_post
+    await fallback._client.aclose()
+    fallback._client = httpx.AsyncClient(transport=httpx.MockTransport(fallback_post))
+    try:
+        kwargs = {
+            "system_prompt": "Use as evidências.",
+            "question": "Qual é o aviso?",
+            "jurisdiction": None,
+            "reference_date": None,
+            "evidence": evidence,
+        }
+        await primary.generate(**kwargs)
+        await fallback._generate_anthropic(**kwargs)
+    finally:
+        await primary.aclose()
+        await fallback.aclose()
+
+    primary_messages = requests["primary"]["messages"]
+    fallback_payload = requests["fallback"]
+    assert primary_messages[0]["content"] == fallback_payload["system"]
+    assert json.loads(primary_messages[1]["content"]) == json.loads(
+        fallback_payload["messages"][0]["content"]
     )
 
 

@@ -158,6 +158,8 @@ class DocumentA2AExecutor(AgentExecutor):
         updater: TaskUpdater,
         recorder: OperationRecorder | None,
     ) -> None:
+        """Não retornar mensagens internas, tokens, fontes parciais ou exceções
+        do provedor ao chamador do protocolo."""
         if context.current_task is None:
             timestamp = Timestamp()
             timestamp.FromDatetime(datetime.now(UTC))
@@ -222,9 +224,7 @@ class DocumentA2AExecutor(AgentExecutor):
         try:
             response = await self._registry.execute(request, access_context)
         except Exception as exc:
-            # Não retornar mensagens internas, tokens, fontes parciais ou exceções
-            # do provedor ao chamador do protocolo.
-            _LOGGER.error("document agent execution failed: %s", type(exc).__name__)
+            _LOGGER.error("falha na execução do agente documental: %s", type(exc).__name__)
             response = DocumentAnswerResponse(
                 request_id=request.request_id,
                 status="unavailable",

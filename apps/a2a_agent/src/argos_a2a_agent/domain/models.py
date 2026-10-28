@@ -158,6 +158,7 @@ class IndexedDocumentChunk:
     chunk: DocumentChunk
     vector: tuple[float, ...]
     metadata: DocumentMetadata
+    voyage_vector: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -167,6 +168,10 @@ class IndexedDocumentChunk:
             raise ValueError("metadados do chunk devem corresponder ao documento e à revisão")
         if not self.vector or any(not math.isfinite(value) for value in self.vector):
             raise ValueError("vetor deve conter valores finitos")
+        if self.voyage_vector is not None and (
+            not self.voyage_vector or any(not math.isfinite(value) for value in self.voyage_vector)
+        ):
+            raise ValueError("vetor Voyage deve conter valores finitos")
 
 
 @dataclass(frozen=True, slots=True)

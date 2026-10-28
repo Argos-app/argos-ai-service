@@ -14,6 +14,11 @@ from packages.observability.langsmith_environment import resolve_langsmith_agent
 _LOGGER = logging.getLogger(__name__)
 
 
+def _env_endpoint(name: str) -> str | None:
+    value = os.getenv(name)
+    return value.rstrip("/") if value and value.strip() else None
+
+
 def _observability_int(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None:
@@ -21,7 +26,10 @@ def _observability_int(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        _LOGGER.warning("invalid observability setting; using default", extra={"setting": name})
+        _LOGGER.warning(
+            "configuração de observabilidade inválida; usando o valor padrão",
+            extra={"setting": name},
+        )
         return default
 
 
@@ -34,7 +42,10 @@ def _environment_bool(name: str, default: bool = False) -> bool:
         return True
     if value in {"0", "false", "no", "off"}:
         return False
-    _LOGGER.warning("invalid boolean setting; using default", extra={"setting": name})
+    _LOGGER.warning(
+        "configuração booleana inválida; usando o valor padrão",
+        extra={"setting": name},
+    )
     return default
 
 
@@ -45,6 +56,7 @@ class Settings:
     qdrant_write_api_key: str | None = field(default=None, repr=False)
     qdrant_collection: str | None = None
     qdrant_vector_size: int | None = None
+    qdrant_voyage_vector_size: int | None = 1024
     qdrant_distance: str = "Cosine"
     document_source_root: Path | None = None
     document_catalog_name: str = "catalog.json"
@@ -56,14 +68,17 @@ class Settings:
     delegation_max_ttl_seconds: int = 300
     delegation_clock_skew_seconds: int = 30
     qdrant_timeout_seconds: float = 5
-    embeddings_api_url: str | None = None
-    embeddings_api_key: str | None = field(default=None, repr=False)
+    openai_api_key: str | None = field(default=None, repr=False)
+    openai_base_url: str | None = None
+    openai_embeddings_url: str | None = None
+    voyage_api_key: str | None = field(default=None, repr=False)
+    voyage_embeddings_url: str | None = None
+    anthropic_api_key: str | None = field(default=None, repr=False)
+    anthropic_base_url: str | None = None
     embeddings_model: str | None = None
-    embeddings_model_revision: str | None = None
-    answer_api_url: str | None = None
-    answer_api_key: str | None = field(default=None, repr=False)
-    answer_model: str | None = None
-    answer_thinking: str = "auto"
+    voyage_embeddings_model: str | None = None
+    model_specialist_name: str | None = None
+    anthropic_model_specialist_fallback: str | None = None
     permission_sql_dsn: str | None = field(default=None, repr=False)
     model_timeout_seconds: float = 40
     model_max_output_tokens: int = 4_096
@@ -127,6 +142,7 @@ class Settings:
             qdrant_write_api_key=os.getenv("A2A_QDRANT_WRITE_API_KEY"),
             qdrant_collection=os.getenv("A2A_QDRANT_COLLECTION"),
             qdrant_vector_size=read_int("A2A_QDRANT_VECTOR_SIZE", 0) or None,
+            qdrant_voyage_vector_size=read_int("A2A_QDRANT_VOYAGE_VECTOR_SIZE", 1024) or None,
             qdrant_distance=os.getenv("A2A_QDRANT_DISTANCE", "Cosine"),
             document_source_root=(
                 Path(os.environ["A2A_DOCUMENT_SOURCE_ROOT"])
@@ -144,14 +160,19 @@ class Settings:
             delegation_max_ttl_seconds=max_ttl,
             delegation_clock_skew_seconds=clock_skew,
             qdrant_timeout_seconds=timeout,
-            embeddings_api_url=os.getenv("A2A_EMBEDDINGS_API_URL"),
-            embeddings_api_key=os.getenv("A2A_EMBEDDINGS_API_KEY"),
-            embeddings_model=os.getenv("A2A_EMBEDDINGS_MODEL"),
-            embeddings_model_revision=os.getenv("A2A_EMBEDDINGS_MODEL_REVISION"),
-            answer_api_url=os.getenv("A2A_ANSWER_API_URL"),
-            answer_api_key=os.getenv("A2A_ANSWER_API_KEY"),
-            answer_model=os.getenv("A2A_ANSWER_MODEL"),
-            answer_thinking=os.getenv("A2A_ANSWER_THINKING", "auto").strip().casefold(),
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_base_url=_env_endpoint("OPENAI_BASE_URL"),
+            openai_embeddings_url=_env_endpoint("OPENAI_EMBEDDINGS_URL"),
+            voyage_api_key=os.getenv("VOYAGE_API_KEY"),
+            voyage_embeddings_url=_env_endpoint("VOYAGE_EMBEDDINGS_URL"),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip() or None,
+            anthropic_base_url=_env_endpoint("ANTHROPIC_BASE_URL"),
+            embeddings_model=os.getenv("OPENAI_EMBEDDINGS_MODEL"),
+            voyage_embeddings_model=os.getenv("VOYAGE_EMBEDDINGS_MODEL") or None,
+            model_specialist_name=os.getenv("OPENAI_MODEL_SPECIALIST"),
+            anthropic_model_specialist_fallback=(
+                os.getenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK") or None
+            ),
             permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
             model_timeout_seconds=model_timeout,
             model_max_output_tokens=read_int("A2A_MODEL_MAX_OUTPUT_TOKENS", 4_096),
@@ -204,14 +225,13 @@ class Settings:
         require_providers: bool = True,
         require_permission_sql: bool = True,
     ) -> None:
-        if self.answer_thinking not in {"auto", "enabled", "disabled"}:
-            raise ValueError("A2A_ANSWER_THINKING deve ser auto, enabled ou disabled")
         required = {
             "A2A_QDRANT_URL": self.qdrant_url,
             "A2A_QDRANT_READ_API_KEY": self.qdrant_read_api_key,
             "A2A_QDRANT_WRITE_API_KEY": self.qdrant_write_api_key,
             "A2A_QDRANT_COLLECTION": self.qdrant_collection,
             "A2A_QDRANT_VECTOR_SIZE": self.qdrant_vector_size,
+            "A2A_QDRANT_VOYAGE_VECTOR_SIZE": self.qdrant_voyage_vector_size,
             "A2A_DOCUMENT_SOURCE_ROOT": self.document_source_root,
             "A2A_MANIFEST_PATH": self.manifest_path,
             "A2A_INTERNAL_SERVICE_TOKEN": self.internal_service_token,
@@ -226,15 +246,28 @@ class Settings:
         if require_providers:
             required.update(
                 {
-                    "A2A_EMBEDDINGS_API_URL": self.embeddings_api_url,
-                    "A2A_EMBEDDINGS_API_KEY": self.embeddings_api_key,
-                    "A2A_EMBEDDINGS_MODEL": self.embeddings_model,
-                    "A2A_EMBEDDINGS_MODEL_REVISION": self.embeddings_model_revision,
-                    "A2A_ANSWER_API_URL": self.answer_api_url,
-                    "A2A_ANSWER_API_KEY": self.answer_api_key,
-                    "A2A_ANSWER_MODEL": self.answer_model,
+                    "OPENAI_API_KEY": self.openai_api_key,
+                    "OPENAI_BASE_URL": self.openai_base_url,
+                    "OPENAI_EMBEDDINGS_URL": self.openai_embeddings_url,
+                    "OPENAI_EMBEDDINGS_MODEL": self.embeddings_model,
+                    "VOYAGE_API_KEY": self.voyage_api_key,
+                    "VOYAGE_EMBEDDINGS_URL": self.voyage_embeddings_url,
+                    "VOYAGE_EMBEDDINGS_MODEL": self.voyage_embeddings_model,
+                    "OPENAI_MODEL_SPECIALIST": self.model_specialist_name,
                 }
             )
+        if self.anthropic_api_key and require_providers:
+            required["ANTHROPIC_BASE_URL"] = self.anthropic_base_url
+        if (
+            require_providers
+            and self.anthropic_api_key
+            and (
+                not self.anthropic_model_specialist_fallback
+                or not self.anthropic_model_specialist_fallback.strip()
+                or len(self.anthropic_model_specialist_fallback) > 200
+            )
+        ):
+            raise ValueError("ANTHROPIC_MODEL_SPECIALIST_FALLBACK deve ter até 200 caracteres")
         missing = [
             name
             for name, value in required.items()
@@ -260,6 +293,12 @@ class Settings:
             or not 1 <= self.qdrant_vector_size <= 65_536
         ):
             raise ValueError("A2A_QDRANT_VECTOR_SIZE deve estar entre 1 e 65536")
+        if (
+            isinstance(self.qdrant_voyage_vector_size, bool)
+            or not isinstance(self.qdrant_voyage_vector_size, int)
+            or not 1 <= self.qdrant_voyage_vector_size <= 65_536
+        ):
+            raise ValueError("A2A_QDRANT_VOYAGE_VECTOR_SIZE deve estar entre 1 e 65536")
         if self.qdrant_distance not in {"Cosine", "Euclid", "Dot", "Manhattan"}:
             raise ValueError("A2A_QDRANT_DISTANCE deve ser Cosine, Euclid, Dot ou Manhattan")
         if not self.document_catalog_name.strip():
@@ -302,7 +341,13 @@ class Settings:
         for name, value in (
             ("A2A_QDRANT_URL", self.qdrant_url),
             ("A2A_RESOURCE_SERVER_URL", self.resource_server_url),
+            ("OPENAI_BASE_URL", self.openai_base_url),
+            ("OPENAI_EMBEDDINGS_URL", self.openai_embeddings_url),
+            ("ANTHROPIC_BASE_URL", self.anthropic_base_url),
+            ("VOYAGE_EMBEDDINGS_URL", self.voyage_embeddings_url),
         ):
+            if value is None:
+                continue
             try:
                 parsed = urlsplit(value)
                 valid = (
@@ -318,44 +363,11 @@ class Settings:
                 valid = False
             if not valid:
                 raise ValueError(f"{name} deve ser uma URL HTTP(S) sem credenciais ou query")
-        provider_urls = (
-            (
-                ("A2A_EMBEDDINGS_API_URL", self.embeddings_api_url, "/embeddings"),
-                ("A2A_ANSWER_API_URL", self.answer_api_url, "/chat/completions"),
-            )
-            if require_providers
-            else ()
-        )
-        for name, value, expected_path in provider_urls:
-            try:
-                parsed = urlsplit(value)
-                local_http = parsed.scheme == "http" and parsed.hostname in {
-                    "localhost",
-                    "127.0.0.1",
-                    "::1",
-                }
-                valid = (
-                    (parsed.scheme == "https" or local_http)
-                    and bool(parsed.hostname)
-                    and parsed.username is None
-                    and parsed.password is None
-                )
-                valid = (
-                    valid
-                    and parsed.path.rstrip("/").endswith(expected_path)
-                    and not parsed.query
-                    and not parsed.fragment
-                    and (parsed.port is None or 1 <= parsed.port <= 65535)
-                )
-            except ValueError:
-                valid = False
-            if not valid:
-                raise ValueError(f"{name} deve ser HTTPS e terminar em {expected_path}")
         model_names = (
             (
-                ("A2A_EMBEDDINGS_MODEL", self.embeddings_model),
-                ("A2A_EMBEDDINGS_MODEL_REVISION", self.embeddings_model_revision),
-                ("A2A_ANSWER_MODEL", self.answer_model),
+                ("OPENAI_EMBEDDINGS_MODEL", self.embeddings_model),
+                ("VOYAGE_EMBEDDINGS_MODEL", self.voyage_embeddings_model),
+                ("OPENAI_MODEL_SPECIALIST", self.model_specialist_name),
             )
             if require_providers
             else ()

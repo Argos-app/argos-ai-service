@@ -3,7 +3,7 @@
 import math
 import re
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 from langsmith import traceable
 
@@ -32,16 +32,25 @@ class OpenAICompatibleEmbeddingProvider:
         *,
         max_batch_size: int = 128,
         observation_collector: ObservationCollector | None = None,
+        provider_name: str = "openai_compatible",
+        include_input_type: bool = False,
     ) -> None:
         if not 1 <= max_batch_size <= 128:
             raise ValueError("max_batch_size deve estar entre 1 e 128")
         self._http = OpenAICompatibleHTTP(endpoint, api_key, timeout_seconds)
         self._model = model
         self._max_batch_size = max_batch_size
+        self._provider_name = provider_name
+        self._include_input_type = include_input_type
         self._observation_collector = active_collector(observation_collector)
 
     @traceable(name="a2a.model.embedding", run_type="embedding")
-    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        input_type: Literal["query", "document"] = "document",
+    ) -> Sequence[Sequence[float]]:
         if not texts or len(texts) > self._max_batch_size:
             raise EmbeddingProviderError("lote de embeddings vazio ou acima do limite")
         if any(
@@ -55,7 +64,7 @@ class OpenAICompatibleEmbeddingProvider:
                 operation_name="embedding.a2a.embed",
                 operation_phase=OperationPhase.EXECUTION,
                 observation_level=ObservationLevel.TRANSPORT_ATTEMPT,
-                provider="openai_compatible",
+                provider=self._provider_name,
                 model_requested=_safe_model_name(self._model),
                 error_origin=ErrorOrigin.PROVIDER,
             )
@@ -63,10 +72,16 @@ class OpenAICompatibleEmbeddingProvider:
             else None
         )
         try:
+            payload: dict[str, Any] = {"model": self._model, "input": list(texts)}
+            if self._include_input_type:
+                payload["input_type"] = input_type
             result = await self._http.post_json(
-                {"model": self._model, "input": list(texts)},
+                payload,
                 recorder=recorder,
                 operation_route="/embeddings",
+                rate_profile=(
+                    "embedding_fallback" if self._provider_name == "voyageai" else "embedding"
+                ),
             )
             vectors = _ordered_vectors(result, len(texts))
         except Exception as exc:
@@ -77,6 +92,29 @@ class OpenAICompatibleEmbeddingProvider:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+class VoyageEmbeddingProvider(OpenAICompatibleEmbeddingProvider):
+    """Adapter da API Voyage com input_type explícito para consultas e documentos."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        *,
+        endpoint: str,
+        observation_collector: ObservationCollector | None = None,
+    ) -> None:
+        super().__init__(
+            endpoint,
+            api_key,
+            model,
+            timeout_seconds,
+            observation_collector=observation_collector,
+            provider_name="voyageai",
+            include_input_type=True,
+        )
 
 
 def _ordered_vectors(result: dict[str, Any], expected_count: int) -> tuple[tuple[float, ...], ...]:

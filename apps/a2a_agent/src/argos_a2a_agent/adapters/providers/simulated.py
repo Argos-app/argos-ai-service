@@ -89,14 +89,22 @@ class SimulatedEmbeddingProvider:
         }
     )
 
-    def __init__(self, vector_size: int) -> None:
+    def __init__(self, vector_size: int, *, namespace: str = "argos-simulated") -> None:
         if isinstance(vector_size, bool) or not isinstance(vector_size, int) or vector_size < 1:
             raise ValueError("vector_size deve ser inteiro positivo")
         self._vector_size = vector_size
+        self._namespace = namespace
 
-    async def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+    async def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        input_type: str = "document",
+    ) -> Sequence[Sequence[float]]:
         if not texts or any(not isinstance(text, str) or not text.strip() for text in texts):
             raise ValueError("o lote simulado de embeddings deve conter textos")
+        if input_type not in {"query", "document"}:
+            raise ValueError("input_type deve ser query ou document")
         return tuple(self._vector(text) for text in texts)
 
     def _vector(self, text: str) -> tuple[float, ...]:
@@ -114,12 +122,12 @@ class SimulatedEmbeddingProvider:
         counts = Counter(terms)
         vector = [0.0] * self._vector_size
         for term, count in counts.items():
-            digest = hashlib.sha256(term.encode("utf-8")).digest()
+            digest = hashlib.sha256(f"{self._namespace}:{term}".encode()).digest()
             index = int.from_bytes(digest[:4], "big") % self._vector_size
             sign = 1.0 if digest[4] & 1 else -1.0
             vector[index] += sign * (1.0 + math.log(count))
         if not any(vector):
-            digest = hashlib.sha256(normalized.encode("utf-8")).digest()
+            digest = hashlib.sha256(f"{self._namespace}:{normalized}".encode()).digest()
             vector[int.from_bytes(digest[:4], "big") % self._vector_size] = 1.0
         norm = math.sqrt(sum(value * value for value in vector)) or 1.0
         return tuple(value / norm for value in vector)

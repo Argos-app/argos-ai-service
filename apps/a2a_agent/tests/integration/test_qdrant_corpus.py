@@ -44,7 +44,7 @@ class DeterministicEmbeddings:
     def __init__(self) -> None:
         self.calls: list[tuple[str, ...]] = []
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, input_type="document"):
         batch = tuple(texts)
         self.calls.append(batch)
         return tuple((float(len(text)), 1.0, 0.5) for text in batch)
