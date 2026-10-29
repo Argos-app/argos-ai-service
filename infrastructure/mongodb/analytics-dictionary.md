@@ -128,6 +128,37 @@ envio.
 
 ## Relacionamentos, limitações e exemplos anonimizados
 
+### Custo estimado por atendimento concluído
+
+Para este indicador, um atendimento é a cadeia iniciada por uma mensagem do
+usuário, seguida pelas respostas a perguntas estruturadas, até uma resposta
+final da IA. “Concluído” indica que uma resposta final foi entregue pelo
+sistema; não comprova que o problema do usuário foi resolvido. Uma sessão pode
+conter vários atendimentos e o sistema não persiste um identificador único para
+essa cadeia.
+
+O BI pode reconstruir cadeias candidatas a partir de `ai_messages`: o
+`payload_json` de uma resposta do usuário contém o `interaction_id` da interação
+que fez a pergunta e o `question_id`. Vincule essa resposta à pergunta
+correspondente na mesma sessão e siga os vínculos subsequentes até a resposta
+final. Cada mensagem tem seu próprio `interaction_id`, que também relaciona a
+interação às observações. Valide a reconstrução com dados reais; não agrupe
+automaticamente toda a sessão como um único atendimento.
+
+Some `billing.reported_cost` das observações de cobrança das interações da
+cadeia, incluindo A2A quando configurado, sem duplicar custos de spans pai e
+filho. Separe moedas e evite atribuir custos sem `interaction_id` sem uma regra
+comprovada. O custo médio estimado é a soma dos custos dos atendimentos
+concluídos dividida pela quantidade desses atendimentos, no mesmo período.
+
+Defina antes da apuração como tratar perguntas expiradas, interrupções, falhas,
+respostas degradadas e encadeamentos ambíguos. Informe separadamente a
+quantidade de atendimentos com custo ou vínculo incompleto: observações e custos
+ausentes não são zero. A coleta é de melhor esforço, retries internos podem não
+ser visíveis e a estimativa não substitui a fatura nem inclui automaticamente
+infraestrutura. Essa apuração é uma possibilidade para BI; não há indicador ou
+consulta implementada aqui.
+
 ### Documentos de origem lidos pelo MCP de dados
 
 `cattle_documents` é lida por `CattleHistoryDocument`. Os campos tipados
