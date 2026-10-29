@@ -5,8 +5,8 @@ on:
         branches: [develop, main]
     workflow_dispatch:
 
-# Serialize the entire rollout. Recover incomplete rollouts by deploying all five
-# services, including any changes reverted after a partially successful deployment.
+# Serialize toda a publicação. Recupere publicações incompletas implantando os cinco
+# serviços, inclusive alterações revertidas após uma implantação parcial.
 concurrency:
     group: render-${{ github.ref }}
     cancel-in-progress: false
@@ -72,12 +72,13 @@ jobs:
                         const { data } = await github.rest.actions.listWorkflowRuns({
                           ...context.repo,
                           workflow_id: 'ci.yml',
-                        branch: context.ref.replace('refs/heads/', ''),
+                          branch: context.ref.replace('refs/heads/', ''),
                           head_sha: context.sha,
-                          event: 'push',
-                          per_page: 1,
+                          per_page: 100,
                         });
-                        const run = data.workflow_runs[0];
+                        const acceptedEvents = context.eventName === 'workflow_dispatch'
+                          ? ['push', 'workflow_dispatch'] : ['push'];
+                        const run = data.workflow_runs.find(item => acceptedEvents.includes(item.event));
                         if (run?.status === 'completed') {
                           if (run.conclusion !== 'success') {
                             throw new Error(`CI ${run.id}: ${run.conclusion}. Deployment blocked.`);

@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+from pathlib import PurePosixPath
 
 SERVICES = ("main_api", "mcp_data", "mcp_email", "mcp_prediction", "a2a_agent")
 SHARED_FILES = {"pyproject.toml", "pylock.toml", ".python-version", "render.yaml"}
@@ -10,9 +11,24 @@ SHARED_PREFIXES = ("packages/", "scripts/render/", ".github/workflows/deploy.yml
 
 
 def affected_services(paths: list[str]) -> list[str]:
+    paths = [path for path in paths if not is_documentation(path)]
     if any(path in SHARED_FILES or path.startswith(SHARED_PREFIXES) for path in paths):
         return list(SERVICES)
     return [service for service in SERVICES if any(p.startswith(f"apps/{service}/") for p in paths)]
+
+
+def is_documentation(path: str) -> bool:
+    file = PurePosixPath(path)
+    name = file.name.lower()
+    if name.startswith(("openapi", "swagger")) and file.suffix.lower() in {
+        ".json",
+        ".yaml",
+        ".yml",
+    }:
+        return False
+    return (
+        file.suffix.lower() in {".md", ".mdx", ".markdown", ".rst", ".adoc"} or "docs" in file.parts
+    )
 
 
 def changed_paths(base: str, head: str) -> list[str]:
@@ -28,7 +44,7 @@ def changed_paths(base: str, head: str) -> list[str]:
 def main() -> None:
     branch = os.environ["DEPLOY_BRANCH"]
     if branch not in {"develop", "main"}:
-        raise SystemExit("Only develop and main can be deployed.")
+        raise SystemExit("Somente as branches develop e main podem ser implantadas.")
     base = os.environ.get("BASE_SHA", "")
     services = list(SERVICES)
     if base and os.environ.get("FORCE_ALL") != "true":

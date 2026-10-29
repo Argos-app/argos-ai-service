@@ -18,10 +18,12 @@ branches também dispara o fluxo; configure proteção de branch para exigir PR 
 CI aprovada se somente merges forem permitidos.
 
 O workflow aguarda sucesso da execução `push` da CI (`ci.yml`) para o mesmo SHA,
-por até 30 minutos. Os deploys dos serviços selecionados executam em paralelo,
-sem cancelar os demais se um falhar. Cada job acompanha seu deploy por até 20
-minutos e só conclui com `live` e o SHA esperado; isso confirma o deploy do
-processo, não uma homologação funcional de todas as integrações externas.
+por até 30 minutos. No deploy manual, também aceita uma execução manual da CI
+para o mesmo SHA; execute a CI na branch escolhida antes de solicitar o deploy.
+Os deploys dos serviços selecionados executam em paralelo, sem cancelar os
+demais se um falhar. Cada job acompanha seu deploy por até 20 minutos e só
+conclui com `live` e o SHA esperado; isso confirma o deploy do processo, não uma
+homologação funcional de todas as integrações externas.
 
 A seleção compara o commit atual com o último workflow de deploy concluído com
 sucesso na mesma branch, incluindo todas as alterações do intervalo:
@@ -32,14 +34,14 @@ sucesso na mesma branch, incluindo todas as alterações do intervalo:
   `pyproject.toml`, `pylock.toml`, `render.yaml` ou no próprio `deploy.yml`
   atualizam os cinco serviços. A regra de `packages/` é conservadora e inclui
   qualquer pacote compartilhado atual ou futuro.
-- Alterações somente em documentação na raiz, testes da raiz ou infraestrutura
-  local não geram deploy. Um README ou guia dentro de `apps/<serviço>/`
-  seleciona o serviço correspondente; documentação em `packages/` ou
-  `scripts/render/` seleciona os cinco serviços.
+- Documentação não gera deploy, incluindo arquivos Markdown e arquivos sob
+  diretórios `docs/`. Os contratos OpenAPI/Swagger em JSON ou YAML são exceção:
+  selecionam os serviços conforme seus caminhos.
 - A primeira execução, a execução após falha/cancelamento e a execução manual
   por `workflow_dispatch` atualizam os cinco serviços. Na execução manual,
   selecione `develop` ou `main`; outras branches são ignoradas e o commit
-  selecionado precisa ter CI aprovada.
+  selecionado precisa ter CI aprovada para o mesmo SHA, por push ou execução
+  manual.
 
 Execuções são serializadas por branch. Se a última execução concluída falhar ou
 for cancelada (incluindo a substituição de uma execução pendente), o próximo
