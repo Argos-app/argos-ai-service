@@ -9,3 +9,6 @@
 !packages/contracts/**
 !packages/security/
 !packages/security/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo

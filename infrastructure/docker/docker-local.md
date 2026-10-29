@@ -253,8 +253,6 @@ docker build -f apps/a2a_agent/Dockerfile -t argos-a2a-agent:local .
 Para executar um container isoladamente, prepare as dependências necessárias ou
 use os serviços de infraestrutura pelo Compose. A URL dentro de um container
 deve usar o DNS do serviço; `localhost` sempre aponta para o próprio container.
-O Compose específico em `apps/a2a_agent/compose.yaml` continua disponível para o
-ciclo individual do A2A e tem configuração própria.
 
 ## Parar e limpar
 

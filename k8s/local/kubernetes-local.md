@@ -154,15 +154,17 @@ do Mailpit em `http://127.0.0.1:8025` para conferir o e-mail simulado. A
 aplicação só envia se o fluxo e os dados de destinatário autorizados permitirem;
 subir Mailpit não cria documentos de negócio.
 
-A configuração não carrega automaticamente documentos empresariais para as
-collections `cattle_documents` e `medicine_documents`; o Compose também não as
-popula. Um fluxo que depende desses documentos exige fixtures locais ou dados
-preparados separadamente, conforme o contrato da ferramenta. PostgreSQL recebe
-os scripts `infrastructure/docker/postgres/init/01_*.sql` a `12_*.sql` e
-`99-read-only-role.sh` em volume vazio; modificar os scripts não aplica
-migrações a um volume existente. Para reconstruir apenas o banco de teste, pare
-os consumidores, remova o PVC/PV PostgreSQL ou recrie o cluster e aplique tudo
-novamente. Não use remoção de PVC para preservar dados que queira reter.
+A configuração Kubernetes não carrega automaticamente documentos empresariais
+para as collections `cattle_documents` e `medicine_documents`. No Compose, o
+perfil `apps` executa `mongo_seed` para preencher essas collections com dados
+sintéticos. No Kubernetes, um fluxo que depende desses documentos exige fixtures
+locais ou dados preparados separadamente, conforme o contrato da ferramenta.
+PostgreSQL recebe os scripts `infrastructure/docker/postgres/init/01_*.sql` a
+`12_*.sql` e `99-read-only-role.sh` em volume vazio; modificar os scripts não
+aplica migrações a um volume existente. Para reconstruir apenas o banco de
+teste, pare os consumidores, remova o PVC/PV PostgreSQL ou recrie o cluster e
+aplique tudo novamente. Não use remoção de PVC para preservar dados que queira
+reter.
 
 ## Diagnóstico e persistência
 

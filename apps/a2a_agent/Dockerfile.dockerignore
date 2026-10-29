@@ -13,3 +13,6 @@
 !packages/security/**
 !packages/observability/
 !packages/observability/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo

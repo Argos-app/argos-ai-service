@@ -8,7 +8,7 @@ Este README descreve a implementação atual. Backend e mobile ficam em outros
 repositórios.
 
 Para navegar pelos componentes e suas instruções de manutenção, consulte o
-[índice de agentes](agent.md). O fluxo de contribuição está em
+[índice de agentes](AGENTS.md). O fluxo de contribuição está em
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 O principal tem contratos HTTP, grafo de agentes, Factory e Registry. Ele usa
@@ -274,8 +274,7 @@ documentos afetados no Qdrant. Os agentes acessam apenas arquivos atuais e
 informam a data do documento e sua última atualização conhecida. PDFs de teste
 ficam no repositório.
 
-O serviço tem build independente em `apps/a2a_agent/Dockerfile` e Compose
-individual documentado em
+O serviço tem build independente em `apps/a2a_agent/Dockerfile`, documentado em
 [`apps/a2a_agent/README.md`](apps/a2a_agent/README.md). O runtime implementa
 adapters HTTP OpenAI-compatible para embeddings e geração, além de uma consulta
 PostgreSQL somente leitura para autorização documental. Endpoints, modelos,

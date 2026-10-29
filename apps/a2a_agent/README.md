@@ -19,22 +19,20 @@ compartilhadas explicitamente:
 
 ```powershell
 docker build -f apps/a2a_agent/Dockerfile -t argos-a2a-agent:local .
-Copy-Item apps/a2a_agent/.env.example apps/a2a_agent/.env
-# Edite .env com URLs, modelos e credenciais do deployment.
-docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml up --build -d
+docker compose --profile apps up --build -d
 ```
 
-O Compose publica a porta somente em `127.0.0.1`, usa filesystem raiz somente
-leitura, executa sem root, limita CPU/memória, monta PDFs como somente leitura e
-preserva o manifesto em volume separado. O Qdrant é externo ao Compose de
-produção e precisa expor chaves distintas de leitura e de escrita do índice.
+O Compose da raiz inicia a pilha local integrada e usa a configuração do `.env`
+da raiz. Para executar o container separadamente, configure as dependências e
+variáveis de ambiente necessárias; o Qdrant exige credenciais de leitura e
+escrita.
 
 O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
 metadados sintéticos para demonstração e homologação; eles não são leis nem
-contratos reais e não devem embasar orientação jurídica. `A2A_DOCUMENTS_PATH`
-pode apontar para outro diretório local aprovado, sempre com `catalog.json` e
-arquivos PDF allowlisted. O Compose monta a origem como somente leitura. A
-origem cloud permanece fora desta entrega até a definição do provedor e de sua
+contratos reais e não devem embasar orientação jurídica.
+`A2A_DOCUMENT_SOURCE_ROOT` pode apontar para outro diretório aprovado disponível
+ao processo, sempre com `catalog.json` e arquivos PDF allowlisted. A origem
+cloud permanece fora desta entrega até a definição do provedor e de sua
 configuração de acesso.
 
 ## Integrações do runtime
@@ -173,8 +171,8 @@ não podem ser retomadas após reinício.
   procedimento operacional desse ambiente antes de reabrir tráfego.
 - Os limites funcionais vigentes incluem 20 resultados por busca, 50 documentos
   por página, agregações limitadas a 10.000 documentos/100 grupos, trechos de
-  até três páginas e timeout Qdrant de até 30 segundos. Os limites de container
-  são 1 CPU e 1 GiB e devem ser revistos com medições do workload.
+  até três páginas e timeout Qdrant de até 30 segundos. Os limites do container
+  devem ser definidos com medições do workload.
 - O especialista Informações da Main API pode chamar este serviço quando a
   integração estiver configurada. Este container usa o corpus local configurado.
 
@@ -183,7 +181,7 @@ não podem ser retomadas após reinício.
 ```powershell
 python -m ruff check apps/a2a_agent
 python -m pytest apps/a2a_agent/tests/unit -q
-docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml config --quiet
+docker compose --profile apps config --quiet
 ```
 
 A homologação com Qdrant real está documentada em
