@@ -80,8 +80,8 @@ horário registrado em `interaction.updated_at`.
 O app móvel usa o POST `/async` para não manter uma conexão HTTP aberta durante
 a execução dos modelos e ferramentas. A resposta `202` contém `operation_id`,
 `status: "accepted"` e `poll_after_ms`. O cliente consulta o GET de status nesse
-intervalo até receber `completed`, `degraded` ou `failed`. Quando há um
-resultado, ele aparece em `result` e mantém integralmente o mesmo
+intervalo até receber `completed`, `degraded`, `failed` ou `interrupted`. Quando
+há um resultado, ele aparece em `result` e mantém integralmente o mesmo
 `InteractionResult`, inclusive perguntas estruturadas e respostas `text`,
 `choice` e `confirmation`. Erros anteriores à aceitação continuam usando as
 respostas HTTP de erro existentes. Se o processo for interrompido, o status
@@ -138,10 +138,10 @@ O endpoint de status exige o JWT próprio, confere a titularidade da sessão e
 revalida acesso às fazendas. Se o acesso à sessão for parcial, o resultado não é
 exposto; o app deve atualizar o histórico, que aplica a ocultação existente.
 
-`status` é `completed` ou `degraded`. O estado degradado indica falha em uma ou
-mais etapas necessárias; `degradation_reasons` contém códigos técnicos
-retornados pelo serviço, sem credenciais ou conteúdo privado. O app pode usar
-`status` para mostrar o aviso de resposta parcial.
+No `InteractionResult`, `status` é `completed` ou `degraded`. O estado degradado
+indica falha em uma ou mais etapas necessárias; `degradation_reasons` contém
+códigos técnicos retornados pelo serviço, sem credenciais ou conteúdo privado. O
+app pode usar `status` para mostrar o aviso de resposta parcial.
 
 O corpo de entrada continua discriminado por `kind`. Mensagens usam
 `client_message_id` e `message`. Respostas a perguntas usam `interaction_id`,

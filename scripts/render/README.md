@@ -115,12 +115,20 @@ Credenciais de runtime ficam nos serviços Render, separadas dos secrets de
 deploy do GitHub. Use os arquivos `apps/<serviço>/.env.example` como inventário,
 sem copiar os placeholders ou os valores de localhost:
 
+Os arquivos locais `.env.render.hm` e `.env.render.prod`, quando presentes, são
+ignorados pelo Git e não são enviados pelo deploy. Cadastre os valores no
+serviço Render do ambiente correspondente. Campos de API vazios precisam ser
+preenchidos com as URLs e credenciais dos provedores ou gateways escolhidos.
+
 - No `main_api`, configure `APP_ENV=development` em HM e `APP_ENV=production` em
   produção, além de `AUTH_MODE=jwt`. Configure Firebase, PostgreSQL de
   identidade, Mongo replica set, modelos e chaves próprias de acesso/delegação.
   Os valores locais `APP_ENV=local` e `AUTH_MODE=stub` não servem para cloud.
 - Use bancos, collections/índices, Qdrant, SMTP e credenciais adequados a cada
   ambiente. O pipeline não provisiona nem migra essas dependências.
+- Para predição, configure `MCP_PREDICTION_COVERAGE_RELATION` com uma view de
+  cobertura confiável e `MCP_PREDICTION_DATA_ORIGIN` conforme a origem real dos
+  dados; sem cobertura ou com origem desconhecida, não há estimativa numérica.
 - Aponte os `MAIN_API_MCP_*_URL` para os serviços **do mesmo ambiente**, com
   `/mcp`, e o cliente A2A para `/a2a`. Configure tokens e pares de chaves
   compatíveis entre emissores/consumidores. As URLs anunciadas e audiences
