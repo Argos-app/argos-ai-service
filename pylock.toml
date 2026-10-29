@@ -35,6 +35,17 @@ url = "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8
 sha256 = "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"
 
 [[packages]]
+name = "anthropic"
+version = "1.17.0"
+
+[[packages.wheels]]
+name = "anthropic-1.17.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/98/9d/b4d4e46ec05bf19bcfd46c1417337e7cf42b9ecb95c3c63f295e2e9fee4b/anthropic-1.17.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "ccb98b85e1a14f81cf1e2ba348393f341f342bad9e07e014f96c9b69f853aaa7"
+
+[[packages]]
 name = "anyio"
 version = "4.15.1"
 
@@ -198,6 +209,17 @@ url = "https://files.pythonhosted.org/packages/10/02/cdcc9b7c051786a103c3b09e100
 
 [packages.wheels.hashes]
 sha256 = "9a4aedb833c3c1b49214d04d44d3032ab7a9135f7c1d29a549b4ff78fd82fda9"
+
+[[packages]]
+name = "docstring-parser"
+version = "0.18.0"
+
+[[packages.wheels]]
+name = "docstring_parser-0.18.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/a7/5f/ed01f9a3cdffbd5a008556fc7b2a08ddb1cc6ace7effa7340604b1d16699/docstring_parser-0.18.0-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "b3fcbed555c47d8479be0796ef7e19c2670d428d72e96da63f3a40122860374b"
 
 [[packages]]
 name = "fastapi"
@@ -550,6 +572,17 @@ url = "https://files.pythonhosted.org/packages/c1/e0/c8ec47569a73c0c6205eb545f22
 
 [packages.wheels.hashes]
 sha256 = "0879b85a79d7fbc89fc91f6c65c9fa573f03f4d9458e6b5b3c50c717868bd79f"
+
+[[packages]]
+name = "langchain-anthropic"
+version = "1.7.6"
+
+[[packages.wheels]]
+name = "langchain_anthropic-1.7.6-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/97/d6/da1ba42b7c26cd511c9be5473dbb178c51b07a337e94f09188d45f0306a2/langchain_anthropic-1.7.6-py3-none-any.whl"
+
+[packages.wheels.hashes]
+sha256 = "06bee97006d99e9a04abc4bd56599fc356c0c7f7f2a97629645cb603d9785c73"
 
 [[packages]]
 name = "langchain-classic"

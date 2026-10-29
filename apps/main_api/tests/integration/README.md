@@ -1,7 +1,7 @@
 # Integração Mongo e MCP do `main_api`
 
 Os testes usam serviços descartáveis locais. A persistência do principal usa
-MongoDB 7 em replica set na porta `27027`; o harness do MCP de e-mail usa
+MongoDB 7 em replica set na porta `27030`; o harness do MCP de e-mail usa
 MongoDB, PostgreSQL e Mailpit nas portas `27028`, `54328` e `8028`. Não use
 bases de desenvolvimento ou produção. Execute da raiz com Docker Desktop ativo.
 
@@ -10,7 +10,7 @@ docker compose --file apps/main_api/tests/integration/compose.yaml up -d --wait 
 docker compose --file apps/main_api/tests/integration/compose.yaml run --rm mongo-init
 docker compose --file apps/main_api/tests/integration/compose.yaml exec -T mongo mongosh --quiet --eval 'let primary = false; for (let n = 0; n < 60; n++) { try { if (rs.status().myState === 1) { primary = true; break; } } catch (e) {} sleep(500); } if (!primary) quit(1)'
 docker compose --file apps/mcp_email/tests/integration/compose.yaml up -d --wait
-$env:MAIN_API_MONGO_TEST_URI = "mongodb://127.0.0.1:27027/?directConnection=true"
+$env:MAIN_API_MONGO_TEST_URI = "mongodb://127.0.0.1:27030/?directConnection=true"
 $env:MAIN_API_TEST_AUTH_DATABASE_URL = "postgresql://auth_test:auth_test@127.0.0.1:54329/auth_test"
 $env:MCP_EMAIL_RUN_INTEGRATION = "1"
 New-Item -ItemType Directory -Force reports | Out-Null

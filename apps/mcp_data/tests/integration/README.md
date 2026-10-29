@@ -19,6 +19,7 @@ depende de um clone local de `argos-data-engineering`.
 Na raiz do monorepositório:
 
 ```powershell
+python -m pip install -r requirements-dev.txt
 docker compose -f apps/mcp_data/tests/integration/compose.yaml up -d --wait
 $env:MCP_DATA_RUN_INTEGRATION = "1"
 python -m pytest apps/mcp_data/tests/integration -q

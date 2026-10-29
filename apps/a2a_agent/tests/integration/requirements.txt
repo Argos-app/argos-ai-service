@@ -1,4 +1,0 @@
--r ../../requirements.txt
-pytest>=9.0.3,<10
-pytest-asyncio>=1,<2
-qdrant-client==1.15.1

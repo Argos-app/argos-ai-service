@@ -14,13 +14,7 @@ LOCKS = {
     "apps/mcp_email/pylock.toml": ("apps/mcp_email/requirements.txt",),
     "apps/mcp_prediction/pylock.toml": ("apps/mcp_prediction/requirements.txt",),
     "apps/a2a_agent/pylock.toml": ("apps/a2a_agent/requirements.txt",),
-    "pylock.toml": (
-        "requirements-dev.txt",
-        "apps/mcp_email/tests/integration/requirements.txt",
-        "apps/mcp_data/tests/integration/requirements.txt",
-        "apps/mcp_prediction/tests/integration/requirements.txt",
-        "apps/a2a_agent/tests/integration/requirements.txt",
-    ),
+    "pylock.toml": ("requirements-dev.txt",),
 }
 
 

@@ -6,7 +6,7 @@ Mailpit captura SMTP e não envia mensagens aos destinatários externos.
 
 ```powershell
 python -m venv .venv/mcp-email-integration
-.venv/mcp-email-integration/Scripts/python.exe -m pip install -r apps/mcp_email/tests/integration/requirements.txt
+.venv/mcp-email-integration/Scripts/python.exe -m pip install -r requirements-dev.txt
 docker compose -f apps/mcp_email/tests/integration/compose.yaml up -d --wait
 $env:MCP_EMAIL_RUN_INTEGRATION="1"
 .venv/mcp-email-integration/Scripts/python.exe -m pytest apps/mcp_email/tests/integration -v -p no:cacheprovider
@@ -14,10 +14,11 @@ Remove-Item Env:MCP_EMAIL_RUN_INTEGRATION
 docker compose -f apps/mcp_email/tests/integration/compose.yaml down
 ```
 
-O ambiente separado mantém o SDK MCP 1.x declarado pelo serviço, sem modificar
-as dependências do sistema principal. Sem `MCP_EMAIL_RUN_INTEGRATION=1`, os
-testes de integração são ignorados na execução habitual de pytest. Quando
-habilitados, ausência de infraestrutura produz falha, não resultado aprovado.
+O ambiente virtual separado instala as dependências de desenvolvimento
+compartilhadas, incluindo o SDK MCP declarado pelo serviço. Sem
+`MCP_EMAIL_RUN_INTEGRATION=1`, os testes de integração são ignorados na execução
+habitual de pytest. Quando habilitados, ausência de infraestrutura produz falha,
+não resultado aprovado.
 
 Os testes criam bancos SQL/Mongo com nomes exclusivos e os removem ao finalizar.
 O SQL contém apenas a projeção `app_user` necessária ao adapter de

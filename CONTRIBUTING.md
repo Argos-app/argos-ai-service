@@ -107,7 +107,10 @@ docker run --rm --mount "type=bind,source=$($PWD.Path),target=/workspace" --work
 
 O comando atualiza o lock de CI na raiz e um lock de runtime para cada uma das
 cinco aplicações. Mantenha os `requirements.txt` como declarações de faixa e
-inclua no mesmo commit os locks regenerados quando alterar dependências.
+inclua no mesmo commit os locks regenerados quando alterar dependências. O
+`requirements-dev.txt` da raiz reúne as dependências de testes, integração e
+ferramentas de todos os serviços; os requisitos de runtime ficam em cada
+serviço.
 
 ## Conventional Commits
 
