@@ -1,4 +1,4 @@
--- triggers
+-- gatilhos
 create or replace FUNCTION fn_atualiza_data()
     returns trigger as
 $$

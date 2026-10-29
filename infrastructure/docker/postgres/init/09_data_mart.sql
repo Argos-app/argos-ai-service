@@ -1,4 +1,4 @@
--- tabelas de fato e dimensao star schema
+-- tabelas fato e dimensão do esquema estrela
 
 create table dim_date
 (

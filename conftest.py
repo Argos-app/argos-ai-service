@@ -1,4 +1,4 @@
-"""Test runner defaults shared by every application and package."""
+"""Configurações do executor de testes compartilhadas por aplicações e pacotes."""
 
 import asyncio
 import sys
@@ -8,7 +8,7 @@ import pytest
 
 @pytest.hookimpl
 def pytest_asyncio_loop_factories(config, item):
-    """Use a supported event loop factory on every CI and developer platform."""
+    """Usa uma fábrica de loop de eventos compatível na CI e no desenvolvimento."""
     del config, item
     if sys.platform == "win32":
         return {"windows-selector": asyncio.SelectorEventLoop}

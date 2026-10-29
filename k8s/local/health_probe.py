@@ -1,4 +1,4 @@
-"""Readiness checks for local Kubernetes app pods (stdlib only)."""
+"""Verificações de prontidão dos pods locais do Kubernetes, usando apenas a biblioteca padrão."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def http(url: str, headers: dict[str, str] | None = None) -> None:
     request = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(request, timeout=3) as response:
         if response.status >= 400:
-            raise RuntimeError(f"HTTP status {response.status}: {url}")
+            raise RuntimeError(f"Status HTTP {response.status}: {url}")
 
 
 def main(service: str) -> None:
@@ -52,5 +52,5 @@ if __name__ == "__main__":
     try:
         main(sys.argv[1])
     except (KeyError, OSError, RuntimeError, urllib.error.URLError, IndexError) as exc:
-        print(f"readiness check failed: {exc}", file=sys.stderr)
+        print(f"falha na verificação de prontidão: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc

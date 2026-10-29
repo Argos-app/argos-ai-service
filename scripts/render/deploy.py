@@ -41,7 +41,7 @@ def request(method: str, path: str, token: str, payload: dict | None = None) -> 
                     f"Falha no Render durante {method}: erro de rede ou tempo limite."
                 ) from None
         time.sleep(5 * (attempt + 1))
-    raise AssertionError("Unreachable")
+    raise AssertionError("Trecho inalcançável")
 
 
 def validate_service(service: dict, branch: str) -> None:
@@ -55,14 +55,17 @@ def validate_service(service: dict, branch: str) -> None:
     if service.get("rootDir", "") not in {"", "."}:
         raise ValueError("O diretório raiz do Render deve estar vazio para incluir packages/.")
     if service.get("autoDeployTrigger", "off") != "off" or service.get("autoDeploy", "no") != "no":
-        raise ValueError("Disable Render Auto-Deploy; GitHub Actions owns deployments.")
+        raise ValueError(
+            "Desative a implantação automática do Render; "
+            "o GitHub Actions controla as implantações."
+        )
 
 
 def deploy(service_id: str, token: str, sha: str, branch: str, timeout: int = 1200) -> str:
     if branch not in {"develop", "main"} or not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("Informe uma branch develop/main e o SHA completo do commit Git.")
     if not token or not re.fullmatch(r"srv-[a-zA-Z0-9]+", service_id):
-        raise ValueError("Set RENDER_API_KEY and the RENDER_SERVICE_ID_* environment secret.")
+        raise ValueError("Configure a secret de ambiente RENDER_API_KEY e RENDER_SERVICE_ID_*.")
     path = f"services/{service_id}"
     validate_service(request("GET", path, token), branch)
     result = request("POST", f"{path}/deploys", token, {"commitId": sha})
@@ -81,12 +84,17 @@ def deploy(service_id: str, token: str, sha: str, branch: str, timeout: int = 12
             previous = status
         if status == "live":
             if result.get("commit", {}).get("id") != sha:
-                raise RuntimeError("Live deployment commit does not match the requested SHA.")
+                raise RuntimeError(
+                    "O commit da implantação ativa não corresponde ao SHA solicitado."
+                )
             return url
         if status not in PENDING:
-            raise RuntimeError(f"Deployment did not become live: {status}. See {url}")
+            raise RuntimeError(f"A implantação não ficou ativa: {status}. Consulte {url}")
         time.sleep(15)
-    raise RuntimeError(f"Timed out waiting for deployment; check Render before retrying: {url}")
+    raise RuntimeError(
+        "Tempo limite aguardando a implantação; "
+        f"verifique o Render antes de tentar novamente: {url}"
+    )
 
 
 def main() -> None:
