@@ -28,10 +28,14 @@ class _CrossProviderChatModel(Runnable[Any, Any]):
         self._retryable_errors = retryable_errors
 
     def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return self._primary.invoke(input, config=config, **kwargs)
+        return self._primary.with_fallbacks(
+            [self._fallback], exceptions_to_handle=self._retryable_errors
+        ).invoke(input, config=config, **kwargs)
 
     async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
-        return await self._primary.ainvoke(input, config=config, **kwargs)
+        return await self._primary.with_fallbacks(
+            [self._fallback], exceptions_to_handle=self._retryable_errors
+        ).ainvoke(input, config=config, **kwargs)
 
     def get_num_tokens(self, text: str) -> int:
         """Conta tokens pelo maior dos dois providers para respeitar ambos os limites."""

@@ -328,7 +328,6 @@ class ProviderFallbackAnswerGenerator:
                 json={
                     "model": self._model,
                     "max_tokens": self._max_output_tokens,
-                    "temperature": 0,
                     "system": system,
                     "output_config": {"format": {"type": "json_schema", "schema": _ANSWER_SCHEMA}},
                     "messages": [
@@ -437,16 +436,6 @@ def _answer_from_json(raw: Any) -> GeneratedDocumentAnswer:
             raise ValueError("citações no texto divergem das evidências estruturadas")
         if not citations:
             citations = inline_citations
-    elif (
-        citations
-        and isinstance(status, str)
-        and status.casefold()
-        in {
-            DocumentAnswerStatus.SUCCESS.value,
-            DocumentAnswerStatus.PARTIAL.value,
-        }
-    ):
-        answer = f"{answer.rstrip()} {' '.join(f'[[{item}]]' for item in citations)}"
     normalized_status = _normalized_answer_status(status, answer, citations)
     if normalized_status == DocumentAnswerStatus.SUCCESS and not answer.strip():
         normalized_status = DocumentAnswerStatus.ABSTAIN

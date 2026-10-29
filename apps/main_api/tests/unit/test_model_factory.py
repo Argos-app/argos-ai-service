@@ -53,6 +53,27 @@ class _StructuredAnswer(BaseModel):
     answer: str
 
 
+def test_direct_invoke_uses_fallback_for_retryable_error():
+    def fail(_input):
+        raise RuntimeError("indisponível")
+
+    model = _CrossProviderChatModel(
+        RunnableLambda(fail), RunnableLambda(lambda _: "fallback"), (RuntimeError,)
+    )
+    assert model.invoke("entrada") == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_direct_ainvoke_uses_fallback_for_retryable_error():
+    def fail(_input):
+        raise RuntimeError("indisponível")
+
+    model = _CrossProviderChatModel(
+        RunnableLambda(fail), RunnableLambda(lambda _: "fallback"), (RuntimeError,)
+    )
+    assert await model.ainvoke("entrada") == "fallback"
+
+
 def test_cross_provider_model_uses_native_structured_output_fallback():
     primary = _BoundModel(error=RuntimeError("OpenAI unavailable"))
     fallback = _BoundModel(result={"answer": "ok"})

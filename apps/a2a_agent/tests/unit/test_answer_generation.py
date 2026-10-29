@@ -125,10 +125,25 @@ async def test_primary_and_fallback_send_the_same_document_context():
 
     primary_messages = requests["primary"]["messages"]
     fallback_payload = requests["fallback"]
+    assert "temperature" not in fallback_payload
     assert primary_messages[0]["content"] == fallback_payload["system"]
     assert json.loads(primary_messages[1]["content"]) == json.loads(
         fallback_payload["messages"][0]["content"]
     )
+
+
+@pytest.mark.parametrize("status", ["success", "partial"])
+def test_structured_citation_is_added_once(status):
+    result = _answer_from_json(
+        {
+            "answer": "Trecho",
+            "status": status,
+            "cited_evidence_ids": [_EVIDENCE_ID],
+            "limitations": [],
+            "missing_fields": [],
+        }
+    )
+    assert result.answer.count(f"[[{_EVIDENCE_ID}]]") == 1
 
 
 def test_model_abstention_with_retrieved_evidence_becomes_cited_partial_excerpts():
