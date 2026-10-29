@@ -11,6 +11,16 @@ fixos no código. Os demais limites da fila podem ser ajustados pelas variáveis
 `.env.example`. Não é necessário configurar `LANGSMITH_API_KEY` para usar Mongo
 ou o ranking local.
 
+## Privacidade e tracing
+
+O LangSmith é opcional e oculta entradas e saídas por padrão.
+`MAIN_API_LANGSMITH_CAPTURE_CONTENT=true` ou
+`A2A_LANGSMITH_CAPTURE_CONTENT=true` habilita captura de conteúdo no serviço
+correspondente. E-mails não são anonimizados e podem ser enviados aos modelos,
+persistidos no histórico ou checkpoint e incluídos em traces quando a captura
+está ativa. Avalie acesso e retenção antes de habilitar a captura com dados
+reais.
+
 ## Seguir uma interação
 
 Cada requisição HTTP não-health recebe um UUID novo. A resposta expõe esse valor
@@ -159,9 +169,9 @@ usuários cujas chaves ainda não expiraram e marca
 histórico durável.
 
 Para exportação de BI, use o contrato e a paginação idempotente descritos em
-[mongodb-observability-extraction.md](mongodb-observability-extraction.md). Para
-campos e origem de dados de negócio, consulte o
-[dicionário MongoDB para BI](../../../infrastructure/mongodb/mongodb-analytics-dictionary.md).
+[mongodb-extraction.md](mongodb-extraction.md). Para campos e origem de dados de
+negócio, consulte o
+[dicionário MongoDB para BI](../../../infrastructure/mongodb/analytics-dictionary.md).
 
 ## Estimar custo e retorno
 

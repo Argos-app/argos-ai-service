@@ -45,14 +45,14 @@ def test_shared_changes_deploy_all_consumers(path):
 def test_documentation_and_local_infrastructure_do_not_deploy():
     assert (
         plan.affected_services(
-            ["README.md", "infrastructure/mongodb/mongodb-configuration.md", "compose.yaml"]
+            ["README.md", "infrastructure/mongodb/configuration.md", "compose.yaml"]
         )
         == []
     )
 
 
 def test_service_documentation_selects_its_service():
-    assert plan.affected_services(["apps/main_api/docs/api-main-api.md"]) == []
+    assert plan.affected_services(["apps/main_api/docs/api-contract.md"]) == []
 
 
 @pytest.mark.parametrize(
@@ -65,8 +65,8 @@ def test_openapi_contract_selects_its_service(path):
 @pytest.mark.parametrize(
     "path",
     [
-        "scripts/render/deploy-render.md",
-        "packages/observability/docs/observability-operations.md",
+        "scripts/render/README.md",
+        "packages/observability/docs/operations.md",
         "apps/mcp_email/AGENTS.md",
         "packages/contracts/docs/example.json",
     ],

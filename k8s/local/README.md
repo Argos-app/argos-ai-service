@@ -147,7 +147,7 @@ kubectl -n argos-local port-forward service/mailpit 8025:8025 1025:1025
 ```
 
 Use o fluxo autenticado de sessão e interação descrito em
-[contrato da API](../../apps/main_api/docs/api-main-api.md). No modo local
+[contrato da API](../../apps/main_api/docs/api-contract.md). No modo local
 `AUTH_MODE=stub`, envie `Authorization: Bearer local-dev`; a identidade é
 fornecida pelo stub e não deve ser usada fora do ambiente descartável. Use a UI
 do Mailpit em `http://127.0.0.1:8025` para conferir o e-mail simulado. A

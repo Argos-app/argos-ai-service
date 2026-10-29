@@ -9,8 +9,8 @@ Ao mudar a CI, mantenha as suítes e imagens dos cinco serviços, os artefatos e
 limpeza das dependências de teste. O deploy depende do resultado da CI e de
 segredos configurados no GitHub; validar um YAML localmente não prova execução
 nem implantação remota. Consulte [CONTRIBUTING.md](../../CONTRIBUTING.md),
-[deploy Render](../../scripts/render/deploy-render.md) e os testes do planejador
-antes de alterar seleção de serviços ou regras de publicação.
+[deploy Render](../../scripts/render/README.md) e os testes do planejador antes
+de alterar seleção de serviços ou regras de publicação.
 
 O planejador ignora documentação, exceto contratos OpenAPI/Swagger, e seleciona
 um serviço por alterações em `apps/<serviço>/`. Alterações em `packages/` e

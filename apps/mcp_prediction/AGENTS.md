@@ -22,5 +22,6 @@ tool.
 ## Dependências e verificações
 
 Depende de PostgreSQL e de `packages/contracts` e `packages/security`; a Main
-API o chama por MCP. Veja [README.md](README.md), os testes unitários das regras
-e o guia de integração antes de modificar cálculo, cobertura ou autorização.
+API o chama por MCP. Veja [README.md](README.md), o [contrato MCP](MCP.md), os
+testes unitários e o guia de integração antes de modificar cálculo ou
+autorização.

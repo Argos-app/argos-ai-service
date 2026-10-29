@@ -11,6 +11,6 @@ privacidade. Custo ou tokens ausentes não equivalem a zero; não exponha conte�
 nem credenciais fora das políticas existentes. Mudanças no schema persistido ou
 nos custos exigem revisão dos dois consumidores, consultas e documentação.
 Execute testes do pacote e dos serviços afetados; veja [README.md](README.md). O
-[guia de operação](docs/observability-operations.md) descreve correlação, custos
-e uso Redis; o [guia de extração](docs/mongodb-observability-extraction.md)
-documenta a leitura incremental das observações Mongo.
+[guia de operação](docs/operations.md) descreve correlação, custos e uso Redis;
+o [guia de extração](docs/mongodb-extraction.md) documenta a leitura incremental
+das observações Mongo.

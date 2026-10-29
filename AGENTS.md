@@ -27,7 +27,7 @@ repositórios.
 | `packages/security`      | Autorização, delegação, assinaturas e adapters cadastrais.   | [AGENTS.md](packages/security/AGENTS.md) · [README](packages/security/README.md)                                              |
 | `packages/observability` | Modelos, coleta e persistência compartilhada de observações. | [AGENTS.md](packages/observability/AGENTS.md) · [README](packages/observability/README.md)                                    |
 | `infrastructure`         | Imagem PostgreSQL local, schema e dados sintéticos.          | [AGENTS.md](infrastructure/AGENTS.md) · [Docker](infrastructure/docker/AGENTS.md) · [Mongo](infrastructure/mongodb/AGENTS.md) |
-| `k8s/local`              | Recursos para orquestração local.                            | [AGENTS.md](k8s/local/AGENTS.md) · [guia local](k8s/local/kubernetes-local.md)                                                |
+| `k8s/local`              | Recursos para orquestração local.                            | [AGENTS.md](k8s/local/AGENTS.md) · [guia local](k8s/local/README.md)                                                          |
 | `scripts`                | Inicialização, locks, dados locais e deploy Render.          | [AGENTS.md](scripts/AGENTS.md) · [Render](scripts/render/AGENTS.md)                                                           |
 | `.github/workflows`      | CI, deploy e notificações.                                   | [AGENTS.md](.github/workflows/AGENTS.md)                                                                                      |
 | `tests`                  | Testes transversais de planejamento e deploy.                | [AGENTS.md](tests/AGENTS.md)                                                                                                  |
@@ -35,8 +35,8 @@ repositórios.
 A raiz contém [README.md](README.md), [CONTRIBUTING.md](CONTRIBUTING.md),
 `compose.yaml` para a pilha integrada e `pyproject.toml` para ferramentas e
 coleta de testes. A documentação da API está em
-[contrato da API](apps/main_api/docs/api-main-api.md) e os campos persistidos em
-[estruturas Mongo](infrastructure/mongodb/mongodb-collection-structures.md).
+[contrato da API](apps/main_api/docs/api-contract.md) e os campos persistidos em
+[estruturas Mongo](infrastructure/mongodb/collections.md).
 
 ## Orientações de desenvolvimento
 

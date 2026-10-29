@@ -24,4 +24,5 @@ envio. O código separa `domain`, `application`, `ports` e `adapters`;
 Usa MongoDB para preparação e despacho, PostgreSQL para destinatários e SMTP
 para entrega; compartilha `packages/contracts` e `packages/security`. A Main API
 é cliente MCP. Comandos e integração descartável estão em
-[README.md](README.md).
+[README.md](README.md); o [contrato MCP](MCP.md) detalha os estados e a
+persistência.

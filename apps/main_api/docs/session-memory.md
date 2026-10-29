@@ -2,9 +2,8 @@
 
 A Main API persiste estado conversacional no MongoDB e usa o checkpointer Mongo
 do LangGraph. Este guia resume a implementação atual; os formatos e índices
-estão em
-[estruturas Mongo](../../../infrastructure/mongodb/mongodb-collection-structures.md)
-e as rotas em [API principal](api-main-api.md).
+estão em [estruturas Mongo](../../../infrastructure/mongodb/collections.md) e as
+rotas em [API principal](api-contract.md).
 
 ## Sessão e interação
 

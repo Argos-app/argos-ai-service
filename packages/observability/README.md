@@ -10,6 +10,6 @@ python -m pytest packages/observability/tests -q
 ```
 
 Os campos, retenção, rastreamento e consultas estão em
-[observability-operations.md](docs/observability-operations.md) e no
-[dicionário Mongo](../../infrastructure/mongodb/mongodb-analytics-dictionary.md).
+[operations.md](docs/operations.md) e no
+[dicionário Mongo](../../infrastructure/mongodb/analytics-dictionary.md).
 Consulte [AGENTS.md](AGENTS.md) para mudanças que afetem consumidores.

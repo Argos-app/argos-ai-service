@@ -3,10 +3,10 @@
 Os serviços configuram seus databases por ambiente; `argos_ai` é o padrão e o
 Compose integrado usa um database local compartilhado. O MCP de dados apenas lê
 collections de negócio. Os nomes estão descritos em
-[mongodb-configuration.md](mongodb-configuration.md). Datas BSON são UTC; UUIDs
-são persistidos como strings canônicas, exceto estruturas internas do
-checkpointer LangGraph, cujo formato depende da versão da biblioteca. Exemplos
-abaixo são esquemáticos e não contêm dados de produção.
+[configuration.md](configuration.md). Datas BSON são UTC; UUIDs são persistidos
+como strings canônicas, exceto estruturas internas do checkpointer LangGraph,
+cujo formato depende da versão da biblioteca. Exemplos abaixo são esquemáticos e
+não contêm dados de produção.
 
 ## Mapa de collections
 
@@ -22,7 +22,7 @@ abaixo são esquemáticos e não contêm dados de produção.
 | API                         | `ai_email_workflows`             | Preparações, perguntas pendentes, autorizações e recibos de operação        | `_id` e campos dependem de `record_type`; usuário/sessão, validade e chave idempotente conforme tipo                                                                                                     | TTL por `purge_at`, preservando a retenção de cada registro.                      |
 | API                         | `ai_langgraph_checkpoints`       | Estado técnico serializado dos grafos                                       | Chaves e estrutura controladas pelo LangGraph/checkpointer                                                                                                                                               | Sem contrato analítico estável; não consultar como dado de negócio.               |
 | API                         | `ai_langgraph_checkpoint_writes` | Escritas incrementais dos checkpoints                                       | Chaves e estrutura controladas pelo LangGraph/checkpointer                                                                                                                                               | Sem contrato analítico estável; retenção não definida por BI.                     |
-| API (opcional)              | `ai_observations`                | Uma observação técnica por tentativa do principal                           | `_id`, `correlation_id`, `parent_observation_id`, `started_at`, `updated_at`                                                                                                                             | Sem TTL; formato detalhado em `mongodb-observability-extraction.md`.              |
+| API (opcional)              | `ai_observations`                | Uma observação técnica por tentativa do principal                           | `_id`, `correlation_id`, `parent_observation_id`, `started_at`, `updated_at`                                                                                                                             | Sem TTL; formato detalhado em `mongodb-extraction.md`.                            |
 | MCP e-mail                  | `ai_email_prepared_reports`      | Conteúdo preparado para envio no adapter Mongo                              | `_id=report_id`, `requested_by`, `recipients[]`, `subject`, `body`, `attachments[]` (`filename`, `content_type`, `content_base64`, `sha256`), `source_payload_hash`, `created_at`, `expires_at`, `state` | Sem TTL atualmente no adapter; dados pessoais, corpo e anexo base64.              |
 | MCP e-mail                  | `ai_email_dispatches`            | Estado/idempotência de envio e resposta do provider                         | `_id=operation_id`, `report_id`, `requested_by`, `idempotency_key`, `state`, `provider_message_id`, `error_code`, `created_at`, `updated_at`                                                             | Sem TTL no adapter; `pending` com `send_claimed=true` exige reconciliação manual. |
 | A2A (opcional)              | `ai_a2a_observations`            | Observações de consulta documental/embeddings do A2A                        | Schema compartilhado `Observation`; correlação assinada com a API                                                                                                                                        | Sem TTL; mesma semântica best effort da observabilidade principal.                |
@@ -178,9 +178,9 @@ Exemplo sintético: `{ "_id": "<uuid>`, `"session_id": "<uuid>`,
 relatório, e-mail e memória tem retenção e risco diferentes; permissões BI devem
 ser somente leitura e limitadas às collections/campos aprovados. A
 observabilidade não tem TTL e registros podem faltar por queda ou saturação da
-fila. Veja os guias de [configuração](mongodb-configuration.md),
-[extração](../../packages/observability/docs/mongodb-observability-extraction.md)
-e [operação](../../packages/observability/docs/observability-operations.md).
-Para schemas exatos dos documentos de negócio, consulte os
-modelos/repos/repositórios citados em cada aplicação; as collections de origem
-do MCP de dados exigem confirmação junto ao produtor.
+fila. Veja os guias de [configuração](configuration.md),
+[extração](../../packages/observability/docs/mongodb-extraction.md) e
+[operação](../../packages/observability/docs/operations.md). Para schemas exatos
+dos documentos de negócio, consulte os modelos/repos/repositórios citados em
+cada aplicação; as collections de origem do MCP de dados exigem confirmação
+junto ao produtor.

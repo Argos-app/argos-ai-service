@@ -17,9 +17,9 @@ $env:PYTHONPATH = "apps/mcp_email/src"
 python -m argos_mcp_email
 ```
 
-A [pilha integrada](../../infrastructure/docker/docker-local.md) usa Mailpit
-local por padrão. Para testes unitários e integração com Mongo, PostgreSQL e
-Mailpit descartáveis:
+A [pilha integrada](../../infrastructure/docker/README.md) usa Mailpit local por
+padrão. Para testes unitários e integração com Mongo, PostgreSQL e Mailpit
+descartáveis:
 
 ```powershell
 python -m pytest apps/mcp_email/tests/unit -q
@@ -30,38 +30,9 @@ serviços e ativar os testes de integração.
 
 ## Contrato MCP
 
-O Streamable HTTP em `/mcp` aceita as tools `prepare_report`, `send_report` e
-`get_report_status`, com `payload` e autenticação Bearer de serviço. A origem do
-relatório é validada por assinatura; destinatários são resolvidos no banco. Os
-tipos de requisição e resposta estão em `packages/contracts/email.py`. O estado
-`accepted` registra aceite do provedor SMTP, não leitura ou entrega ao
-destinatário.
-
-`prepare_report` recebe `report_source`, seletores em `recipients`,
-`report_title` e `requested_by`, vinculado ao titular do envelope. Além do
-corpo, gera um anexo UTF-8 `relatorio-{report_id}.txt`; a resposta informa
-metadados como tamanho e SHA-256. Preparar não envia. Para obter uma origem
-válida, use `get_lot_report_source` do MCP de dados ou uma fixture assinada
-conforme os contratos `email.py` e `lot_report.py`.
-
-Exemplos reduzidos de `payload` para envio e consulta:
-
-```json
-{
-	"report_id": "00000000-0000-0000-0000-000000000001",
-	"requested_by": "00000000-0000-0000-0000-000000000002",
-	"idempotency_key": "argos:<authorization-id>"
-}
-```
-
-```json
-{
-	"operation_id": "00000000-0000-0000-0000-000000000003",
-	"requested_by": "00000000-0000-0000-0000-000000000002"
-}
-```
-
-O schema retornado por `tools/list` define nomes, obrigatoriedade e limites. Uma
-operação reclamada que permaneça `pending` precisa de reconciliação; não crie
-uma nova chave e reenvie automaticamente após um resultado desconhecido. O Mongo
-armazena corpo, destinatários e anexo; a resposta pública apresenta metadados.
+O transporte Streamable HTTP em `/mcp` expõe `prepare_report`, `send_report` e
+`get_report_status`. O envelope de origem é assinado e a autorização de envio é
+validada pela Main API. `accepted` indica aceite SMTP, não entrega ou leitura;
+operações pendentes ou desconhecidas precisam de reconciliação antes de um novo
+pedido. Os schemas estão em `packages/contracts/email.py`; campos, exemplos,
+estados e persistência estão em [MCP.md](MCP.md).

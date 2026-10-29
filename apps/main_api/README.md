@@ -10,11 +10,10 @@ Redis, os SDKs MCP e A2A e os pacotes compartilhados do monorepositório. As
 dependências estão em `requirements.txt` e `pylock.toml`.
 
 A forma integrada, com dependências locais e modelos simulados, está em
-[Docker local](../../infrastructure/docker/docker-local.md). Para executar o
-processo no host, instale as dependências a partir da raiz, configure no
-ambiente as variáveis de [.env.example](.env.example) e disponibilize as
-dependências escolhidas. O Python não carrega esse arquivo automaticamente. No
-PowerShell:
+[Docker local](../../infrastructure/docker/README.md). Para executar o processo
+no host, instale as dependências a partir da raiz, configure no ambiente as
+variáveis de [.env.example](.env.example) e disponibilize as dependências
+escolhidas. O Python não carrega esse arquivo automaticamente. No PowerShell:
 
 ```powershell
 python -m pip install -r apps/main_api/requirements.txt
@@ -44,5 +43,5 @@ estão em [tests/integration/README.md](tests/integration/README.md).
 | `GET /v1/sessions/{session_id}/interactions/{operation_id}` | Consulta estado e resultado da interação.                       |
 
 Os schemas, exemplos, erros e autenticação estão no
-[contrato da API](docs/api-main-api.md) e em `/docs` quando o processo está
+[contrato da API](docs/api-contract.md) e em `/docs` quando o processo está
 ativo. `X-Argos-Correlation-ID` é retornado nas respostas de negócio.

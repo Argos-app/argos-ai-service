@@ -71,8 +71,7 @@ principal. `correlation_id` identifica a requisição HTTP correlacionada e
 observação do próprio protocolo e recebe os IDs funcionais pela delegação
 assinada. Os documentos usam `schema_version="2"`. `session_id` e
 `interaction_id` podem faltar em operações sem sessão, como verificações de
-saúde. Veja o fluxo e as limitações em
-[observability-operations.md](observability-operations.md).
+saúde. Veja o fluxo e as limitações em [operations.md](operations.md).
 
 Não há índice TTL nem expiração automática configurada para essa coleção.
 Registros só deixam o Mongo por exclusão operacional explícita, fora deste

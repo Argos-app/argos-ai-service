@@ -28,8 +28,8 @@ de alterar a ordem.
 - O resumo e a memória usam modelos configurados; mantenha a contagem de tokens,
   fallback, limites e observabilidade ao alterar `model_factory.py`.
 - Campos HTTP e Mongo são contratos; confira consumidores, índices e
-  [documentação Mongo](../../infrastructure/mongodb/mongodb-collection-structures.md)
-  antes de alterá-los.
+  [documentação Mongo](../../infrastructure/mongodb/collections.md) antes de
+  alterá-los.
 
 ## Dependências e verificações
 
@@ -41,7 +41,7 @@ providers e LangSmith. Compartilha `packages/contracts`, `security` e
 os limites e a retomada. Comandos e contrato em [README.md](README.md); testes
 de integração usam serviços descartáveis conforme seu README.
 
-O [contrato HTTP](docs/api-main-api.md), o
+O [contrato HTTP](docs/api-contract.md), o
 [OpenAPI versionado](docs/openapi-main-api.json) e o
-[guia de autenticação](docs/firebase-authentication-identity.md) acompanham esta
+[guia de autenticação](docs/firebase-authentication.md) acompanham esta
 aplicação. Atualize o snapshot OpenAPI e seus testes ao alterar o contrato.

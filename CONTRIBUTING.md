@@ -12,7 +12,6 @@ monorepositório Python do Argos AI Service.
 - [Conventional Commits](#conventional-commits)
 - [Fluxo de branches](#fluxo-de-branches)
 - [Pull Requests](#pull-requests)
-- [Comparação com o backend](#comparação-com-o-backend)
 
 ## Pré-requisitos
 
@@ -57,7 +56,7 @@ python -m pip install -r requirements-dev.txt
 Instale as dependências Node e ative os hooks locais:
 
 ```bash
-npm install
+npm ci
 ```
 
 ## Verificações locais
@@ -76,7 +75,7 @@ npm run format:check
 Com a `.venv` ativada, execute os testes Python:
 
 ```bash
-python -m pytest tests apps packages -m "not integration" -q -p no:cacheprovider
+python -m pytest tests apps packages -m "not integration" --cov=apps --cov=packages --cov-fail-under=75
 ```
 
 As integrações de cada serviço ficam em `apps/<serviço>/tests/integration`.
@@ -178,5 +177,5 @@ git checkout -b feature/nome-da-feature
 6. Use Squash Merge quando essa for a política adotada para a branch.
 
 As branches `develop` e `main` devem exigir os checks do CI por meio de branch
-protection no GitHub. O workflow executa em qualquer push e em PRs destinadas a
-`main` ou `develop`.
+protection no GitHub. O workflow executa em pushes para `main` ou `develop`, em
+PRs destinadas a essas branches e por acionamento manual.

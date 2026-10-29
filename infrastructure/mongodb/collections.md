@@ -35,8 +35,8 @@ string ou UUID BSON, conforme configuração.
 | A2A           | `ai_a2a_observations`            | Leitura e escrita                | Observabilidade técnica do serviço A2A.                         |
 
 Os nomes, databases e configurações estão em
-[`mongodb-configuration.md`](mongodb-configuration.md). O dicionário voltado a
-BI está em [`mongodb-analytics-dictionary.md`](mongodb-analytics-dictionary.md).
+[`configuration.md`](configuration.md). O dicionário voltado a BI está em
+[`analytics-dictionary.md`](analytics-dictionary.md).
 
 ## Collections do `main_api`
 

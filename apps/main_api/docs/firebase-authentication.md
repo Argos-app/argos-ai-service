@@ -2,7 +2,7 @@
 
 A Main API autentica a identidade pelo Firebase e autoriza o usuário e suas
 propriedades pelo PostgreSQL. O contrato HTTP e os exemplos estão em
-[api-main-api.md](api-main-api.md).
+[api-contract.md](api-contract.md).
 
 ## Troca e uso do token
 

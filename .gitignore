@@ -85,23 +85,4 @@ Thumbs.db
 # ─────────────────────────────────────────────
 # Misc
 # ─────────────────────────────────────────────
-*.md
-!README.md
-!agent.md
-!AGENTS.md
-!apps/mcp_data/MCP.md
-!docs/agent-integration-handoff.md
-!docs/session-memory-persistence-plan.md
-!docs/mongodb-configuration.md
-!docs/docker-local.md
-!docs/deploy-render.md
-!docs/kubernetes-local.md
-!docs/api-main-api.md
-!docs/mongodb-analytics-dictionary.md
-!docs/mongodb-observability-extraction.md
-!docs/mongodb-collection-structures.md
-!docs/observability-operations.md
-!docs/raw-observability-data-plan.md
-!docs/local-validation-results.md
-!docs/firebase-authentication-identity.md
 k8s/local/secret.env

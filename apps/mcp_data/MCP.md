@@ -82,6 +82,5 @@ de saída do `main_api`. O MCP de dados não persiste uma observação própria;
 do processo podem ser associados pelo ID de delegação/request quando
 disponíveis. Valores ausentes em telemetria não indicam ausência de consulta nem
 consumo zero. Os IDs não são argumentos das tools. Consulte
-[operação de observabilidade](../../packages/observability/docs/observability-operations.md)
-e o
-[dicionário MongoDB BI](../../infrastructure/mongodb/mongodb-analytics-dictionary.md).
+[operação de observabilidade](../../packages/observability/docs/operations.md) e
+o [dicionário MongoDB BI](../../infrastructure/mongodb/analytics-dictionary.md).
