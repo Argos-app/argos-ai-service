@@ -11,5 +11,6 @@ integração. O leitor dos serviços usa acesso limitado; não remova os control
 read-only. Comandos e contexto em [Docker local](docker/docker-local.md) e nos
 READMEs de integração dos serviços.
 
-O [guia de Docker](docker/agent.md) trata da pilha integrada; o
-[guia Mongo](mongodb/agent.md) reúne configuração, estrutura e consumo de dados.
+O [guia de Docker](docker/AGENTS.md) trata da pilha integrada; o
+[guia Mongo](mongodb/AGENTS.md) reúne configuração, estrutura e consumo de
+dados.

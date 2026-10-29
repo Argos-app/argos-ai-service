@@ -13,4 +13,4 @@ desenvolvimento instaladas:
 python -m pytest packages/contracts/tests -q
 ```
 
-Consulte [agent.md](agent.md) antes de alterar schemas compartilhados.
+Consulte [AGENTS.md](AGENTS.md) antes de alterar schemas compartilhados.

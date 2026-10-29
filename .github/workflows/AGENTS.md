@@ -12,8 +12,8 @@ nem implantação remota. Consulte [CONTRIBUTING.md](../../CONTRIBUTING.md),
 [deploy Render](../../scripts/render/deploy-render.md) e os testes do planejador
 antes de alterar seleção de serviços ou regras de publicação.
 
-O planejador seleciona um serviço por alterações em qualquer arquivo sob seu
-diretório `apps/<serviço>/`, inclusive documentação. Alterações em `packages/` e
+O planejador ignora documentação, exceto contratos OpenAPI/Swagger, e seleciona
+um serviço por alterações em `apps/<serviço>/`. Alterações em `packages/` e
 outros caminhos compartilhados selecionados pelo planejador afetam todos os
-serviços. Em pushes para `develop` ou `main`, essas mudanças podem acionar o
-deploy após a CI.
+serviços. Pushes em `develop` ou `main` podem acionar deploy após a CI do mesmo
+commit; o deploy manual também aceita CI executada manualmente para o mesmo SHA.

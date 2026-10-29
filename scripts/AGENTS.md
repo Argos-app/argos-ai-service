@@ -12,4 +12,4 @@ Confira argumentos, diretórios e ambiente antes de executá-los; nunca use base
 de produção como fixtures. Mantenha consistente a lista de serviços e os
 contratos de build com os workflows, Dockerfiles e guias locais. As alterações
 do planejador Render são cobertas em `tests/test_render_deploy.py`. Para
-alterações de implantação, leia [render/agent.md](render/agent.md).
+alterações de implantação, leia [render/AGENTS.md](render/AGENTS.md).

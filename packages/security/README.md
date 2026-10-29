@@ -12,5 +12,5 @@ serviços. Com as dependências de desenvolvimento instaladas:
 python -m pytest apps/main_api/tests/unit/test_auth.py apps/mcp_data/tests/unit/test_delegation.py apps/mcp_prediction/tests/unit/test_delegation.py -q
 ```
 
-Veja [agent.md](agent.md) e os testes dos demais consumidores quando mudar
+Veja [AGENTS.md](AGENTS.md) e os testes dos demais consumidores quando mudar
 tokens, políticas ou adapters compartilhados.
