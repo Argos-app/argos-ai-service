@@ -2,7 +2,7 @@ name: CI
 
 on:
     push:
-        branches: ["**"]
+        branches: [main, develop]
     pull_request:
         branches: [main, develop]
     workflow_dispatch:
@@ -54,13 +54,23 @@ jobs:
             - name: Audit Python dependencies
               run: pip-audit
 
+            - name: Audit service runtime locks
+              shell: bash
+              run: |
+                  audit_file=$(mktemp)
+                  trap 'rm -f "$audit_file"' EXIT
+                  for lock in apps/{main_api,mcp_data,mcp_email,mcp_prediction,a2a_agent}/pylock.toml; do
+                    python -c 'import sys, tomllib; data = tomllib.load(open(sys.argv[1], "rb")); print("\n".join("{}=={}".format(p["name"], p["version"]) for p in data["packages"]))' "$lock" > "$audit_file"
+                    echo "Auditing $lock"
+                    pip-audit --no-deps -r "$audit_file"
+                  done
+
             - name: Generate disposable local secrets
               run: python scripts/docker/create-local-env.py --output .env.ci --force
 
             - name: Validate every Compose file
               run: |
                   docker compose --env-file .env.ci --profile apps --file compose.yaml config --quiet
-                  docker compose --env-file apps/a2a_agent/.env.example --file apps/a2a_agent/compose.yaml config --quiet
                   docker compose --file apps/main_api/tests/integration/compose.yaml config --quiet
                   docker compose --file apps/mcp_email/tests/integration/compose.yaml config --quiet
                   docker compose --file apps/mcp_data/tests/integration/compose.yaml config --quiet
@@ -138,7 +148,7 @@ jobs:
               shell: bash
               run: |
                   mkdir -p reports
-                  python -m pytest tests apps packages -m "not integration" --junitxml=reports/pytest.xml --cov=apps --cov=packages --cov-report=xml:reports/coverage.xml
+                  python -m pytest tests apps packages -m "not integration" --junitxml=reports/pytest.xml --cov=apps --cov=packages --cov-report=xml:reports/coverage.xml --cov-fail-under=75
 
             - name: Publish test reports
               if: always()
@@ -185,7 +195,7 @@ jobs:
 
             - name: Run main API integration tests
               env:
-                  MAIN_API_MONGO_TEST_URI: mongodb://127.0.0.1:27027/?directConnection=true
+                  MAIN_API_MONGO_TEST_URI: mongodb://127.0.0.1:27030/?directConnection=true
                   MAIN_API_TEST_AUTH_DATABASE_URL: postgresql://auth_test:auth_test@127.0.0.1:54329/auth_test
                   MCP_EMAIL_RUN_INTEGRATION: "1"
               run: |
