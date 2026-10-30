@@ -5,6 +5,7 @@ from typing import Any
 
 from app.agent_schemas.inputs import SessionContext
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
+from app.graph.input_risk import run_input_risk_node
 from app.graph.state import AgentState
 from app.graph.workflow_nodes import (
     SYNTHESIS_AGENT_TIMEOUT_SECONDS,
@@ -29,6 +30,7 @@ from app.graph.workflow_nodes import (
 from app.ports.agent import AgentId
 from app.ports.agent_factory import AgentFactory
 from app.ports.email_preparation_repository import EmailPreparationRepository
+from app.ports.input_risk import InputRiskEvaluator
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
@@ -48,10 +50,16 @@ def build_graph(
     report_artifacts: ReportArtifactRepository | None = None,
     email_preparations: EmailPreparationRepository | None = None,
     email_dispatch: EmailDispatchWorkflow | None = None,
+    input_risk_evaluator: InputRiskEvaluator | None = None,
     synthesis_agent_timeout_seconds: float = SYNTHESIS_AGENT_TIMEOUT_SECONDS,
 ):
     graph = StateGraph(AgentState)
-    graph.add_node("guardrail_input", run_input_guardrail_node)
+    graph.add_node(
+        "guardrail_input",
+        partial(run_input_risk_node, evaluator=input_risk_evaluator)
+        if input_risk_evaluator is not None
+        else run_input_guardrail_node,
+    )
     graph.add_node("router", partial(run_router_node, factory=factory))
     for agent_id in (
         AgentId.FARM,
@@ -105,8 +113,9 @@ def build_graph(
     graph.add_edge(START, "guardrail_input")
     graph.add_conditional_edges(
         "guardrail_input",
-        route_after_input_guardrail,
+        _route_after_input,
         {
+            "risk_end": END,
             "router": "router",
             "farm": "farm",
             "doctor": "doctor",
@@ -140,6 +149,17 @@ def build_graph(
     graph.add_edge("guardrail_output", END)
     graph.add_edge("safe", END)
     return graph.compile(checkpointer=checkpointer)
+
+
+def _route_after_input(state: AgentState) -> str:
+    errors = state.get("errors", [])
+    if (
+        state.get("final_answer")
+        and errors
+        and errors[-1] in {"input_risk_blocked", "input_risk_unavailable"}
+    ):
+        return "risk_end"
+    return route_after_input_guardrail(state)
 
 
 async def execute_workflow(

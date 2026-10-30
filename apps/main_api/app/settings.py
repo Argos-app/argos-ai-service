@@ -5,6 +5,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field, fields
+from decimal import Decimal
 from urllib.parse import urlsplit
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
@@ -41,6 +42,11 @@ def _environment_bool(name: str, default: bool = False) -> bool:
         extra={"setting": name},
     )
     return default
+
+
+def _optional_rate(name: str) -> Decimal | None:
+    value = os.getenv(name)
+    return Decimal(value) if value and value.strip() else None
 
 
 _MONGO_COLLECTION_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
@@ -123,6 +129,17 @@ class Settings:
     document_a2a_service_token: str | None = field(default=None, repr=False)
     document_a2a_timeout_seconds: float = 45.0
     document_a2a_response_max_bytes: int = 1_000_000
+    jev_url: str | None = None
+    jev_api_key: str | None = field(default=None, repr=False)
+    jev_model: str = "jev-latest"
+    decisions_url: str | None = None
+    decisions_model: str = "gpt-6-luna"
+    jev_input_rate: Decimal | None = None
+    jev_output_rate: Decimal | None = None
+    decisions_input_rate: Decimal | None = None
+    decisions_output_rate: Decimal | None = None
+    input_risk_threshold: float = 0.8
+    input_risk_timeout_seconds: float = 5.0
     model_mode: str = "provider"
     openai_api_key: str | None = field(default=None, repr=False)
     openai_base_url: str | None = None
@@ -235,6 +252,17 @@ class Settings:
             document_a2a_response_max_bytes=int(
                 os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
             ),
+            jev_url=os.getenv("JEV_URL", "").strip() or None,
+            jev_api_key=os.getenv("JEV_API_KEY") or None,
+            jev_model=os.getenv("JEV_MODEL", "jev-latest"),
+            decisions_url=os.getenv("DECISIONS_URL", "").strip() or None,
+            decisions_model=os.getenv("DECISIONS_MODEL", "gpt-6-luna"),
+            jev_input_rate=_optional_rate("JEV_INPUT_COST_PER_MILLION_TOKENS"),
+            jev_output_rate=_optional_rate("JEV_OUTPUT_COST_PER_MILLION_TOKENS"),
+            decisions_input_rate=_optional_rate("DECISIONS_INPUT_COST_PER_MILLION_TOKENS"),
+            decisions_output_rate=_optional_rate("DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS"),
+            input_risk_threshold=float(os.getenv("INPUT_RISK_THRESHOLD", "0.8")),
+            input_risk_timeout_seconds=float(os.getenv("INPUT_RISK_TIMEOUT_SECONDS", "5")),
             model_mode=os.getenv("MAIN_API_MODEL_MODE", "provider").strip().casefold(),
             openai_api_key=os.getenv("OPENAI_API_KEY") or None,
             openai_base_url=_env_endpoint("OPENAI_BASE_URL"),
@@ -263,6 +291,8 @@ class Settings:
 
     def __post_init__(self) -> None:
         for name, value in (
+            ("JEV_URL", self.jev_url),
+            ("DECISIONS_URL", self.decisions_url),
             ("OPENAI_BASE_URL", self.openai_base_url),
             ("ANTHROPIC_BASE_URL", self.anthropic_base_url),
         ):
@@ -341,6 +371,21 @@ class Settings:
             or not 1 <= self.execution_timeout_seconds <= 300
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if (
+            not 0 < self.input_risk_threshold <= 1
+            or not 0 < self.input_risk_timeout_seconds <= 120
+            or not self.jev_model.strip()
+            or not self.decisions_model.strip()
+        ):
+            raise ValueError("configuração de avaliação de risco inválida")
+        for rate in (
+            self.jev_input_rate,
+            self.jev_output_rate,
+            self.decisions_input_rate,
+            self.decisions_output_rate,
+        ):
+            if rate is not None and (not rate.is_finite() or rate < 0):
+                raise ValueError("tarifa de avaliação de risco inválida")
         if self.model_mode not in {"provider", "simulated"}:
             raise ValueError("MAIN_API_MODEL_MODE deve ser provider ou simulated")
         if self.auth_mode not in {"jwt", "stub"}:
