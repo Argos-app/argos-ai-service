@@ -1769,3 +1769,87 @@ async def test_orchestrator_source_reference_is_canonicalized_from_trusted_evide
     assert judge_outcome_source.reference == trusted.reference
     assert judge_outcome_source.excerpt is None
     assert result["final_answer"] == "Dado"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("input_type", ["free_text", "single_choice", "confirmation"])
+async def test_input_risk_block_preserves_question_and_stops_agents(input_type):
+    from app.ports.input_risk import InputRiskDecision
+
+    class Evaluator:
+        def __init__(self):
+            self.decisions = [
+                InputRiskDecision.ALLOW,
+                InputRiskDecision.BLOCK,
+                InputRiskDecision.ALLOW,
+            ]
+
+        async def evaluate(self, text):
+            return self.decisions.pop(0)
+
+    router = FakeAgent(
+        RoutePlan(intent="relatório", missing_slots=("período",)),
+        RoutePlan(intent="relatório", tasks=(task(),)),
+    )
+    farm = FakeAgent(SpecialistResult(agent="farm", status="success", answer="Teste"))
+    graph = build_graph(
+        FakeFactory(
+            router=router,
+            question_formatter=FakeAgent(QuestionFormatterResult(prompt="Qual período?")),
+            farm=farm,
+            orchestrator=FakeAgent(OrchestratorResult(draft_answer="Resposta de teste")),
+            judge=FakeAgent(JudgeResult(decision="approved", reason="Teste aprovado")),
+        ),
+        checkpointer=MemorySaver(),
+        input_risk_evaluator=Evaluator(),
+    )
+    config = {"configurable": {"thread_id": "risk-retry"}}
+    first = await graph.ainvoke(request_state("Quero um relatório"), config=config)
+    from app.agent_schemas.inputs import QuestionOption
+
+    request = QuestionFormattingRequest(
+        reason_code="test",
+        input_type=input_type,
+        question_goal="Escolha uma resposta",
+        options=(QuestionOption(option_id="yes", label="Sim"),)
+        if input_type == "single_choice"
+        else (),
+    )
+    await graph.aupdate_state(
+        config, {"clarification_request": request}, as_node="question_guardrail"
+    )
+    blocked = await graph.ainvoke(
+        answer_state("janeiro", question_id=first["question_id"]), config=config
+    )
+    assert blocked["question_id"] == first["question_id"]
+    assert blocked["clarification_question"] == first["clarification_question"]
+    assert "input_risk_blocked" in blocked["errors"]
+    assert len(router.calls) == 1
+    assert farm.calls == []
+    limits = ExecutionLimits(4, 4)
+    limits.record_tool_success("farm", "consultar_fazenda", '{"applications": 1}')
+    with execution_limits_scope(limits):
+        resumed = await graph.ainvoke(
+            answer_state("fevereiro", question_id=first["question_id"]), config=config
+        )
+    assert resumed["final_answer"] == "Resposta de teste"
+    assert len(farm.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "decision,error", [("block", "input_risk_blocked"), ("unavailable", "input_risk_unavailable")]
+)
+async def test_input_risk_stops_before_router(decision, error):
+    from app.ports.input_risk import InputRiskDecision
+
+    class Evaluator:
+        async def evaluate(self, text):
+            return InputRiskDecision(decision)
+
+    router = FakeAgent()
+    graph = build_graph(FakeFactory(router=router), input_risk_evaluator=Evaluator())
+    result = await graph.ainvoke(request_state("consulta"))
+    assert error in result["errors"]
+    assert router.calls == []
+    assert result["messages"][-1].content == result["final_answer"]
