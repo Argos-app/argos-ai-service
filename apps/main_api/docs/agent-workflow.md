@@ -56,11 +56,14 @@ traces, latência, uso e custos, veja
 
 ```mermaid
 flowchart TD
-    Input[Mensagem do backend] --> Auth[Validar identidade, fazendas e sessão]
+    Input[Mensagem do usuário] --> Auth[Validar identidade, fazendas e sessão]
     Auth --> Privacy[Preservar parâmetros protegidos e minimizar dados]
     Privacy --> Guard{Guardrail aprova?}
     Guard -->|Não ou falha| Safe[Finalização segura sem ferramentas de negócio]
-    Guard -->|Sim| Route[Roteador]
+    Guard -->|Aprovada: nova mensagem| Route[Roteador]
+    Guard -->|Aprovada: resposta pendente| Resume[Retomar tarefa ou roteador]
+    Resume -->|Roteador| Route
+    Resume -->|Especialista| Specialists
     Route --> Missing{Faltam informações?}
     Missing -->|Sim| Question[Agente Formatador de perguntas]
     Question --> Wait[Aguardar resposta do usuário]
@@ -70,6 +73,7 @@ flowchart TD
     Specialists --> Secretary[Secretário]
     Specialists --> Analyst[Analista]
     Specialists --> Info[Informações]
+    Specialists -->|Precisa esclarecimento| Question
     Farm --> Data[MCP de dados]
     Secretary --> Email[MCP de e-mail]
     Analyst --> Prediction[MCP de predição]
@@ -83,8 +87,8 @@ flowchart TD
     A2A --> Merge
     Merge --> Judge[Juiz e validações]
     Judge --> Decision{Resultado}
-    Decision -->|Atendido| Answer[Resposta com fontes e limitações]
-    Decision -->|Falta esclarecimento| Question
+    Decision -->|Aprovado| OutputGuard[Guardrail de saída]
+    OutputGuard --> Answer[Resposta final]
     Decision -->|Revisar texto dentro dos limites| Merge
     Decision -->|Limite ou evidência insuficiente| Partial[Resposta parcial ou abstenção]
 ```

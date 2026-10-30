@@ -8,10 +8,11 @@ explicativos e não devem ser copiados como documentos válidos.
 As estruturas do `main_api`, do MCP de e-mail e da observabilidade são definidas
 pelo código deste repositório. O MCP de dados lê duas collections de negócio; a
 estrutura completa delas é controlada pelo produtor desses dados e não pode ser
-deduzida integralmente daqui. Datas persistidas são datas BSON em UTC. O
-`main_api` representa UUIDs como strings canônicas, exceto nos documentos de
-checkpoints geridos pelo LangGraph. O MCP de dados aceita IDs relacionais como
-string ou UUID BSON, conforme configuração.
+deduzida integralmente daqui. Datas dos campos externos são BSON em UTC; objetos
+serializados em modo JSON, como `envelope` e `prepared_report`, usam strings ISO
+8601 para suas datas. O `main_api` representa UUIDs como strings canônicas,
+exceto nos documentos de checkpoints geridos pelo LangGraph. O MCP de dados
+aceita IDs relacionais como string ou UUID BSON, conforme configuração.
 
 ## Inventário
 
@@ -195,8 +196,9 @@ interação que justificam cada preferência.
 ### `ai_report_artifacts`
 
 Guarda o envelope assinado de um relatório separado do estado visível ao agente.
-As leituras exigem usuário, sessão e interação correspondentes. `purge_at` é
-usado pelo índice TTL e fica um dia após `expires_at`.
+As leituras são vinculadas ao usuário e à sessão; algumas operações também
+exigem interação e tarefa correspondentes. `purge_at` é usado pelo índice TTL e
+fica um dia após `expires_at`.
 
 ```jsonc
 {
@@ -218,7 +220,7 @@ usado pelo índice TTL e fica um dia após `expires_at`.
 		"principal_user_id": "<internal user UUID>",
 		"authorized_property_ids": ["<farm UUID>"],
 		"source_service": "mcp_data",
-		"valid_until": "<BSON UTC datetime>",
+		"valid_until": "<ISO 8601 UTC datetime string>",
 		"payload_hash": "<hash>",
 		"signature": "<signature>",
 		"signature_key_id": "<key ID>",
@@ -262,8 +264,8 @@ conforme `purge_at`. Os MCPs mantêm suas collections próprias.
 				"size_bytes": 1,
 			},
 		],
-		"created_at": "<BSON UTC datetime>",
-		"expires_at": "<BSON UTC datetime>",
+		"created_at": "<ISO 8601 UTC datetime string>",
+		"expires_at": "<ISO 8601 UTC datetime string>",
 		"unresolved": [],
 	},
 }
@@ -284,6 +286,7 @@ usado para rejeitar respostas atrasadas. `purge_at` é um dia após a validade.
 ```jsonc
 {
 	"_id": "<question UUID>",
+	"record_type": "pending_resolution",
 	"principal_user_id": "<internal user UUID>",
 	"session_id": "<session UUID>",
 	"interaction_id": "<interaction UUID>",
@@ -314,6 +317,7 @@ ficam vinculados à autorização.
 ```jsonc
 {
 	"_id": "<authorization UUID>",
+	"record_type": "authorization",
 	"principal_user_id": "<internal user UUID>",
 	"session_id": "<session UUID>",
 	"source_interaction_id": "<interaction UUID>",
@@ -329,6 +333,26 @@ ficam vinculados à autorização.
 	"question_id": "<question UUID or null>",
 	"question_expires_at": "<BSON UTC datetime or null>",
 	"purge_at": "<expires_at plus one day>",
+}
+```
+
+### Referência de operação
+
+A referência é mantida por 31 dias a partir de `recorded_at`; o índice TTL usa
+`purge_at`. O último estado conhecido pode ser nulo antes de uma consulta
+confirmada.
+
+```jsonc
+{
+	"_id": "operation:<authorization UUID>",
+	"record_type": "operation_reference",
+	"principal_user_id": "<internal user UUID>",
+	"session_id": "<session UUID>",
+	"operation_id": "<MCP operation UUID>",
+	"recorded_at": "<BSON UTC datetime>",
+	"last_known_status": "<dispatch status or null>",
+	"last_known_updated_at": "<BSON UTC datetime or null>",
+	"purge_at": "<recorded_at plus 31 days>",
 }
 ```
 
@@ -613,6 +637,24 @@ documento de origem são ignorados pelo modelo.
 ```
 
 ## Observações sobre evolução e leitura
+
+### Índices criados pela aplicação
+
+Além dos índices `_id` do Mongo, as sessões usam `ix_sessions_owner_created`; as
+interações, `uq_interaction_deduplication` (único por sessão, tipo e chave) e
+`ix_interaction_session_status`. Mensagens usam `uq_message_session_sequence` e
+`ix_message_owner_session_sequence`; eventos usam
+`ix_execution_session_interaction` e `ix_execution_invocation_correlation`.
+Artefatos usam `ix_report_artifacts_execution` e `ttl_report_artifacts` em
+`purge_at`.
+
+Em `ai_email_workflows`, os índices únicos `uq_email_workflow_preparation`,
+`uq_email_workflow_pending` e `uq_email_workflow_authorization` usam filtros
+parciais por `record_type`; `ttl_email_workflows` usa `purge_at`. O MCP de
+e-mail cria `uq_dispatch_idempotency_key` em `idempotency_key`. Observações usam
+índices por correlação, interação, sessão, `started_at` e `updated_at`; os nomes
+e chaves completos estão em `packages/observability/mongo_repository.py`. Os
+índices internos do checkpointer são controlados pela biblioteca instalada.
 
 - A documentação registra os documentos que o código serializa ou valida; os
   exemplos não criam validação adicional nem alteram contratos de API.

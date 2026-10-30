@@ -16,6 +16,14 @@ O A2A usa `OPENAI_MODEL_SPECIALIST` para respostas documentais e
 e Voyage como vetores nomeados separados na mesma coleção. Saídas estruturadas
 são solicitadas por JSON Schema nativo.
 
+No modo `provider`, a Main API também avalia a entrada pelo Jev, com Decisions
+como fallback. Configure `JEV_URL`, `JEV_API_KEY`, `JEV_MODEL`, `DECISIONS_URL`,
+`DECISIONS_MODEL` e `OPENAI_API_KEY` no `.env` da raiz; as URLs são endpoints
+completos. Se ambos falharem ou estiverem sem configuração, a entrada é
+bloqueada por indisponibilidade. O modo `simulated` usa apenas o guardrail
+determinístico. Limiares, timeout e tarifas estão descritos no
+[fluxo de agentes](../../apps/main_api/docs/agent-workflow.md).
+
 Opcionalmente, `ANTHROPIC_API_KEY` habilita fallback de respostas: configure
 `ANTHROPIC_MODEL_FAST_FALLBACK` para o papel rápido e
 `ANTHROPIC_MODEL_SPECIALIST_FALLBACK` para especialistas da Main API e respostas

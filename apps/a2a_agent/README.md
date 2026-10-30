@@ -5,8 +5,8 @@ Guia vigente da interface A2A JSON-RPC 1.0.0. Contratos tipados em
 
 Serviço isolado que expõe as skills Documental e Legal por A2A e consulta o
 corpus global de leis e termos/condições. O artefato contém somente
-`apps/a2a_agent` e os contratos e primitivas de segurança compartilhados; não
-instala nem importa o `main_api` ou outros MCPs.
+`apps/a2a_agent` e os pacotes compartilhados de contratos, segurança e
+observabilidade; não instala nem importa o `main_api` ou outros MCPs.
 
 O runtime usa Python 3.14.3, o SDK A2A, Starlette/Uvicorn, Pydantic, HTTPX,
 Qdrant e PostgreSQL. MongoDB, Redis e LangSmith são opcionais para

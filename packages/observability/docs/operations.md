@@ -116,11 +116,14 @@ do provider ou gateway configurado: `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
 `MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS`. Chat exige tokens de
 entrada e saída e ambas as tarifas do perfil; embedding usa somente entrada. O
 custo explícito do provider tem precedência. Sem contagens ou tarifas
-necessárias, o custo fica ausente. A estimativa não reconcilia faturas e não
-considera preços diferenciados de tokens cacheados. Providers podem retornar
-tokens sem preço por chamada. Algumas bibliotecas fazem retries internos
-invisíveis: consulte `attempt_visibility` e `attempt_reason` e não interprete
-contagem de spans como contagem exata de chamadas faturadas.
+necessárias, o custo fica ausente. As tentativas Jev e Decisions usam tarifas
+próprias `JEV_INPUT_COST_PER_MILLION_TOKENS`,
+`JEV_OUTPUT_COST_PER_MILLION_TOKENS`, `DECISIONS_INPUT_COST_PER_MILLION_TOKENS`
+e `DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS`. A estimativa não reconcilia
+faturas e não considera preços diferenciados de tokens cacheados. Providers
+podem retornar tokens sem preço por chamada. Algumas bibliotecas fazem retries
+internos invisíveis: consulte `attempt_visibility` e `attempt_reason` e não
+interprete contagem de spans como contagem exata de chamadas faturadas.
 
 As filas são limitadas e mantidas somente em memória. Observações podem se
 perder quando a fila enche, o processo encerra antes do flush, Mongo fica
@@ -168,9 +171,9 @@ $env:USER_USAGE_REDIS_KEY_PREFIX = "argos:usage:users:v1"
 python scripts/observability/rank_usage_24h.py
 ```
 
-O relatório inclui nome e e-mail e fornece ordenações por chamadas e por tokens,
-além de chamadas de modelo com contagem de tokens incompleta. Ele inclui somente
-usuários cujas chaves ainda não expiraram e marca
+O relatório inclui nome e e-mail e fornece ordenações por chamadas, tokens e
+custo USD conhecido, além de contadores de tokens e custos incompletos. Ele
+inclui somente usuários cujas chaves ainda não expiraram e marca
 `completeness=best_effort_incomplete`; não é um ledger de faturamento nem um
 histórico durável.
 
