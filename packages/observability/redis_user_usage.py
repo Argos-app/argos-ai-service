@@ -7,6 +7,17 @@ from typing import Any
 from uuid import UUID
 
 _TTL_SECONDS = 24 * 60 * 60
+_DEFAULT_FIELDS = {
+    "name": "",
+    "email": "",
+    "calls": 0,
+    "tokens": 0,
+    "model_calls": 0,
+    "unknown_token_calls": 0,
+    "cost_usd": "0",
+    "known_cost_calls": 0,
+    "unknown_cost_calls": 0,
+}
 
 
 class RedisUserUsageCounter:
@@ -27,6 +38,8 @@ class RedisUserUsageCounter:
             field: value for field, value in (("name", name), ("email", email)) if value is not None
         }
         async with self._client.pipeline(transaction=True) as pipeline:
+            for field, value in _DEFAULT_FIELDS.items():
+                pipeline.hsetnx(key, field, value)
             if identity:
                 pipeline.hset(key, mapping=identity)
             pipeline.hincrby(key, "calls", 1)
@@ -48,12 +61,18 @@ class RedisUserUsageCounter:
         token_count, complete = _reported_token_count(usage)
         cost = _usd_cost(billing)
         script = """
+        for i = 6, #ARGV, 2 do
+            redis.call('HSETNX', KEYS[1], ARGV[i], ARGV[i + 1])
+        end
+        redis.call('EXPIRE', KEYS[1], ARGV[4])
         if redis.call('SADD', KEYS[2], ARGV[1]) == 0 then return 0 end
         redis.call('EXPIRE', KEYS[2], ARGV[4])
         redis.call('HINCRBY', KEYS[1], 'model_calls', 1)
         if ARGV[5] ~= 'unknown' then
             redis.call('HINCRBYFLOAT', KEYS[1], 'cost_usd', ARGV[5])
             redis.call('HINCRBY', KEYS[1], 'known_cost_calls', 1)
+        else
+            redis.call('HINCRBY', KEYS[1], 'unknown_cost_calls', 1)
         end
         if ARGV[2] == 'unknown' then
             redis.call('HINCRBY', KEYS[1], 'unknown_token_calls', 1)
@@ -76,6 +95,7 @@ class RedisUserUsageCounter:
             "true" if complete else "false",
             _TTL_SECONDS,
             str(cost) if cost is not None else "unknown",
+            *(item for pair in _DEFAULT_FIELDS.items() for item in pair),
         )
 
     async def list_users(self) -> list[dict[str, int | str | None]]:
@@ -94,18 +114,15 @@ class RedisUserUsageCounter:
             rows.append(
                 {
                     "user_id": key.removeprefix(f"{self._key_prefix}:"),
-                    "name": values.get("name"),
-                    "email": values.get("email"),
+                    "name": values.get("name", ""),
+                    "email": values.get("email", ""),
                     "calls": int(values.get("calls", 0)),
                     "tokens": int(values.get("tokens", 0)),
                     "model_calls": int(values.get("model_calls", 0)),
                     "unknown_token_calls": int(values.get("unknown_token_calls", 0)),
-                    "cost_usd": values.get("cost_usd"),
+                    "cost_usd": values.get("cost_usd", "0"),
                     "known_cost_calls": int(values.get("known_cost_calls", 0)),
-                    "unknown_cost_calls": max(
-                        0,
-                        int(values.get("model_calls", 0)) - int(values.get("known_cost_calls", 0)),
-                    ),
+                    "unknown_cost_calls": int(values.get("unknown_cost_calls", 0)),
                 }
             )
         rows.sort(key=lambda row: (int(row["tokens"]), int(row["calls"])), reverse=True)

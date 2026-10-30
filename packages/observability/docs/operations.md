@@ -132,25 +132,25 @@ retenção e exclusão são decisão operacional.
 O Redis mantém um hash por `user_id`, compartilhado pelo `main_api` e pelo A2A.
 O campo `cost_usd` soma custos conhecidos em dólares, informados pelo provider
 ou estimados pelas tarifas configuradas. `known_cost_calls` e
-`unknown_cost_calls` indicam a cobertura dessa soma; hashes anteriores à
-inclusão de custos são considerados desconhecidos. O ranking inclui
+`unknown_cost_calls` indicam a cobertura dessa soma. O ranking inclui
 `by_cost_usd` e o total é parcial quando existem custos desconhecidos. O Redis
 usa ponto flutuante e os valores servem à observação de uso, não à cobrança
 financeira. O hash também armazena `name` e `email`, atualizados pelo `main_api`
 a partir do cadastro PostgreSQL carregado em cada requisição autenticada. Esses
 campos acompanham o TTL do hash; atualizações de tokens pelo A2A preservam a
-identidade. Hashes antigos ou criados somente por observações podem não ter
-esses campos: o ranking retorna `null` até a próxima chamada autenticada do
-usuário. Cada requisição com identidade válida incrementa `calls`; cada
-observação terminal de modelo/embedding incrementa `model_calls` e soma os
-tokens conhecidos. Quando o provider não retorna tokens completos, o sistema
-soma o que conhece e incrementa `unknown_token_calls`. Os tokens são
-deduplicados pelo ID da observação. O hash expira 24 horas depois do último
-incremento; cada atualização renova o TTL. Isso mede uso acumulado durante a
-atividade recente do usuário, e não uma janela móvel exata de 24 horas. Os
-contadores são independentes do registro Mongo, mas são best effort: falhas
-Redis, encerramentos antes do flush da fila ou reinício do Redis podem perder
-incrementos. O Redis do Compose local não persiste em disco.
+identidade. Cada atualização inicializa os campos ausentes do hash com texto
+vazio ou zero, sem sobrescrever os valores existentes. Um custo zero só deve ser
+interpretado junto dos contadores de custos conhecidos e desconhecidos. Cada
+requisição com identidade válida incrementa `calls`; cada observação terminal de
+modelo/embedding incrementa `model_calls` e soma os tokens conhecidos. Quando o
+provider não retorna tokens completos, o sistema soma o que conhece e incrementa
+`unknown_token_calls`. Os tokens são deduplicados pelo ID da observação. O hash
+expira 24 horas depois do último incremento; cada atualização renova o TTL. Isso
+mede uso acumulado durante a atividade recente do usuário, e não uma janela
+móvel exata de 24 horas. Os contadores são independentes do registro Mongo, mas
+são best effort: falhas Redis, encerramentos antes do flush da fila ou reinício
+do Redis podem perder incrementos. O Redis do Compose local não persiste em
+disco.
 
 Para execução individual, configure `MAIN_API_OBSERVABILITY_REDIS_URL` e/ou
 `A2A_OBSERVABILITY_REDIS_URL` para o mesmo Redis e o mesmo
