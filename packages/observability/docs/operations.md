@@ -130,9 +130,15 @@ operação não ocorreu. Mongo não aplica TTL à collection de observabilidade;
 retenção e exclusão são decisão operacional.
 
 O Redis mantém um hash por `user_id`, compartilhado pelo `main_api` e pelo A2A.
-O hash também armazena `name` e `email`, atualizados pelo `main_api` a partir do
-cadastro PostgreSQL carregado em cada requisição autenticada. Esses campos
-acompanham o TTL do hash; atualizações de tokens pelo A2A preservam a
+O campo `cost_usd` soma custos conhecidos em dólares, informados pelo provider
+ou estimados pelas tarifas configuradas. `known_cost_calls` e
+`unknown_cost_calls` indicam a cobertura dessa soma; hashes anteriores à
+inclusão de custos são considerados desconhecidos. O ranking inclui
+`by_cost_usd` e o total é parcial quando existem custos desconhecidos. O Redis
+usa ponto flutuante e os valores servem à observação de uso, não à cobrança
+financeira. O hash também armazena `name` e `email`, atualizados pelo `main_api`
+a partir do cadastro PostgreSQL carregado em cada requisição autenticada. Esses
+campos acompanham o TTL do hash; atualizações de tokens pelo A2A preservam a
 identidade. Hashes antigos ou criados somente por observações podem não ter
 esses campos: o ranking retorna `null` até a próxima chamada autenticada do
 usuário. Cada requisição com identidade válida incrementa `calls`; cada

@@ -215,6 +215,7 @@ class MongoObservationWriter:
                         user_id,
                         document.get("usage"),
                         observation_id=document.get("_id"),
+                        billing=document.get("billing"),
                     )
             except Exception:
                 self._report("redis_user_usage_write_failed")
