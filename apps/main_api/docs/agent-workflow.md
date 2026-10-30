@@ -93,3 +93,31 @@ O contexto inclui até 12.000 caracteres, 20 mensagens recentes e leitura de at�
 200 mensagens. Os limites de chamadas, tempo e saída são definidos na
 configuração de execução; consulte `app/application/execution_limits.py` e
 `app/session_config.py`.
+
+## Avaliação de risco da entrada
+
+No modo `provider`, a entrada é validada e sanitizada deterministicamente antes
+de ser avaliada pelo Jev. O Decisions (`gpt-6-luna`) é consultado somente quando
+o Jev falha ou retorna decisão inválida. Uma decisão válida de bloqueio encerra
+a avaliação. Os critérios são tentativa de injeção de instruções e ofensa ou
+assédio dirigido; citações e relatos não são, por si, ataques. A avaliação não
+determina autorização, completude, roteamento ou uso de ferramentas.
+
+Uma entrada arriscada recebe “Não posso atender a essa entrada por motivos de
+segurança.”; se ambos os provedores falharem, recebe “A verificação de segurança
+está temporariamente indisponível. Tente novamente mais tarde.” O resultado usa
+o fluxo assíncrono existente. Respostas de esclarecimento bloqueadas mantêm a
+pergunta pendente. No modo `simulated`, apenas as validações determinísticas são
+executadas. Classificação probabilística pode produzir erros e não substitui as
+verificações de identidade e autorização.
+
+Configure `JEV_URL`, `JEV_API_KEY`, `JEV_MODEL`, `DECISIONS_URL`,
+`OPENAI_API_KEY`, `DECISIONS_MODEL`, `INPUT_RISK_THRESHOLD` (0 < valor ≤ 1) e
+`INPUT_RISK_TIMEOUT_SECONDS` (0 < valor ≤ 120). Cada URL é o endpoint completo
+do provedor. Credenciais ou URLs ausentes provocam falha da tentativa
+respectiva; sem decisão válida a entrada é bloqueada. As tarifas opcionais em
+USD por milhão de tokens são `JEV_INPUT_COST_PER_MILLION_TOKENS`,
+`JEV_OUTPUT_COST_PER_MILLION_TOKENS`, `DECISIONS_INPUT_COST_PER_MILLION_TOKENS`
+e `DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS`. Custos desconhecidos permanecem
+desconhecidos. Cada tentativa usa a collection existente de observabilidade; seu
+trace contém somente metadados técnicos, sem entrada ou credenciais.

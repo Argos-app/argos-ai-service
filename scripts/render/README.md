@@ -123,7 +123,10 @@ preenchidos com as URLs e credenciais dos provedores ou gateways escolhidos.
 - No `main_api`, configure `APP_ENV=development` em HM e `APP_ENV=production` em
   produção, além de `AUTH_MODE=jwt`. Configure Firebase, PostgreSQL de
   identidade, Mongo replica set, modelos e chaves próprias de acesso/delegação.
-  Os valores locais `APP_ENV=local` e `AUTH_MODE=stub` não servem para cloud.
+  Configure também os endpoints, modelos, credenciais, limiar, timeout e tarifas
+  de risco listados no `.env.example`; sem decisão válida dos provedores a
+  entrada é bloqueada. Os valores locais `APP_ENV=local` e `AUTH_MODE=stub` não
+  servem para cloud.
 - Use bancos, collections/índices, Qdrant, SMTP e credenciais adequados a cada
   ambiente. O pipeline não provisiona nem migra essas dependências.
 - Para predição, configure `MCP_PREDICTION_COVERAGE_RELATION` com uma view de

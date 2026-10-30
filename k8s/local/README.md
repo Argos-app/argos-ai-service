@@ -216,3 +216,8 @@ Pods estarem prontos, execute os testes E2E documentados pelo API principal e os
 testes de integração das aplicações a partir do host. Um cluster com Pods Ready
 confirma disponibilidade e conectividade básica, não o aceite de todos os fluxos
 de negócio.
+
+Para experimentar o modo `provider`, defina `MAIN_API_MODEL_MODE=provider` no
+deployment e crie o Secret opcional `argos-input-risk` com as variáveis de risco
+documentadas em `apps/main_api/.env.example`. Sem provedores configurados, o
+grafo bloqueia entradas por indisponibilidade. O padrão local é `simulated`.

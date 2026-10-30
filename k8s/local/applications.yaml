@@ -26,6 +26,142 @@ spec:
                       - { name: APP_ENV, value: local }
                       - { name: AUTH_MODE, value: stub }
                       - { name: MAIN_API_MODEL_MODE, value: simulated }
+                      - {
+                            name: JEV_URL,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-input-risk, key: JEV_URL, optional: true },
+                                },
+                        }
+                      - {
+                            name: JEV_API_KEY,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: JEV_API_KEY,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: JEV_MODEL,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        { name: argos-input-risk, key: JEV_MODEL, optional: true },
+                                },
+                        }
+                      - {
+                            name: DECISIONS_URL,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: DECISIONS_URL,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: OPENAI_API_KEY,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: OPENAI_API_KEY,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: DECISIONS_MODEL,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: DECISIONS_MODEL,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: INPUT_RISK_THRESHOLD,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: INPUT_RISK_THRESHOLD,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: INPUT_RISK_TIMEOUT_SECONDS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: INPUT_RISK_TIMEOUT_SECONDS,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: JEV_INPUT_COST_PER_MILLION_TOKENS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: JEV_INPUT_COST_PER_MILLION_TOKENS,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: JEV_OUTPUT_COST_PER_MILLION_TOKENS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: JEV_OUTPUT_COST_PER_MILLION_TOKENS,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: DECISIONS_INPUT_COST_PER_MILLION_TOKENS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: DECISIONS_INPUT_COST_PER_MILLION_TOKENS,
+                                            optional: true,
+                                        },
+                                },
+                        }
+                      - {
+                            name: DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-input-risk,
+                                            key: DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS,
+                                            optional: true,
+                                        },
+                                },
+                        }
                       - { name: MAIN_API_MONGO_URI, value: "mongodb://mongo:27017/?replicaSet=rs0" }
                       - {
                             name: MAIN_API_MONGO_DATABASE,
