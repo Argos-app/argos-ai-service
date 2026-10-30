@@ -41,3 +41,7 @@ em `X-Argos-Delegation`. As tools recebem `payload` tipado e incluem:
 Os modelos de entrada e saída estão em `packages/contracts` e nos schemas usados
 pelo servidor. `get_lot_report_source` retorna um envelope assinado de curta
 validade; o MCP não envia e-mails.
+
+A consulta de aplicações usa `application.active`, definido no schema de
+referência `argos-data-engineering/modulos/criacao_banco_completo.sql`. O filtro
+`active` é opcional e a resposta informa o valor armazenado.

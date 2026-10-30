@@ -22,6 +22,12 @@ conciliado por um processo administrativo externo. A revogação do Firebase é
 verificada na troca; um JWT próprio já emitido pode continuar válido até
 expirar, com TTL padrão de cinco minutos e limite definido nas configurações.
 
+No schema de referência `modulos/criacao_banco_completo.sql` do repositório
+`argos-data-engineering`, `firebase_uid` e `blocked_until` pertencem a
+`app_user`. A consulta de autorização usa esses campos diretamente. Um
+dicionário de dados que os omita ou coloque o bloqueio em outra tabela precisa
+ser atualizado para refletir esse schema.
+
 ## Regras de acesso
 
 O usuário e sua permissão cadastrada devem estar ativos, sem bloqueio vigente; a

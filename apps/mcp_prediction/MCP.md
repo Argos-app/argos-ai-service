@@ -62,6 +62,19 @@ desconhecida. Meses sem eventos registrados entram como zero observado, mas não
 provam que não houve aplicações fora do banco. Produtos sem histórico não
 recebem estimativa zero.
 
+O schema de referência em
+`argos-data-engineering/modulos/criacao_banco_completo.sql` define
+`application.active`; a consulta considera somente aplicações ativas. Esse
+schema não define uma fonte de cobertura histórica. Para habilitar uma
+estimativa com dados reais, o responsável pelos dados deve disponibilizar uma
+view de leitura confiável com `property_id` (UUID), `coverage_start` e
+`coverage_end` (DATE, inclusivos) e `evidence_source` (texto), e configurar
+`MCP_PREDICTION_COVERAGE_RELATION` com seu nome. A view deve representar a
+completude efetiva do histórico, inclusive períodos sem aplicações. Na ausência
+da relação configurada, a cobertura é desconhecida e não há estimativa numérica.
+A view `local_prediction_coverage` usa dados sintéticos e serve apenas à pilha
+local; ela não constitui evidência de cobertura em produção.
+
 ## Autenticação e acesso
 
 Cada chamada em `/mcp` exige ambos os headers:
