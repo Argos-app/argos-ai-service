@@ -70,12 +70,12 @@ class MongoObservationRepository:
             if incoming_status == ObservationStatus.STARTED.value:
                 if existing_status != ObservationStatus.STARTED.value:
                     return
-                if _without_updated_at(existing) == _without_updated_at(document):
+                if _documents_equal(existing, document):
                     return
                 raise ObservationConflictError("início divergente para o mesmo ID")
 
             if existing_status != ObservationStatus.STARTED.value:
-                if _without_updated_at(existing) == _without_updated_at(document):
+                if _documents_equal(existing, document):
                     return
                 raise ObservationConflictError("término divergente para o mesmo ID")
 
@@ -115,6 +115,21 @@ def _without_updated_at(document: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in document.items() if key != "updated_at"}
 
 
+def _comparable_datetime(value: Any) -> Any:
+    """Treat PyMongo's default naive UTC datetimes as equivalent to aware UTC values."""
+    if not isinstance(value, datetime):
+        return value
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _documents_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return {
+        key: _comparable_datetime(value) for key, value in _without_updated_at(left).items()
+    } == {key: _comparable_datetime(value) for key, value in _without_updated_at(right).items()}
+
+
 def _same_attempt_identity(existing: dict[str, Any], incoming: dict[str, Any]) -> bool:
     identity_fields = (
         "_id",
@@ -134,4 +149,7 @@ def _same_attempt_identity(existing: dict[str, Any], incoming: dict[str, Any]) -
         "execution_mode",
         "started_at",
     )
-    return all(existing.get(field) == incoming.get(field) for field in identity_fields)
+    return all(
+        _comparable_datetime(existing.get(field)) == _comparable_datetime(incoming.get(field))
+        for field in identity_fields
+    )
