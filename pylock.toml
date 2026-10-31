@@ -982,14 +982,14 @@ sha256 = "b56d5d686b5a03ba4f4db5e769dc32336e142fc3bd4d68a8c25579ebb0a67304"
 
 [[packages]]
 name = "pyasn1"
-version = "0.6.4"
+version = "0.6.5"
 
 [[packages.wheels]]
-name = "pyasn1-0.6.4-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/9a/3b/6163796d69c3977d1e4287bea4a6979161cbbdd170ebb430511e8e1999ce/pyasn1-0.6.4-py3-none-any.whl"
+name = "pyasn1-0.6.5-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/19/1f/3eefd5c84c35cae44549ce1c7f7e58f7945b34f5a6bce07a135438522073/pyasn1-0.6.5-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b"
+sha256 = "4017b0fce125096b8573b39c989fdb1a4b19cf761e683398184550fea0e66587"
 
 [[packages]]
 name = "pyasn1-modules"
@@ -1103,14 +1103,14 @@ sha256 = "ece8c00a69cf01b45d0b1dedabb469c90d8caf996d4fda40f147627a122849a4"
 
 [[packages]]
 name = "pypdf"
-version = "6.21.2"
+version = "6.21.4"
 
 [[packages.wheels]]
-name = "pypdf-6.21.2-py3-none-any.whl"
-url = "https://files.pythonhosted.org/packages/1b/4d/c9d2d67f204eff463237a1a8f5e25a6923b7b1043982b91fcaf104c8ef60/pypdf-6.21.2-py3-none-any.whl"
+name = "pypdf-6.21.4-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/3f/4b/77e8ad4ac42c9d93600f40541a50e9feb3a61d2bbee2d76f659346072051/pypdf-6.21.4-py3-none-any.whl"
 
 [packages.wheels.hashes]
-sha256 = "1d44d1a3a200f25062adff0085b02040e4646431ac2ccac22e42679e91466084"
+sha256 = "33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c"
 
 [[packages]]
 name = "pytest"
