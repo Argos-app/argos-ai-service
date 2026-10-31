@@ -50,16 +50,6 @@ def test_mongo_collection_names_are_fixed(monkeypatch):
     assert settings.mongo_medicine_collection == "medicine_documents"
 
 
-def test_mongo_collection_names_are_fixed(monkeypatch):
-    monkeypatch.setenv("MCP_DATA_MONGO_CATTLE_COLLECTION", "override_cattle")
-    monkeypatch.setenv("MCP_DATA_MONGO_MEDICINE_COLLECTION", "override_medicine")
-
-    settings = Settings.from_env()
-
-    assert settings.mongo_cattle_collection == "cattle_documents"
-    assert settings.mongo_medicine_collection == "medicine_documents"
-
-
 def test_runtime_rejects_missing_read_only_connections_and_auth() -> None:
     with pytest.raises(ValueError, match="MCP_DATA_SQL_DSN"):
         create_mcp_server(Settings())
