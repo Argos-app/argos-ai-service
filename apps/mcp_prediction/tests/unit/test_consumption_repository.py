@@ -377,7 +377,7 @@ async def test_scope_expired_while_query_runs_cannot_return_data(monkeypatch):
     reader = AsyncMock()
     reader.fetch_all.return_value = [aggregate_row(scope, medicine)]
     clock = AsyncMock()
-    clock.now = lambda tz: scope.expires_at + timedelta(seconds=1)
+    clock.now = lambda _tz: scope.expires_at + timedelta(seconds=1)
 
     async def expire(*args):
         monkeypatch.setattr(

@@ -115,13 +115,17 @@ pergunta pendente. No modo `simulated`, apenas as validações determinísticas 
 executadas. Classificação probabilística pode produzir erros e não substitui as
 verificações de identidade e autorização.
 
-Configure `JEV_URL`, `JEV_API_KEY`, `JEV_MODEL`, `DECISIONS_URL`,
-`OPENAI_API_KEY`, `DECISIONS_MODEL`, `INPUT_RISK_THRESHOLD` (0 < valor ≤ 1) e
-`INPUT_RISK_TIMEOUT_SECONDS` (0 < valor ≤ 120). Cada URL é o endpoint completo
-do provedor. Credenciais ou URLs ausentes provocam falha da tentativa
-respectiva; sem decisão válida a entrada é bloqueada. As tarifas opcionais em
-USD por milhão de tokens são `JEV_INPUT_COST_PER_MILLION_TOKENS`,
+Configure `JEV_URL`, `JEV_MODEL`, `OPENROUTER_API_KEY`, `DECISIONS_URL`,
+`OPENAI_API_KEY` e `DECISIONS_MODEL`, além de `INPUT_RISK_THRESHOLD` (0 < valor
+≤ 1). JEV usa a Decisions API do OpenRouter; a chave OpenRouter também atende o
+fallback Anthropic. `DECISIONS_URL` aponta para a API oficial da OpenAI. Cada
+URL é o endpoint completo. Credenciais ou URLs ausentes provocam falha da
+tentativa respectiva; sem decisão válida a entrada é bloqueada. As tarifas
+opcionais em USD por milhão de tokens são `JEV_INPUT_COST_PER_MILLION_TOKENS`,
 `JEV_OUTPUT_COST_PER_MILLION_TOKENS`, `DECISIONS_INPUT_COST_PER_MILLION_TOKENS`
 e `DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS`. Custos desconhecidos permanecem
 desconhecidos. Cada tentativa usa a collection existente de observabilidade; seu
 trace contém somente metadados técnicos, sem entrada ou credenciais.
+
+Os timeouts de avaliação são fixos no código e não exigem configuração no
+ambiente.

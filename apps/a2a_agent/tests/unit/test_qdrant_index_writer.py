@@ -238,7 +238,7 @@ def test_upsert_rejects_invalid_revision_duplicate_ids_and_wrong_vector_size() -
     assert client.upsert_calls == []
 
 
-def test_upsert_and_remove_are_scoped_to_exact_staging_generation() -> None:
+def test_upsert_is_scoped_to_exact_staging_generation() -> None:
     client = FakeQdrantClient()
     adapter = writer(client)
     item = indexed_chunk()
@@ -249,14 +249,6 @@ def test_upsert_and_remove_are_scoped_to_exact_staging_generation() -> None:
     assert upsert_collection == f"documents__g_{corpus_revision}"
     assert points[0].payload["corpus_revision"] == corpus_revision
     assert points[0].payload["revision_hash"] == REVISION
-
-    run_immediate(adapter.remove_document(REVISION, item.chunk.document_id))
-
-    collection, selector, wait = client.delete_calls[0]
-    assert collection == f"documents__g_{REVISION}"
-    assert selector.filter.must[0].key == "document_id"
-    assert selector.filter.must[0].match.value == str(item.chunk.document_id)
-    assert wait is True
 
 
 def test_copy_documents_reuses_vectors_and_refreshes_payload_for_next_generation() -> None:

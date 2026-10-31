@@ -6,10 +6,11 @@ Compose integrado, `ai_observations` e `ai_a2a_observations` são ativadas por
 padrão. Em execução individual, configure `MAIN_API_MONGO_URI` no `main_api`;
 para observações do A2A, configure `A2A_OBSERVABILITY_MONGO_URI` e, se
 necessário, `A2A_OBSERVABILITY_MONGO_DATABASE`. Os nomes das collections são
-fixos no código. Os demais limites da fila podem ser ajustados pelas variáveis
-`MAIN_API_OBSERVABILITY_*` e `A2A_OBSERVABILITY_*` mostradas nos respectivos
-`.env.example`. Não é necessário configurar `LANGSMITH_API_KEY` para usar Mongo
-ou o ranking local.
+fixos no código. Tamanho da fila e atraso entre retentativas podem ser ajustados
+pelos exemplos de configuração de cada serviço. O lote do writer é fixo em 100
+observações. Timeouts, quantidade de tentativas e prazo de encerramento também
+são políticas fixas, sem variáveis de ambiente. Não é necessário configurar
+`LANGSMITH_API_KEY` para usar Mongo ou o ranking local.
 
 ## Privacidade e tracing
 

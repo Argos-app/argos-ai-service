@@ -14,8 +14,6 @@ from .consumption import (
     ConsumptionGroup,
     ConsumptionState,
     ConsumptionUnit,
-    CoverageRecord,
-    CoverageState,
     MonthlyConsumptionRecord,
     MonthlyConsumptionSummary,
     PredictionWindows,
@@ -80,53 +78,13 @@ def _calendar_days(start: date, end: date) -> dict[int, int]:
     return counts
 
 
-def coverage_failure_reason(
-    coverage: CoverageRecord | None,
-    *,
-    property_id: UUID,
-    windows: PredictionWindows,
-) -> str | None:
-    """Cobertura só é utilizável com evidência explícita cobrindo o ano completo."""
-    _validate_windows(windows)
-    if coverage is None:
-        return "cobertura histórica não comprovada"
-    if not isinstance(coverage, CoverageRecord) or coverage.property_id != property_id:
-        raise InvalidConsumptionDataError("evidência de cobertura externa à propriedade")
-    if not isinstance(coverage.state, CoverageState):
-        raise InvalidConsumptionDataError("estado de cobertura inválido")
-    if coverage.state != CoverageState.CONFIRMED:
-        return coverage.reason or "cobertura histórica desconhecida ou incompleta"
-    if (
-        not isinstance(coverage.source, str)
-        or not coverage.source.strip()
-        or coverage.start is None
-        or coverage.end is None
-    ):
-        return "cobertura confirmada sem fonte ou janela de evidência"
-    if (
-        type(coverage.start) is not date
-        or type(coverage.end) is not date
-        or coverage.start > coverage.end
-    ):
-        raise InvalidConsumptionDataError("janela de cobertura inválida")
-    if coverage.start > windows.history_start or coverage.end < windows.history_end:
-        return "evidência não cobre todo o ano histórico"
-    return None
-
-
 def calculate_consumption(
     group: ConsumptionGroup,
     records: tuple[MonthlyConsumptionRecord, ...],
     *,
-    coverage: CoverageRecord | None,
     windows: PredictionWindows,
 ) -> ConsumptionCalculation:
-    """Calcula um grupo isolado pela distribuição mensal do histórico disponível.
-
-    Somente cobertura explícita, confiável e completa permite tratar meses sem
-    eventos como zero. Com cobertura desconhecida/incompleta, são reportados
-    apenas os totais observados e nenhuma estimativa é liberada.
-    """
+    """Calcula um grupo pela distribuição mensal do histórico disponível."""
     _validate_windows(windows)
     if (
         not isinstance(group, ConsumptionGroup)
@@ -135,10 +93,6 @@ def calculate_consumption(
         or not isinstance(group.unit, ConsumptionUnit)
     ):
         raise InvalidConsumptionDataError("grupo de consumo inválido")
-    coverage_reason = coverage_failure_reason(
-        coverage, property_id=group.property_id, windows=windows
-    )
-    coverage_confirmed = coverage_reason is None
     by_month = {}
     for record in records:
         if (
@@ -157,14 +111,13 @@ def calculate_consumption(
         ):
             raise InvalidConsumptionDataError("histórico mensal inconsistente")
         by_month[record.month] = record
-    reason = "medicamento sem histórico de aplicações na janela" if not records else coverage_reason
+    reason = "medicamento sem histórico de aplicações na janela" if not records else None
     history_days = _calendar_days(windows.history_start, windows.history_end)
     future_days = _calendar_days(windows.forecast_start, windows.forecast_end)
     with localcontext(Context(prec=50)):
         historical_quantity = sum((record.quantity for record in records), Decimal(0))
         historical_events = sum(record.application_events for record in records)
         historical_heads = sum(record.head_administrations for record in records)
-        summary_months = range(1, 13) if coverage_confirmed else sorted(by_month)
         summaries = tuple(
             MonthlyConsumptionSummary(
                 month,
@@ -173,7 +126,7 @@ def calculate_consumption(
                 by_month[month].application_events if month in by_month else 0,
                 by_month[month].head_administrations if month in by_month else 0,
             )
-            for month in summary_months
+            for month in range(1, 13)
         )
         if reason is not None:
             estimate = ConsumptionEstimate(

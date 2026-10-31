@@ -230,8 +230,6 @@ async def resume_workflow_answer(
 def build_session_config(
     session_id: str,
     config: RunnableConfig | None,
-    *,
-    checkpoint_namespace: str | None = None,
 ) -> RunnableConfig:
     """LangGraph usa namespace vazio no grafo raiz. Um namespace próprio impediria
     o MongoSaver de localizar as gravações por aget_state(thread_id)."""

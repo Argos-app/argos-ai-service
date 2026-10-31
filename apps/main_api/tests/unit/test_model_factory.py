@@ -648,6 +648,9 @@ def test_factory_uses_configured_anthropic_base_url(monkeypatch):
 
     assert len(calls) == 2
     assert all(call["base_url"] == "https://anthropic-gateway.example" for call in calls)
+    assert all(
+        call["default_headers"] == {"Authorization": "Bearer anthropic-key"} for call in calls
+    )
 
 
 def test_provider_base_urls_are_validated():
@@ -684,7 +687,7 @@ def test_factory_reuses_instance_when_both_roles_share_a_model_name():
 def test_fast_and_specialist_model_names_are_loaded_from_environment(monkeypatch):
     monkeypatch.setenv("OPENAI_MODEL_FAST", "fast-env")
     monkeypatch.setenv("OPENAI_MODEL_SPECIALIST", "specialist-env")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-test-key")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://openai-gateway.example/v1/")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://anthropic-gateway.example/")
     monkeypatch.setenv("ANTHROPIC_MODEL_FAST_FALLBACK", "haiku-env")
@@ -694,7 +697,8 @@ def test_fast_and_specialist_model_names_are_loaded_from_environment(monkeypatch
 
     assert settings.model_fast_name == "fast-env"
     assert settings.model_specialist_name == "specialist-env"
-    assert settings.anthropic_api_key == "anthropic-test-key"
+    assert settings.anthropic_api_key == "openrouter-test-key"
+    assert settings.jev_api_key == "openrouter-test-key"
     assert settings.openai_base_url == "https://openai-gateway.example/v1"
     assert settings.anthropic_base_url == "https://anthropic-gateway.example"
     assert settings.model_fast_fallback_name == "haiku-env"
@@ -729,7 +733,7 @@ def test_fallback_models_have_no_built_in_names(monkeypatch):
         {"model_max_retries": -1},
         {"model_max_retries": 3},
         {"document_a2a_timeout_seconds": 0},
-        {"document_a2a_timeout_seconds": 61},
+        {"document_a2a_timeout_seconds": 301},
         {"execution_max_model_calls": 0},
         {"execution_max_tool_calls": 101},
         {"execution_timeout_seconds": 301},
@@ -740,26 +744,22 @@ def test_execution_limits_are_validated(overrides):
         replace(Settings(), **overrides)
 
 
-def test_execution_limits_are_loaded_from_environment(monkeypatch):
-    monkeypatch.setenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "900")
-    monkeypatch.setenv("MAIN_API_MODEL_MAX_RETRIES", "2")
-    monkeypatch.setenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "8")
-    monkeypatch.setenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "7")
+def test_execution_limits_are_fixed_and_ignore_removed_environment_settings(monkeypatch):
+    monkeypatch.setenv("MAIN_API_MODEL_MAX_RETRIES", "20")
     monkeypatch.setenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("MAIN_API_AUTH_DATABASE_POOL_MAX_SIZE", "20")
 
     settings = Settings.from_env()
 
-    assert settings.model_max_output_tokens == 900
     assert settings.model_max_retries == 2
-    assert settings.execution_max_model_calls == 8
-    assert settings.execution_max_tool_calls == 7
-    assert settings.execution_timeout_seconds == 45
+    assert settings.execution_timeout_seconds == 300
+    assert settings.auth_database_pool_max_size == 10
 
 
-def test_document_a2a_timeout_is_loaded_from_environment(monkeypatch):
+def test_document_a2a_timeout_is_fixed_and_ignores_removed_environment_setting(monkeypatch):
     monkeypatch.setenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "50")
 
-    assert Settings.from_env().document_a2a_timeout_seconds == 50
+    assert Settings.from_env().document_a2a_timeout_seconds == 270
 
 
 def test_model_factory_rejects_model_without_native_structured_output():

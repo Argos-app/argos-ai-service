@@ -45,3 +45,7 @@ estão em [tests/integration/README.md](tests/integration/README.md).
 Os schemas, exemplos, erros e autenticação estão no
 [contrato da API](docs/api-contract.md) e em `/docs` quando o processo está
 ativo. `X-Argos-Correlation-ID` é retornado nas respostas de negócio.
+
+Respostas dos modelos têm limite fixo de 4096 tokens. Respostas dos MCPs e do
+A2A documental têm limite fixo de 1 MB. Esses limites não são configurados por
+variável de ambiente.

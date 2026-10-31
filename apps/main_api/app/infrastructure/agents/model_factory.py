@@ -224,6 +224,7 @@ def _attach_anthropic_fallbacks(
     shared_options: dict[str, Any] = {
         "api_key": settings.anthropic_api_key,
         "base_url": settings.anthropic_base_url,
+        "default_headers": {"Authorization": f"Bearer {settings.anthropic_api_key}"},
         "timeout": settings.model_timeout_seconds,
         "max_retries": settings.model_max_retries,
         "max_tokens": settings.model_max_output_tokens,

@@ -270,7 +270,7 @@ class ProviderFallbackAnswerGenerator:
         self._endpoint = endpoint
         self._max_output_tokens = max_output_tokens
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 5)),
+            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 10)),
             follow_redirects=False,
             trust_env=False,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),

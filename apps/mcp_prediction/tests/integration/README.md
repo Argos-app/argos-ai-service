@@ -35,7 +35,8 @@ do fixture, além de `default_transaction_read_only=on` no pool.
 - `initialize`, `list_tools` e `call_tool` pelo SDK MCP, com uma única
   ferramenta e argumento `payload`.
 - Consulta ao PostgreSQL real e cálculo anual agregado, incluindo quantidade,
-  eventos, cabeças-administrações, modo de simulação e cobertura desconhecida.
+  eventos, cabeças-administrações, modo de simulação e cobertura completa
+  assumida pelo serviço em toda janela histórica.
 - Isolamento entre propriedades: o mesmo medicamento tem consumos distintos em
   duas fazendas, e cada delegação recebe apenas o agregado da propriedade
   selecionada. Filtros fora do contexto são rejeitados.

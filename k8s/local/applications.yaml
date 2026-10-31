@@ -35,13 +35,13 @@ spec:
                                 },
                         }
                       - {
-                            name: JEV_API_KEY,
+                            name: OPENROUTER_API_KEY,
                             valueFrom:
                                 {
                                     secretKeyRef:
                                         {
                                             name: argos-input-risk,
-                                            key: JEV_API_KEY,
+                                            key: OPENROUTER_API_KEY,
                                             optional: true,
                                         },
                                 },
@@ -98,18 +98,6 @@ spec:
                                         {
                                             name: argos-input-risk,
                                             key: INPUT_RISK_THRESHOLD,
-                                            optional: true,
-                                        },
-                                },
-                        }
-                      - {
-                            name: INPUT_RISK_TIMEOUT_SECONDS,
-                            valueFrom:
-                                {
-                                    secretKeyRef:
-                                        {
-                                            name: argos-input-risk,
-                                            key: INPUT_RISK_TIMEOUT_SECONDS,
                                             optional: true,
                                         },
                                 },
@@ -496,7 +484,6 @@ spec:
                                         },
                                 },
                         }
-                      - { name: MCP_PREDICTION_COVERAGE_RELATION, value: local_prediction_coverage }
                       - { name: MCP_PREDICTION_DATA_ORIGIN, value: synthetic }
                       - {
                             name: MCP_PREDICTION_RESOURCE_SERVER_URL,

@@ -39,19 +39,20 @@ configuração de acesso.
 
 O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
 `/chat/completions`, e um adapter HTTP para os embeddings Voyage. Configure as
-URLs base `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL`, os endpoints completos
-`OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL`, além das chaves, nomes dos
-modelos e dimensões dos dois espaços. O código não presume URLs de provedores:
-informe endpoints compatíveis com o protocolo esperado, incluindo gateways como
-OpenRouter quando oferecerem a API adequada. Para respostas, o fallback
-Anthropic usa o endpoint `/v1/messages` relativo à base configurada. A
-sincronização indexa os documentos em vetores Qdrant nomeados (`openai` e
+`OPENAI_BASE_URL` aponta para a API oficial da OpenAI e
+`OPENAI_EMBEDDINGS_URL` para seu endpoint de embeddings. `ANTHROPIC_BASE_URL`
+aponta para `https://openrouter.ai/api`; o fallback usa `/v1/messages` nessa
+base. `VOYAGE_EMBEDDINGS_URL` aponta para o endpoint OpenRouter
+`/api/v1/embeddings`, com o modelo `voyageai/voyage-4-large`. Use a mesma
+`OPENROUTER_API_KEY` para os fallbacks Claude e Voyage. Configure também os
+nomes dos modelos e as dimensões dos dois espaços. A sincronização indexa os
+documentos em vetores Qdrant nomeados (`openai` e
 `voyage`); a consulta usa o índice correspondente ao provedor que conseguiu
 gerar o vetor. A revisão dos modelos e dimensões participa do fingerprint de
 indexação; alterá-la força o sincronizador a criar uma nova geração compatível
-com Qdrant. Cada chamada de resposta também recebe o teto
-`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 4096); o deadline delegado e os timeouts
-existentes limitam a duração da tarefa.
+com Qdrant. Cada chamada de resposta tem limite fixo de 4096 tokens de saída.
+Os timeouts de provider e Qdrant e a validade das delegações também são
+políticas fixas do serviço, não variáveis de ambiente.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
 os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o

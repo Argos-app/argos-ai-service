@@ -53,6 +53,7 @@ _TASK_STATES = {
     a2a_pb2.TASK_STATE_REJECTED: "rejected",
     a2a_pb2.TASK_STATE_AUTH_REQUIRED: "auth_required",
 }
+_MAX_RESPONSE_BYTES = 1_000_000
 
 
 class DocumentA2ACallError(RuntimeError):
@@ -80,7 +81,6 @@ class DocumentA2AClient:
         self._private_key = self._load_private_key(settings.mcp_delegation_private_key)
         self._ttl_seconds = settings.mcp_delegation_ttl_seconds
         self._timeout_seconds = settings.document_a2a_timeout_seconds
-        self._response_max_bytes = settings.document_a2a_response_max_bytes
         self.observation_collector = observation_collector
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(self._timeout_seconds),
@@ -259,8 +259,8 @@ class DocumentA2AClient:
             for part in artifact.parts:
                 if not part.text:
                     continue
-                if len(part.text.encode("utf-8")) > self._response_max_bytes:
-                    raise DocumentA2ACallError("resposta documental excede o limite configurado")
+                if len(part.text.encode("utf-8")) > _MAX_RESPONSE_BYTES:
+                    raise DocumentA2ACallError("resposta documental excede o limite fixo")
                 try:
                     response = DocumentAnswerResponse.model_validate_json(part.text)
                 except ValueError:

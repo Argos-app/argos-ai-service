@@ -85,7 +85,6 @@ def mock_query_law(
 MOCK_FARM_TOOLS = [mock_query_farm]
 MOCK_DOCTOR_TOOLS = [mock_query_medicine]
 MOCK_ANALYST_TOOLS = [mock_estimate_prediction]
-MOCK_SECRETARY_TOOLS = [mock_prepare_report]
 MOCK_INFORMATION_TOOLS = [mock_query_documents, mock_query_law]
 
 MOCK_AGENT_TOOL_BINDINGS = {

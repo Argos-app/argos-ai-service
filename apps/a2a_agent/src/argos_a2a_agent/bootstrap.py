@@ -180,7 +180,7 @@ async def create_runtime_dependencies(
         settings.permission_sql_dsn,
         min_size=1,
         max_size=10,
-        command_timeout=5,
+        command_timeout=15,
         server_settings={"default_transaction_read_only": "on"},
     )
     provider_resources: list[Any] = []
@@ -542,7 +542,6 @@ async def _create_observability_runtime(
             max_items=settings.observability_queue_max_items,
             max_bytes=settings.observability_queue_max_bytes,
             max_document_bytes=settings.observability_document_max_bytes,
-            batch_size=settings.observability_batch_size,
             batch_interval_ms=settings.observability_batch_interval_ms,
             max_attempts=settings.observability_max_attempts,
             retry_base_delay_ms=settings.observability_retry_base_delay_ms,

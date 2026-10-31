@@ -140,18 +140,6 @@ class UserMemory:
             raise ValueError("trecho de origem de general_goal não pode exceder 512 caracteres")
 
     @property
-    def is_empty(self) -> bool:
-        return self.tone is None and self.general_goal is None
-
-    @property
-    def tone_effective_updated_at(self) -> datetime:
-        return self.tone_updated_at or self.updated_at
-
-    @property
-    def goal_effective_updated_at(self) -> datetime:
-        return self.goal_updated_at or self.updated_at
-
-    @property
     def summary_text(self) -> str | None:
         fields = []
         if self.tone:

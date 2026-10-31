@@ -8,26 +8,7 @@ from pydantic import Field, field_validator, model_serializer, model_validator
 
 from app.api.v1.models.interactions import AnswerValue, ResponseValue
 from app.application.contracts.base import ApplicationModel
-from app.session_config import DEFAULT_MESSAGES_PAGE_SIZE, MAX_MESSAGES_PAGE_SIZE
-
-
-class MessageHistoryQuery(ApplicationModel):
-    """Parâmetros validados da consulta; cursor opaco à camada HTTP."""
-
-    limit: int = Field(
-        default=DEFAULT_MESSAGES_PAGE_SIZE,
-        ge=1,
-        le=MAX_MESSAGES_PAGE_SIZE,
-        description="Quantidade máxima de mensagens retornadas na página.",
-        examples=[DEFAULT_MESSAGES_PAGE_SIZE],
-    )
-    cursor: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=2048,
-        description="Cursor opaco retornado em next_cursor para continuar a paginação.",
-        examples=["cursor-opaco-retornado-pela-api"],
-    )
+from app.session_config import MAX_MESSAGES_PAGE_SIZE
 
 
 class SessionMessage(ApplicationModel):

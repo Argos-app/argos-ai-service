@@ -129,9 +129,9 @@ preenchidos com as URLs e credenciais dos provedores ou gateways escolhidos.
   servem para cloud.
 - Use bancos, collections/índices, Qdrant, SMTP e credenciais adequados a cada
   ambiente. O pipeline não provisiona nem migra essas dependências.
-- Para predição, configure `MCP_PREDICTION_COVERAGE_RELATION` com uma view de
-  cobertura confiável e `MCP_PREDICTION_DATA_ORIGIN` conforme a origem real dos
-  dados; sem cobertura ou com origem desconhecida, não há estimativa numérica.
+- Para predição, configure `MCP_PREDICTION_DATA_ORIGIN=recorded` quando a fonte
+  contiver dados reais. O serviço sempre considera completo o registro de
+  aplicações da janela; com origem desconhecida, não há estimativa numérica.
 - Aponte os `MAIN_API_MCP_*_URL` para os serviços **do mesmo ambiente**, com
   `/mcp`, e o cliente A2A para `/a2a`. Configure tokens e pares de chaves
   compatíveis entre emissores/consumidores. As URLs anunciadas e audiences

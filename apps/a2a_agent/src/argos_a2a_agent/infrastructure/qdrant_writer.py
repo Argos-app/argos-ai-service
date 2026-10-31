@@ -105,34 +105,6 @@ class QdrantDocumentIndexWriter:
         except Exception as exc:
             raise IndexWriteError("não foi possível gravar chunks no staging Qdrant") from exc
 
-    async def remove_document(self, corpus_revision: RevisionHash, document_id: UUID) -> None:
-        revision = self._validate_revision(corpus_revision)
-        if not isinstance(document_id, UUID):
-            raise IndexWriteError("document_id deve ser UUID")
-        from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
-
-        try:
-            collection = self._generation_collection(revision)
-            await self._ensure_collection(collection)
-            await self._client.delete(
-                collection_name=collection,
-                points_selector=FilterSelector(
-                    filter=Filter(
-                        must=[
-                            FieldCondition(
-                                key="document_id",
-                                match=MatchValue(value=str(document_id)),
-                            )
-                        ]
-                    )
-                ),
-                wait=True,
-            )
-        except IndexWriteError:
-            raise
-        except Exception as exc:
-            raise IndexWriteError("não foi possível remover documento do staging Qdrant") from exc
-
     async def copy_documents(
         self,
         source_revision: RevisionHash,

@@ -23,7 +23,7 @@ class OpenAICompatibleHTTP:
 
     def __init__(self, endpoint: str, api_key: str, timeout_seconds: float) -> None:
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 5)),
+            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 10)),
             follow_redirects=False,
             trust_env=False,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),

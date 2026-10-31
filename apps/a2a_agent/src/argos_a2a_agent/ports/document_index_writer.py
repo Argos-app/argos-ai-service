@@ -17,9 +17,6 @@ class DocumentIndexWriter(Protocol):
     ) -> None:
         """Grava chunks em uma geração ainda não publicada."""
 
-    async def remove_document(self, corpus_revision: RevisionHash, document_id: UUID) -> None:
-        """Remove um documento da geração em preparação."""
-
     async def copy_documents(
         self,
         source_revision: RevisionHash,

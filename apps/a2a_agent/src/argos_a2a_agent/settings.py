@@ -67,7 +67,7 @@ class Settings:
     trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
     delegation_max_ttl_seconds: int = 300
     delegation_clock_skew_seconds: int = 30
-    qdrant_timeout_seconds: float = 5
+    qdrant_timeout_seconds: float = 15
     openai_api_key: str | None = field(default=None, repr=False)
     openai_base_url: str | None = None
     openai_embeddings_url: str | None = None
@@ -80,7 +80,7 @@ class Settings:
     model_specialist_name: str | None = None
     anthropic_model_specialist_fallback: str | None = None
     permission_sql_dsn: str | None = field(default=None, repr=False)
-    model_timeout_seconds: float = 40
+    model_timeout_seconds: float = 120
     model_max_output_tokens: int = 4_096
     model_mode: str = "provider"
     a2a_host: str = "0.0.0.0"
@@ -89,12 +89,11 @@ class Settings:
     observability_mongo_uri: str | None = field(default=None, repr=False)
     observability_mongo_database: str = "argos_ai"
     observability_collection: str = "ai_a2a_observations"
-    observability_mongo_server_selection_timeout_ms: int = 5_000
-    observability_mongo_write_timeout_ms: int = 5_000
+    observability_mongo_server_selection_timeout_ms: int = 15_000
+    observability_mongo_write_timeout_ms: int = 15_000
     observability_queue_max_items: int = 2_048
     observability_queue_max_bytes: int = 8 * 1024 * 1024
     observability_document_max_bytes: int = 16 * 1024
-    observability_batch_size: int = 100
     observability_batch_interval_ms: int = 250
     observability_max_attempts: int = 3
     observability_retry_base_delay_ms: int = 50
@@ -126,16 +125,7 @@ class Settings:
                 raise ValueError(f"{name} deve ser um inteiro") from exc
 
         port = read_int("A2A_PORT", 8000)
-        max_ttl = read_int("A2A_DELEGATION_MAX_TTL", 300)
         clock_skew = read_int("A2A_DELEGATION_CLOCK_SKEW", 30)
-        try:
-            timeout = float(os.getenv("A2A_QDRANT_TIMEOUT_SECONDS", "5"))
-        except ValueError as exc:
-            raise ValueError("A2A_QDRANT_TIMEOUT_SECONDS deve ser um número") from exc
-        try:
-            model_timeout = float(os.getenv("A2A_MODEL_TIMEOUT_SECONDS", "40"))
-        except ValueError as exc:
-            raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser um número") from exc
         return cls(
             qdrant_url=os.getenv("A2A_QDRANT_URL"),
             qdrant_read_api_key=os.getenv("A2A_QDRANT_READ_API_KEY"),
@@ -157,15 +147,13 @@ class Settings:
             resource_server_url=os.getenv("A2A_RESOURCE_SERVER_URL"),
             delegation_issuer=os.getenv("A2A_DELEGATION_ISSUER"),
             trusted_delegation_keys=tuple(delegation_keys.items()),
-            delegation_max_ttl_seconds=max_ttl,
             delegation_clock_skew_seconds=clock_skew,
-            qdrant_timeout_seconds=timeout,
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_base_url=_env_endpoint("OPENAI_BASE_URL"),
             openai_embeddings_url=_env_endpoint("OPENAI_EMBEDDINGS_URL"),
-            voyage_api_key=os.getenv("VOYAGE_API_KEY"),
+            voyage_api_key=os.getenv("OPENROUTER_API_KEY"),
             voyage_embeddings_url=_env_endpoint("VOYAGE_EMBEDDINGS_URL"),
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip() or None,
+            anthropic_api_key=os.getenv("OPENROUTER_API_KEY", "").strip() or None,
             anthropic_base_url=_env_endpoint("ANTHROPIC_BASE_URL"),
             embeddings_model=os.getenv("OPENAI_EMBEDDINGS_MODEL"),
             voyage_embeddings_model=os.getenv("VOYAGE_EMBEDDINGS_MODEL") or None,
@@ -174,20 +162,12 @@ class Settings:
                 os.getenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK") or None
             ),
             permission_sql_dsn=os.getenv("A2A_PERMISSION_SQL_DSN"),
-            model_timeout_seconds=model_timeout,
-            model_max_output_tokens=read_int("A2A_MODEL_MAX_OUTPUT_TOKENS", 4_096),
             model_mode=os.getenv("A2A_MODEL_MODE", "provider").strip().casefold(),
             a2a_host=os.getenv("A2A_HOST", "0.0.0.0"),
             a2a_port=port,
             a2a_endpoint_url=os.getenv("A2A_ENDPOINT_URL"),
             observability_mongo_uri=os.getenv("A2A_OBSERVABILITY_MONGO_URI") or None,
             observability_mongo_database=os.getenv("A2A_OBSERVABILITY_MONGO_DATABASE", "argos_ai"),
-            observability_mongo_server_selection_timeout_ms=_observability_int(
-                "A2A_OBSERVABILITY_MONGO_SERVER_SELECTION_TIMEOUT_MS", 5_000
-            ),
-            observability_mongo_write_timeout_ms=_observability_int(
-                "A2A_OBSERVABILITY_MONGO_WRITE_TIMEOUT_MS", 5_000
-            ),
             observability_queue_max_items=_observability_int(
                 "A2A_OBSERVABILITY_QUEUE_MAX_ITEMS", 2_048
             ),
@@ -197,16 +177,11 @@ class Settings:
             observability_document_max_bytes=_observability_int(
                 "A2A_OBSERVABILITY_DOCUMENT_MAX_BYTES", 16 * 1024
             ),
-            observability_batch_size=_observability_int("A2A_OBSERVABILITY_BATCH_SIZE", 100),
             observability_batch_interval_ms=_observability_int(
                 "A2A_OBSERVABILITY_BATCH_INTERVAL_MS", 250
             ),
-            observability_max_attempts=_observability_int("A2A_OBSERVABILITY_MAX_ATTEMPTS", 3),
             observability_retry_base_delay_ms=_observability_int(
                 "A2A_OBSERVABILITY_RETRY_BASE_DELAY_MS", 50
-            ),
-            observability_shutdown_timeout_ms=_observability_int(
-                "A2A_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2_000
             ),
             langsmith_api_key=os.getenv("A2A_LANGSMITH_API_KEY") or None,
             langsmith_agent_id=os.getenv("A2A_LANGSMITH_AGENT_ID", "argos-ai-service"),
@@ -250,7 +225,7 @@ class Settings:
                     "OPENAI_BASE_URL": self.openai_base_url,
                     "OPENAI_EMBEDDINGS_URL": self.openai_embeddings_url,
                     "OPENAI_EMBEDDINGS_MODEL": self.embeddings_model,
-                    "VOYAGE_API_KEY": self.voyage_api_key,
+                    "OPENROUTER_API_KEY": self.voyage_api_key,
                     "VOYAGE_EMBEDDINGS_URL": self.voyage_embeddings_url,
                     "VOYAGE_EMBEDDINGS_MODEL": self.voyage_embeddings_model,
                     "OPENAI_MODEL_SPECIALIST": self.model_specialist_name,
@@ -280,7 +255,7 @@ class Settings:
         if not 1 <= self.a2a_port <= 65535:
             raise ValueError("A2A_PORT deve estar entre 1 e 65535")
         if not 1 <= self.delegation_max_ttl_seconds <= 300:
-            raise ValueError("A2A_DELEGATION_MAX_TTL deve estar entre 1 e 300 segundos")
+            raise ValueError("validade fixa da delegação deve estar entre 1 e 300 segundos")
         if not 0 <= self.delegation_clock_skew_seconds <= 60:
             raise ValueError("A2A_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos")
         if not self.a2a_host.strip():
@@ -330,14 +305,14 @@ class Settings:
             not math.isfinite(self.qdrant_timeout_seconds)
             or not 0 < self.qdrant_timeout_seconds <= 30
         ):
-            raise ValueError("A2A_QDRANT_TIMEOUT_SECONDS deve ser maior que 0 e até 30")
+            raise ValueError("timeout fixo do Qdrant deve ser maior que 0 e até 30 segundos")
         if (
             not math.isfinite(self.model_timeout_seconds)
-            or not 0 < self.model_timeout_seconds <= 45
+            or not 0 < self.model_timeout_seconds <= 180
         ):
-            raise ValueError("A2A_MODEL_TIMEOUT_SECONDS deve ser maior que 0 e até 45")
+            raise ValueError("timeout fixo do modelo deve ser maior que 0 e até 180 segundos")
         if not 128 <= self.model_max_output_tokens <= 8_192:
-            raise ValueError("A2A_MODEL_MAX_OUTPUT_TOKENS deve estar entre 128 e 8192")
+            raise ValueError("limite fixo de tokens de saída do A2A inválido")
         for name, value in (
             ("A2A_QDRANT_URL", self.qdrant_url),
             ("A2A_RESOURCE_SERVER_URL", self.resource_server_url),
@@ -434,15 +409,11 @@ class Settings:
             self.observability_queue_max_items,
             self.observability_queue_max_bytes,
             self.observability_document_max_bytes,
-            self.observability_batch_size,
             self.observability_batch_interval_ms,
             self.observability_max_attempts,
             self.observability_shutdown_timeout_ms,
         )
         if min(limits) < 1 or self.observability_retry_base_delay_ms < 0:
             raise ValueError("limites de observabilidade A2A inválidos")
-        if (
-            self.observability_batch_size > self.observability_queue_max_items
-            or self.observability_document_max_bytes > self.observability_queue_max_bytes
-        ):
-            raise ValueError("limites do lote ou documento excedem a fila A2A")
+        if self.observability_document_max_bytes > self.observability_queue_max_bytes:
+            raise ValueError("limite do documento excede a fila A2A")

@@ -14,7 +14,7 @@ def _response(result):
     return result.structuredContent or json.loads(result.content[0].text)
 
 
-async def test_real_tool_suppresses_estimate_when_coverage_is_unknown(prediction_harness):
+async def test_real_tool_assumes_complete_recording(prediction_harness):
     import asyncpg
 
     harness = prediction_harness
@@ -38,12 +38,12 @@ async def test_real_tool_suppresses_estimate_when_coverage_is_unknown(prediction
             )
         )
 
-    assert result["status"] == "insufficient_data"
+    assert result["status"] == "estimated"
     assert result["mode"] == "simulation"
     assert result["data_origin"] == "synthetic"
     assert result["property_ids"] == [str(harness.property_a)]
-    assert result["coverage"][0]["status"] == "unknown"
-    assert any("cobertura histórica confirmada" in item for item in result["limitations"])
+    assert result["coverage"][0]["status"] == "confirmed"
+    assert result["coverage"][0]["source"] == "registro completo das aplicações"
     assert len(result["items"]) == 1
     item = result["items"][0]
     assert item["property_id"] == str(harness.property_a)
@@ -57,7 +57,7 @@ async def test_real_tool_suppresses_estimate_when_coverage_is_unknown(prediction
         for entry in item["monthly_history"]
         if entry["month"] == (harness.as_of + timedelta(days=1)).month
     )
-    assert item["estimated_quantity"] is None
+    assert Decimal(item["estimated_quantity"]) > 0
     assert Decimal(month["quantity"]) > 0
 
     admin = await asyncpg.connect(harness.database_dsn)

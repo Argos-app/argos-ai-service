@@ -2,12 +2,9 @@
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
 
 from packages.contracts import DataOrigin
-
-_COVERAGE_RELATION = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,9 +17,8 @@ class Settings:
     trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
     delegation_max_ttl_seconds: int = 300
     delegation_clock_skew_seconds: int = 30
-    sql_timeout_seconds: int = 5
+    sql_timeout_seconds: int = 15
     data_origin: DataOrigin = DataOrigin.UNKNOWN
-    coverage_relation: str | None = None
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
 
@@ -59,11 +55,8 @@ class Settings:
             mcp_resource_server_url=os.getenv("MCP_PREDICTION_RESOURCE_SERVER_URL"),
             delegation_issuer=os.getenv("MCP_PREDICTION_DELEGATION_ISSUER"),
             trusted_delegation_keys=tuple(delegation_keys.items()),
-            delegation_max_ttl_seconds=read_int("MCP_PREDICTION_DELEGATION_MAX_TTL", 300),
             delegation_clock_skew_seconds=read_int("MCP_PREDICTION_DELEGATION_CLOCK_SKEW", 30),
-            sql_timeout_seconds=read_int("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", 5),
             data_origin=data_origin,
-            coverage_relation=os.getenv("MCP_PREDICTION_COVERAGE_RELATION") or None,
             mcp_host=os.getenv("MCP_PREDICTION_HOST", "0.0.0.0"),
             mcp_port=read_int("MCP_PREDICTION_PORT", 8000),
         )
@@ -81,19 +74,15 @@ class Settings:
             missing.append("MCP_PREDICTION_TRUSTED_DELEGATION_KEYS")
         if not isinstance(self.data_origin, DataOrigin):
             raise ValueError("MCP_PREDICTION_DATA_ORIGIN inválida")
-        if self.coverage_relation is not None and not _COVERAGE_RELATION.fullmatch(
-            self.coverage_relation
-        ):
-            raise ValueError("MCP_PREDICTION_COVERAGE_RELATION deve ser schema.view ou view")
         if missing:
             raise ValueError(f"configuração obrigatória ausente: {', '.join(missing)}")
         if not 1 <= self.mcp_port <= 65535:
             raise ValueError("MCP_PREDICTION_PORT deve estar entre 1 e 65535")
         if not 1 <= self.delegation_max_ttl_seconds <= 300:
-            raise ValueError("MCP_PREDICTION_DELEGATION_MAX_TTL deve estar entre 1 e 300 segundos")
+            raise ValueError("validade fixa da delegação deve estar entre 1 e 300 segundos")
         if not 0 <= self.delegation_clock_skew_seconds <= 60:
             raise ValueError(
                 "MCP_PREDICTION_DELEGATION_CLOCK_SKEW deve estar entre 0 e 60 segundos"
             )
         if not 1 <= self.sql_timeout_seconds <= 60:
-            raise ValueError("MCP_PREDICTION_SQL_TIMEOUT_SECONDS deve estar entre 1 e 60")
+            raise ValueError("timeout fixo do PostgreSQL deve estar entre 1 e 60 segundos")
