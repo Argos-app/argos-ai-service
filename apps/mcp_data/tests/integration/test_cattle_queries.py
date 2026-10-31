@@ -626,16 +626,16 @@ async def test_sql_reader_rejects_writes_and_preserves_data(mcp_data_harness):
 async def test_revoked_or_inactive_property_invalidates_the_whole_delegation(
     mcp_data_harness,
 ):
+    """A primeira página comprova que a delegação era válida inicialmente.
+    Desativa uma das propriedades ainda indicada pelo token assinado.
+    A autorização deve rejeitar o escopo desatualizado antes das consultas SQL."""
     harness = mcp_data_harness
     sql = await harness.connect_to_test_database()
     try:
         async with harness.client() as session:
-            # The first page proves the delegation was initially usable.
             first_page = await session.call_tool("list_properties", {"payload": {"page_size": 1}})
             assert not first_page.isError
 
-            # Deactivate one of the properties still named by the signed token.
-            # Authorization must reject the stale scope before running SQL tools.
             property_inactive = await sql.execute(
                 "UPDATE property SET active = FALSE WHERE id = $1",
                 harness.fixture_ids["property_a"],

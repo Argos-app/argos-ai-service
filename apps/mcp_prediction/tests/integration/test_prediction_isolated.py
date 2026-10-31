@@ -105,6 +105,7 @@ async def test_authentication_and_property_filter_are_enforced(prediction_harnes
 
 
 async def test_same_medicine_is_aggregated_only_for_each_delegated_property(prediction_harness):
+    """O mesmo medicamento tem consumos diferentes em A e B; os resultados permanecem isolados."""
     harness = prediction_harness
     results = {}
     for property_id in (harness.property_a, harness.property_b):
@@ -128,7 +129,6 @@ async def test_same_medicine_is_aggregated_only_for_each_delegated_property(pred
         assert result["items"][0]["property_id"] == str(property_id)
         results[property_id] = Decimal(result["items"][0]["historical_quantity"])
 
-    # The same medicine has distinct consumption in A and B; results stay scoped.
     assert results[harness.property_a] == Decimal("120.0")
     assert results[harness.property_b] == Decimal("600.0")
 

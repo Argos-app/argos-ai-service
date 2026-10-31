@@ -31,11 +31,18 @@ class QdrantDocumentIndexWriter:
         active_alias: str,
         vector_size: int,
         distance: str,
+        voyage_vector_size: int | None = None,
     ) -> None:
         if not isinstance(active_alias, str) or not _COLLECTION_COMPONENT.fullmatch(active_alias):
             raise ValueError("active_alias deve conter de 1 a 120 caracteres alfanuméricos, _ ou -")
         if isinstance(vector_size, bool) or not isinstance(vector_size, int) or vector_size < 1:
             raise ValueError("vector_size deve ser um inteiro positivo")
+        if voyage_vector_size is not None and (
+            isinstance(voyage_vector_size, bool)
+            or not isinstance(voyage_vector_size, int)
+            or voyage_vector_size < 1
+        ):
+            raise ValueError("voyage_vector_size deve ser um inteiro positivo")
         from qdrant_client.models import Distance
 
         try:
@@ -45,6 +52,7 @@ class QdrantDocumentIndexWriter:
         self._client = client
         self._active_alias = active_alias
         self._vector_size = vector_size
+        self._voyage_vector_size = voyage_vector_size
 
     async def upsert_chunks(
         self, corpus_revision: RevisionHash, chunks: Sequence[IndexedDocumentChunk]
@@ -68,10 +76,23 @@ class QdrantDocumentIndexWriter:
                 for value in item.vector
             ):
                 raise IndexWriteError("vetor do chunk diverge da dimensão configurada")
+            if self._voyage_vector_size is not None and (
+                item.voyage_vector is None
+                or len(item.voyage_vector) != self._voyage_vector_size
+                or any(
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    for value in item.voyage_vector
+                )
+            ):
+                raise IndexWriteError("vetor Voyage diverge da dimensão configurada")
+            if self._voyage_vector_size is None and item.voyage_vector is not None:
+                raise IndexWriteError("vetor Voyage não está configurado no writer")
             points.append(
                 PointStruct(
                     id=str(item.chunk.chunk_id),
-                    vector=list(item.vector),
+                    vector=self._point_vectors(item.vector, item.voyage_vector),
                     payload=self._payload(item, revision),
                 )
             )
@@ -173,19 +194,7 @@ class QdrantDocumentIndexWriter:
                         raise IndexWriteError(
                             "chunk copiado não corresponde à revisão atual do PDF"
                         )
-                    vector = point.vector
-                    if (
-                        not isinstance(vector, Sequence)
-                        or isinstance(vector, (str, bytes))
-                        or len(vector) != self._vector_size
-                        or any(
-                            isinstance(value, bool)
-                            or not isinstance(value, (int, float))
-                            or not math.isfinite(value)
-                            for value in vector
-                        )
-                    ):
-                        raise IndexWriteError("vetor anterior diverge da dimensão configurada")
+                    vectors = self._validate_point_vectors(point.vector)
                     try:
                         chunk_index = payload["chunk_index"]
                         page_from = payload["page_from"]
@@ -213,7 +222,7 @@ class QdrantDocumentIndexWriter:
                     copied_points.append(
                         PointStruct(
                             id=point.id,
-                            vector=list(vector),
+                            vector=vectors,
                             payload=copied_payload,
                         )
                     )
@@ -357,20 +366,86 @@ class QdrantDocumentIndexWriter:
             return
         from qdrant_client.models import VectorParams
 
+        if self._voyage_vector_size is None:
+            vectors_config = VectorParams(size=self._vector_size, distance=self._distance)
+        else:
+            vectors_config = {
+                "openai": VectorParams(size=self._vector_size, distance=self._distance),
+                "voyage": VectorParams(size=self._voyage_vector_size, distance=self._distance),
+            }
         await self._client.create_collection(
             collection_name=collection,
-            vectors_config=VectorParams(size=self._vector_size, distance=self._distance),
+            vectors_config=vectors_config,
         )
 
     async def _validate_collection(self, collection: str) -> None:
+        """Coleções antigas com vetor OpenAI único continuam publicáveis para
+        rollback. O fingerprint novo força a reconstrução dual antes da busca."""
         info = await self._client.get_collection(collection_name=collection)
         vectors = info.config.params.vectors
+        if self._voyage_vector_size is not None and isinstance(vectors, dict):
+            expected = {"openai": self._vector_size, "voyage": self._voyage_vector_size}
+
+            def matches(name: str, size: int) -> bool:
+                params = vectors[name]
+                actual_distance = getattr(params.distance, "value", params.distance)
+                return params.size == size and actual_distance == self._distance.value
+
+            if set(vectors) != set(expected) or not all(
+                matches(name, size) for name, size in expected.items()
+            ):
+                raise IndexWriteError("coleção de staging diverge da configuração vetorial")
+            return
+
         if (
             not hasattr(vectors, "size")
             or vectors.size != self._vector_size
             or vectors.distance != self._distance
         ):
             raise IndexWriteError("coleção de staging diverge da configuração vetorial")
+
+    def _point_vectors(
+        self,
+        openai_vector: Sequence[float],
+        voyage_vector: Sequence[float] | None,
+    ) -> list[float] | dict[str, list[float]]:
+        if self._voyage_vector_size is None:
+            return list(openai_vector)
+        if voyage_vector is None:
+            raise IndexWriteError("chunk não contém vetor Voyage")
+        return {"openai": list(openai_vector), "voyage": list(voyage_vector)}
+
+    def _validate_point_vectors(self, raw_vectors: Any) -> list[float] | dict[str, list[float]]:
+        if self._voyage_vector_size is None:
+            if not self._valid_vector(raw_vectors, self._vector_size):
+                raise IndexWriteError("vetor anterior diverge da dimensão configurada")
+            return list(raw_vectors)
+        if not isinstance(raw_vectors, Mapping):
+            raise IndexWriteError("geração anterior não contém os vetores nomeados")
+        expected = {"openai": self._vector_size, "voyage": self._voyage_vector_size}
+        if set(raw_vectors) != set(expected):
+            raise IndexWriteError("geração anterior diverge dos provedores configurados")
+        normalized: dict[str, list[float]] = {}
+        for name, size in expected.items():
+            vector = raw_vectors[name]
+            if not self._valid_vector(vector, size):
+                raise IndexWriteError(f"vetor anterior {name} diverge da dimensão configurada")
+            normalized[name] = list(vector)
+        return normalized
+
+    @staticmethod
+    def _valid_vector(vector: Any, size: int) -> bool:
+        return (
+            isinstance(vector, Sequence)
+            and not isinstance(vector, (str, bytes))
+            and len(vector) == size
+            and all(
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+                for value in vector
+            )
+        )
 
     @staticmethod
     def _validate_revision(corpus_revision: str) -> str:

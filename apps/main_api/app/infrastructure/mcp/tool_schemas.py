@@ -24,13 +24,6 @@ class _ScopedPagePayload(_Payload):
             "IDs de propriedades já informados pelo usuário; omita se não foram informados."
         ),
     )
-    property_id: UUID | None = Field(
-        default=None,
-        description=(
-            "Alias de compatibilidade para uma única propriedade; será normalizado para "
-            "property_ids antes da chamada MCP."
-        ),
-    )
     page_size: int = Field(default=50, ge=1, le=100)
     offset: int = Field(default=0, ge=0, le=10_000)
 
@@ -60,12 +53,6 @@ class ListLotsPayload(_DateRangePayload):
         max_length=20,
         description="Código do lote, por exemplo HC-LOTE-001. O nome do campo é lot_code.",
     )
-    code: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=20,
-        description="Alias de lot_code; será normalizado antes da chamada MCP.",
-    )
     category: Literal["ENGORDA", "CRIA", "RECRIA"] | None = None
     is_exception_lot: bool | None = None
     active: bool | None = None
@@ -90,12 +77,6 @@ class ListApplicationsPayload(_DateRangePayload):
         min_length=1,
         max_length=80,
         description="Filtro textual chamado medicine_name (singular).",
-    )
-    medication_name: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=80,
-        description="Alias de medicine_name; será normalizado antes da chamada MCP.",
     )
     active: bool | None = None
     application_kind: Literal["COLETIVA", "INDIVIDUAL"] | None = None
@@ -181,16 +162,6 @@ class ListMedicineDocumentsPayload(ListMedicinesPayload):
 
 
 class EstimateConsumptionPayload(EstimateMedicineConsumptionRequest):
-    property_id: UUID | None = Field(
-        default=None,
-        description="Alias de compatibilidade para uma única propriedade autorizada.",
-    )
-    medicine_name: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=80,
-        description="Alias de compatibilidade para um único nome de medicamento.",
-    )
     as_of: date = Field(
         default_factory=lambda: date.today() - timedelta(days=1),
         description="Último dia encerrado do histórico; quando omitido, usa ontem no servidor.",

@@ -24,17 +24,10 @@ from pydantic import BaseModel
 
 
 class ModelPolicyId(StrEnum):
-    """Referências de política de modelo, sem nomes de provedores ou modelos."""
+    """Papéis de latência/capacidade usados para escolher os dois modelos."""
 
-    ROUTER = "router"
-    FARM = "farm"
-    DOCTOR = "doctor"
-    ANALYST = "analyst"
-    SECRETARY = "secretary"
-    INFORMATION = "information"
-    ORCHESTRATOR = "orchestrator"
-    JUDGE = "judge"
-    QUESTION_FORMATTER = "question_formatter"
+    FAST = "fast"
+    SPECIALIST = "specialist"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +76,8 @@ ALLOWED_TOOL_NAMES_BY_SLOT: dict[tuple[AgentId, str], frozenset[str]] = {
         {
             "consultar_documental",
             "consultar_legal",
-            "mock_consultar_documental",
-            "mock_consultar_legal",
+            "mock_query_documents",
+            "mock_query_law",
             "documental_unavailable",
         }
     ),
@@ -94,21 +87,21 @@ ALLOWED_TOOL_NAMES_BY_SLOT: dict[tuple[AgentId, str], frozenset[str]] = {
             "send_report",
             "get_report_status",
             "mcp_email_unavailable",
-            "mock_preparar_relatorio",
+            "mock_prepare_report",
         }
     ),
 }
 
 _EXPECTED_MODEL_POLICIES: dict[AgentId, ModelPolicyId] = {
-    AgentId.ROUTER: ModelPolicyId.ROUTER,
-    AgentId.FARM: ModelPolicyId.FARM,
-    AgentId.DOCTOR: ModelPolicyId.DOCTOR,
-    AgentId.ANALYST: ModelPolicyId.ANALYST,
-    AgentId.SECRETARY: ModelPolicyId.SECRETARY,
-    AgentId.INFORMATION: ModelPolicyId.INFORMATION,
-    AgentId.ORCHESTRATOR: ModelPolicyId.ORCHESTRATOR,
-    AgentId.JUDGE: ModelPolicyId.JUDGE,
-    AgentId.QUESTION_FORMATTER: ModelPolicyId.QUESTION_FORMATTER,
+    AgentId.ROUTER: ModelPolicyId.FAST,
+    AgentId.FARM: ModelPolicyId.SPECIALIST,
+    AgentId.DOCTOR: ModelPolicyId.SPECIALIST,
+    AgentId.ANALYST: ModelPolicyId.SPECIALIST,
+    AgentId.SECRETARY: ModelPolicyId.SPECIALIST,
+    AgentId.INFORMATION: ModelPolicyId.SPECIALIST,
+    AgentId.ORCHESTRATOR: ModelPolicyId.FAST,
+    AgentId.JUDGE: ModelPolicyId.FAST,
+    AgentId.QUESTION_FORMATTER: ModelPolicyId.FAST,
 }
 
 
@@ -196,7 +189,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=RouterInput,
             output_schema=RoutePlan,
             tool_slots=(),
-            model_policy=ModelPolicyId.ROUTER,
+            model_policy=ModelPolicyId.FAST,
         ),
         AgentDefinition(
             agent_id=AgentId.FARM,
@@ -205,7 +198,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
             tool_slots=("farm_data",),
-            model_policy=ModelPolicyId.FARM,
+            model_policy=ModelPolicyId.SPECIALIST,
         ),
         AgentDefinition(
             agent_id=AgentId.DOCTOR,
@@ -214,7 +207,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
             tool_slots=("medicine_reference",),
-            model_policy=ModelPolicyId.DOCTOR,
+            model_policy=ModelPolicyId.SPECIALIST,
         ),
         AgentDefinition(
             agent_id=AgentId.ANALYST,
@@ -223,7 +216,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
             tool_slots=("prediction",),
-            model_policy=ModelPolicyId.ANALYST,
+            model_policy=ModelPolicyId.SPECIALIST,
         ),
         AgentDefinition(
             agent_id=AgentId.SECRETARY,
@@ -232,7 +225,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
             tool_slots=("report_delivery",),
-            model_policy=ModelPolicyId.SECRETARY,
+            model_policy=ModelPolicyId.SPECIALIST,
         ),
         AgentDefinition(
             agent_id=AgentId.INFORMATION,
@@ -241,7 +234,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=SpecialistInput,
             output_schema=SpecialistResult,
             tool_slots=("documental_a2a",),
-            model_policy=ModelPolicyId.INFORMATION,
+            model_policy=ModelPolicyId.SPECIALIST,
         ),
         AgentDefinition(
             agent_id=AgentId.ORCHESTRATOR,
@@ -250,7 +243,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=OrchestratorInput,
             output_schema=OrchestratorResult,
             tool_slots=(),
-            model_policy=ModelPolicyId.ORCHESTRATOR,
+            model_policy=ModelPolicyId.FAST,
         ),
         AgentDefinition(
             agent_id=AgentId.JUDGE,
@@ -259,7 +252,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=JudgeInput,
             output_schema=JudgeResult,
             tool_slots=(),
-            model_policy=ModelPolicyId.JUDGE,
+            model_policy=ModelPolicyId.FAST,
         ),
         AgentDefinition(
             agent_id=AgentId.QUESTION_FORMATTER,
@@ -268,7 +261,7 @@ DEFAULT_AGENT_REGISTRY = AgentRegistry(
             input_schema=QuestionFormatterInput,
             output_schema=QuestionFormatterResult,
             tool_slots=(),
-            model_policy=ModelPolicyId.QUESTION_FORMATTER,
+            model_policy=ModelPolicyId.FAST,
         ),
     )
 )

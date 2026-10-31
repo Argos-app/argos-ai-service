@@ -12,8 +12,26 @@ from .models import Billing
 _COST_KEYS = ("reported_cost", "total_cost_usd", "cost_usd", "total_cost", "cost")
 _CURRENCY_KEYS = ("currency", "cost_currency", "currency_code")
 _MILLION = Decimal("1000000")
-_INPUT_RATE_ENV = "MODEL_INPUT_COST_PER_MILLION_TOKENS"
-_OUTPUT_RATE_ENV = "MODEL_OUTPUT_COST_PER_MILLION_TOKENS"
+_RATE_PROFILES = {
+    "fast": (
+        "MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS",
+        "MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS",
+    ),
+    "fast_fallback": (
+        "MODEL_FAST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS",
+        "MODEL_FAST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS",
+    ),
+    "specialist": (
+        "MODEL_SPECIALIST_INPUT_COST_PER_MILLION_TOKENS",
+        "MODEL_SPECIALIST_OUTPUT_COST_PER_MILLION_TOKENS",
+    ),
+    "specialist_fallback": (
+        "MODEL_SPECIALIST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS",
+        "MODEL_SPECIALIST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS",
+    ),
+    "embedding": ("MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS", None),
+    "embedding_fallback": ("MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS", None),
+}
 
 
 def provider_billing(value: Any) -> Billing | None:
@@ -37,20 +55,27 @@ def provider_billing(value: Any) -> Billing | None:
 
 
 def configured_rate_billing(
-    *, input_tokens: int | None, output_tokens: int | None, embedding: bool = False
+    *,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    embedding: bool = False,
+    rate_profile: str | None = None,
 ) -> Billing | None:
-    """Estimate USD cost from globally configured per-million-token rates.
+    """Estima o custo em USD com as tarifas configuradas para o papel e provider do modelo.
 
-    Chat estimates require both token counts and both rates to avoid silently
-    undercounting partial usage. Embeddings are input-only and require only the
-    input count and rate. Explicit provider-reported prices should be preferred.
+    Estimativas de chat exigem contagens de tokens e as duas tarifas para evitar
+    subestimar o uso parcial. Embeddings cobram somente a entrada e exigem a
+    respectiva contagem e tarifa. Prefira preços informados explicitamente pelo provider.
     """
-    input_rate = _environment_rate(_INPUT_RATE_ENV)
+    profile = _RATE_PROFILES.get(rate_profile or "")
+    if profile is None:
+        return None
+    input_rate = _environment_rate(profile[0])
     if input_rate is None or input_tokens is None:
         return None
     cost = input_rate * input_tokens / _MILLION
     if not embedding:
-        output_rate = _environment_rate(_OUTPUT_RATE_ENV)
+        output_rate = _environment_rate(profile[1]) if profile[1] else None
         if output_rate is None or output_tokens is None:
             return None
         cost += output_rate * output_tokens / _MILLION
@@ -67,17 +92,21 @@ def billing_with_fallback(
     input_tokens: int | None,
     output_tokens: int | None,
     embedding: bool = False,
+    rate_profile: str | None = None,
 ) -> Billing | None:
-    """Return explicit provider cost first, otherwise estimate from env rates."""
+    """Prefere o custo informado pelo provider; se ausente, estima pelas tarifas do ambiente."""
     return provider_billing(value) or configured_rate_billing(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         embedding=embedding,
+        rate_profile=rate_profile,
     )
 
 
-def billing_from_usage_payload(value: Any, *, embedding: bool = False) -> Billing | None:
-    """Resolve provider cost or an estimate from common nested token usage shapes."""
+def billing_from_usage_payload(
+    value: Any, *, embedding: bool = False, rate_profile: str | None = None
+) -> Billing | None:
+    """Resolve o custo do provider ou estima o valor a partir de formatos usuais de uso."""
     explicit = provider_billing(value)
     if explicit is not None:
         return explicit
@@ -94,6 +123,7 @@ def billing_from_usage_payload(value: Any, *, embedding: bool = False) -> Billin
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 embedding=embedding,
+                rate_profile=rate_profile,
             )
             if estimate is not None:
                 return estimate
@@ -105,8 +135,9 @@ def langsmith_usage_metadata(
     usage: Mapping[str, Any] | None,
     *,
     embedding: bool = False,
+    rate_profile: str | None = None,
 ) -> dict[str, Any]:
-    """Build LangSmith's recognized usage fields without changing stored billing."""
+    """Monta os campos de uso reconhecidos pelo LangSmith sem alterar a cobrança persistida."""
     source = usage or {}
     allowed_keys = {
         "input_tokens",
@@ -142,13 +173,40 @@ def langsmith_usage_metadata(
 
     input_tokens = _first_count(metadata, ("input_tokens", "prompt_tokens"))
     output_tokens = _first_count(metadata, ("output_tokens", "completion_tokens"))
-    input_rate = _environment_rate(_INPUT_RATE_ENV)
-    output_rate = _environment_rate(_OUTPUT_RATE_ENV)
+    profile = _RATE_PROFILES.get(rate_profile or "")
+    input_rate = _environment_rate(profile[0]) if profile else None
+    output_rate = _environment_rate(profile[1]) if profile and profile[1] else None
     if input_rate is not None and input_tokens is not None:
         metadata["input_cost"] = float(input_rate * input_tokens / _MILLION)
     if not embedding and output_rate is not None and output_tokens is not None:
         metadata["output_cost"] = float(output_rate * output_tokens / _MILLION)
     return metadata
+
+
+def configured_rate_profile(provider: str | None, model: str | None) -> str | None:
+    """Resolve o perfil tarifário configurado para uma chamada de modelo rastreada."""
+    if not isinstance(provider, str) or not isinstance(model, str):
+        return None
+    env_profiles = {
+        "openai": (
+            ("OPENAI_MODEL_FAST", "fast"),
+            ("OPENAI_MODEL_SPECIALIST", "specialist"),
+            ("OPENAI_EMBEDDINGS_MODEL", "embedding"),
+        ),
+        "anthropic": (
+            ("ANTHROPIC_MODEL_FAST_FALLBACK", "fast_fallback"),
+            ("ANTHROPIC_MODEL_SPECIALIST_FALLBACK", "specialist_fallback"),
+        ),
+        "voyageai": (("VOYAGE_EMBEDDINGS_MODEL", "embedding_fallback"),),
+    }
+    return next(
+        (
+            profile
+            for env_name, profile in env_profiles.get(provider.casefold(), ())
+            if os.getenv(env_name, "").strip() == model
+        ),
+        None,
+    )
 
 
 def _environment_rate(name: str) -> Decimal | None:

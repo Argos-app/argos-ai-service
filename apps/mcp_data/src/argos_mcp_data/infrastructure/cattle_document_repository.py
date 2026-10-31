@@ -30,7 +30,7 @@ class MongoCattleDocumentRepository(CattleDocumentReadRepository):
         return str(value) if self._id_format == "string" else value
 
     def _build_filter(self, scope: AuthorizedScope, request: ListCattleDocumentsRequest) -> dict:
-        # O primeiro predicado é sempre derivado do contexto autenticado e validado.
+        """O primeiro predicado é sempre derivado do contexto autenticado e validado."""
         query: dict[str, Any] = {
             "relational_property_id": {
                 "$in": [self._encode_id(value) for value in scope.property_ids]
@@ -64,6 +64,7 @@ class MongoCattleDocumentRepository(CattleDocumentReadRepository):
     async def list_documents(
         self, scope: AuthorizedScope, request: ListCattleDocumentsRequest
     ) -> CattleDocumentsPage:
+        """Defesa em profundidade contra adapter falso ou consulta mal configurada."""
         raw_documents = await self._reader.find_many(
             self._collection,
             self._build_filter(scope, request),
@@ -80,7 +81,6 @@ class MongoCattleDocumentRepository(CattleDocumentReadRepository):
         for raw in raw_documents:
             document = CattleHistoryDocument.model_validate(dict(raw))
             if document.relational_property_id not in allowed:
-                # Defesa em profundidade contra adapter falso ou consulta mal configurada.
                 raise AccessDeniedError("documento fora do escopo autorizado")
             docs.append(document)
         has_more = len(raw_documents) > request.page_size

@@ -1,4 +1,4 @@
--- procedures
+-- procedimentos
 create or replace procedure sp_registrar_aplicacao(
     p_lot_id UUID,
     p_medicine_batch_id UUID,

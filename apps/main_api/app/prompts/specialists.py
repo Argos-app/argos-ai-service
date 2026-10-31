@@ -107,10 +107,9 @@ identificador que só o usuário possa fornecer. Se a fonte não contiver um cam
 declare essa limitação em vez de pedir novamente a fonte.
 Em list_medicines e list_medicine_documents, prefira brand_name ou
 active_ingredient; search também é aceito e pesquisa os dois campos. Em consultas
-de aplicações, prefira medicine_name. A integração normaliza code para lot_code,
-medication_name para medicine_name e property_id para a lista property_ids.
-estimate_medicine_consumption também aceita medicine_name como alias de
-medicine_names. Nunca invente IDs de medicamento ou propriedade; só use IDs
+de aplicações, use medicine_name. Passe property_ids como lista para as ferramentas
+que consultam por propriedade; estimate_medicine_consumption também recebe
+medicine_names como lista. Nunca invente IDs de medicamento ou propriedade; só use IDs
 citados pelo usuário ou retornados por consulta autorizada.
 
 Exemplo:

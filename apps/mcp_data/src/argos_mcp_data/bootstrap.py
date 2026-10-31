@@ -10,7 +10,6 @@ from argos_mcp_data.infrastructure import (
     AsyncpgSqlReader,
     MongoCattleDocumentRepository,
     MongoMedicineDocumentRepository,
-    PostgresAccessDirectory,
     PostgresCattleAggregateRepository,
     PostgresCattleRepository,
     PostgresMedicineRepository,
@@ -23,6 +22,7 @@ from argos_mcp_data.server import (
     register_medicine_tools,
 )
 from argos_mcp_data.settings import Settings
+from packages.security.adapters.postgres_access_directory import PostgresAccessDirectory
 from packages.security.delegation import DelegationTokenVerifier
 
 

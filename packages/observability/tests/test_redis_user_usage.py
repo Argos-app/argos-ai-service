@@ -150,25 +150,37 @@ def test_identity_refresh_preserves_counters_and_survives_model_updates():
     asyncio.run(run())
 
 
-def test_ranking_decodes_identity_bytes_and_keeps_legacy_users_without_identity():
+def test_ranking_handles_current_partial_usage_hash_without_identity_metadata():
     async def run():
         redis = _Redis()
         usage = RedisUserUsageCounter(redis)
-        identified = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad102")
-        legacy = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad103")
-        redis.hashes[usage.key_for(identified)] = {
-            b"name": "José".encode(),
-            b"email": b"jose@example.test",
-            b"tokens": b"42",
-        }
-        redis.hashes[usage.key_for(legacy)] = {b"calls": b"3"}
+        call_only = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad103")
+        model_only = UUID("7a1a86ec-0f2f-4a44-8db0-378fe3dad104")
+        await usage.increment_call(call_only)
+        await usage.increment_call(call_only)
+        await usage.increment_call(call_only)
+        await usage.record_model_usage(
+            model_only, {"total_tokens": 42}, observation_id="model-only-observation"
+        )
 
-        first, second = await usage.list_users()
-        assert first["name"] == "José"
-        assert first["email"] == "jose@example.test"
-        assert first["tokens"] == 42
-        assert second["name"] is None
-        assert second["email"] is None
-        assert second["calls"] == 3
+        rows = {row["user_id"]: row for row in await usage.list_users()}
+        assert rows[str(call_only)] == {
+            "user_id": str(call_only),
+            "name": None,
+            "email": None,
+            "calls": 3,
+            "tokens": 0,
+            "model_calls": 0,
+            "unknown_token_calls": 0,
+        }
+        assert rows[str(model_only)] == {
+            "user_id": str(model_only),
+            "name": None,
+            "email": None,
+            "calls": 0,
+            "tokens": 42,
+            "model_calls": 1,
+            "unknown_token_calls": 0,
+        }
 
     asyncio.run(run())

@@ -28,12 +28,13 @@ class DocumentAgentFactory:
         ensure_current: EnsureCurrentCorpus,
         repository: DocumentReadRepository,
         embeddings: EmbeddingProvider,
+        voyage_embeddings: EmbeddingProvider | None = None,
         answer_generator: DocumentAnswerGenerator,
         clock: Clock = lambda: datetime.now(UTC),
         observation_collector: ObservationCollector | None = None,
     ) -> DocumentAgentRegistry:
         search = observe_adapter(
-            SearchDocuments(ensure_current, repository, embeddings),
+            SearchDocuments(ensure_current, repository, embeddings, voyage_embeddings),
             observation_collector,
             operation_prefix="document.search",
         )

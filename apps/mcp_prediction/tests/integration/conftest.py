@@ -256,6 +256,7 @@ async def prediction_harness(tmp_path):
 
 
 async def _seed_database(sql, harness, as_of):
+    """A conta possui acesso cadastral a B, mas a delegação assina somente A."""
     permission_id = uuid4()
     other_user_id = uuid4()
     herd_ids = {
@@ -300,7 +301,7 @@ async def _seed_database(sql, harness, as_of):
             (harness.property_external, other_user_id, "Propriedade externa"),
         ],
     )
-    # A conta possui acesso cadastral a B, mas a delegação assina somente A.
+
     await sql.execute(
         "INSERT INTO user_property VALUES ($1, $2, TRUE, CURRENT_DATE, NULL)",
         harness.user_id,

@@ -1,0 +1,1432 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Argos AI Service",
+    "description": "Gerencia sessões autenticadas e interações com os agentes do Argos. Cada resposta inclui o cabeçalho X-Argos-Correlation-ID para diagnóstico.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Verificar se o processo está ativo",
+        "description": "Retorna uma resposta simples quando o processo HTTP está em execução.",
+        "operationId": "live_health_live_get",
+        "responses": {
+          "200": {
+            "description": "O processo está ativo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Live Health Live Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": ["health"],
+        "summary": "Verificar se o serviço está pronto",
+        "description": "Verifica dependências essenciais, incluindo persistência, autenticação, runtime dos agentes e integração documental quando configurada.",
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "O serviço está pronto para receber requisições.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "503": {
+            "description": "Uma ou mais dependências essenciais estão indisponíveis."
+          }
+        }
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "Listar sessões",
+        "description": "Lista as sessões pertencentes ao usuário autenticado.",
+        "operationId": "list_sessions_v1_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Sessões do usuário autenticado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  },
+                  "type": "array",
+                  "title": "Response List Sessions V1 Sessions Get"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido ou expirado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Usuário sem acesso habilitado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistência ou serviço de identidade indisponível.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["sessions"],
+        "summary": "Criar sessão",
+        "description": "Cria uma sessão para o usuário autenticado e retorna seu identificador.",
+        "operationId": "create_session_v1_sessions_post",
+        "responses": {
+          "201": {
+            "description": "Sessão criada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido ou expirado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Usuário sem acesso habilitado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistência ou serviço de identidade indisponível.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/messages": {
+      "get": {
+        "tags": ["sessions"],
+        "summary": "Consultar mensagens da sessão",
+        "description": "Retorna mensagens sanitizadas em ordem cronológica. Use next_cursor para buscar a próxima página.",
+        "operationId": "list_session_messages_v1_sessions__session_id__messages_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Identificador UUID da sessão consultada.",
+              "examples": ["123e4567-e89b-12d3-a456-426614174000"],
+              "title": "Session Id"
+            },
+            "description": "Identificador UUID da sessão consultada."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Quantidade máxima de mensagens retornadas nesta página.",
+              "examples": [50],
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Quantidade máxima de mensagens retornadas nesta página."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor opaco retornado como next_cursor na página anterior.",
+              "examples": ["cursor-opaco-retornado-pela-api"],
+              "title": "Cursor"
+            },
+            "description": "Cursor opaco retornado como next_cursor na página anterior."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de mensagens da sessão.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionMessagesPage"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido ou expirado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A sessão não pertence ao escopo autorizado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sessão não encontrada.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Identificador ou parâmetro inválido.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Histórico da sessão indisponível.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/interactions/async": {
+      "post": {
+        "tags": ["interactions"],
+        "summary": "Enviar interação para processamento",
+        "description": "Aceita uma nova mensagem ou uma resposta a uma pergunta pendente. O processamento ocorre em segundo plano; consulte operation_id para acompanhar o estado.",
+        "operationId": "create_interaction_async_v1_sessions__session_id__interactions_async_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Identificador UUID da sessão que receberá a interação.",
+              "examples": ["123e4567-e89b-12d3-a456-426614174000"],
+              "title": "Session Id"
+            },
+            "description": "Identificador UUID da sessão que receberá a interação."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MessageInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnswerInteraction"
+                  }
+                ],
+                "title": "Body"
+              },
+              "examples": {
+                "mensagem": {
+                  "summary": "Enviar uma mensagem",
+                  "description": "Inicia uma interação com uma mensagem do usuário.",
+                  "value": {
+                    "kind": "message",
+                    "client_message_id": "123e4567-e89b-12d3-a456-426614174001",
+                    "message": "Quantos animais há no lote 12?"
+                  }
+                },
+                "resposta": {
+                  "summary": "Responder a uma pergunta pendente",
+                  "description": "Envia uma resposta vinculada à pergunta e à interação originais.",
+                  "value": {
+                    "kind": "answer",
+                    "interaction_id": "123e4567-e89b-12d3-a456-426614174002",
+                    "question_id": "123e4567-e89b-12d3-a456-426614174003",
+                    "answer": {
+                      "kind": "text",
+                      "text": "Lote 12"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Interação aceita para processamento em segundo plano.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionAccepted"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Conteúdo da interação inválido.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido ou expirado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A sessão não pertence ao escopo autorizado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sessão ou pergunta não encontrada.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Interação incompatível com o estado atual da sessão.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Corpo ou parâmetro inválido.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço de sessão indisponível.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{session_id}/interactions/{operation_id}": {
+      "get": {
+        "tags": ["interactions"],
+        "summary": "Consultar estado da interação",
+        "description": "Consulta o processamento de uma interação aceita anteriormente.",
+        "operationId": "get_interaction_operation_v1_sessions__session_id__interactions__operation_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Identificador UUID da sessão.",
+              "examples": ["123e4567-e89b-12d3-a456-426614174000"],
+              "title": "Session Id"
+            },
+            "description": "Identificador UUID da sessão."
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Identificador UUID retornado ao aceitar a interação.",
+              "examples": ["123e4567-e89b-12d3-a456-426614174004"],
+              "title": "Operation Id"
+            },
+            "description": "Identificador UUID retornado ao aceitar a interação."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado atual da interação e resultado, quando concluído.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionOperationStatus"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido ou expirado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A sessão não pertence ao escopo autorizado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sessão ou interação não encontrada.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Identificador inválido.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Serviço de sessão indisponível.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/firebase": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Autenticar com Firebase",
+        "description": "Valida um Firebase ID token enviado no cabeçalho Authorization e emite um token de acesso do serviço. O token Firebase não deve ser enviado no corpo.",
+        "operationId": "authenticate_firebase_v1_auth_firebase_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Firebase ID token no formato Bearer <token>.",
+              "examples": ["Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."],
+              "title": "Authorization"
+            },
+            "description": "Firebase ID token no formato Bearer <token>."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token de acesso do serviço emitido.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido, expirado ou revogado.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Usuário sem cadastro habilitado ou sem propriedades autorizadas.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Autenticação Firebase ou consulta cadastral indisponível.",
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Erro de validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "headers": {
+              "X-Argos-Correlation-ID": {
+                "description": "Identificador de correlação desta requisição no serviço Argos.",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccessTokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Access Token",
+            "description": "Token Bearer emitido pelo serviço para as próximas requisições.",
+            "examples": ["eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9..."]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["access_token"],
+        "title": "AccessTokenResponse",
+        "description": "Token emitido para autenticar chamadas à API do Argos."
+      },
+      "AnswerChoice": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "choice",
+            "title": "Kind",
+            "description": "Discriminador da resposta; use `choice`."
+          },
+          "option_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Option Id",
+            "description": "option_id de uma das opções da pergunta pendente.",
+            "examples": ["option-1"]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "option_id"],
+        "title": "AnswerChoice",
+        "description": "Seleção de uma opção de resposta oferecida pelo serviço."
+      },
+      "AnswerConfirmation": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "confirmation",
+            "title": "Kind",
+            "description": "Discriminador da resposta; use `confirmation`."
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm",
+            "description": "Use true para confirmar ou false para recusar.",
+            "examples": [true]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "confirm"],
+        "title": "AnswerConfirmation",
+        "description": "Confirmação ou recusa de uma ação solicitada."
+      },
+      "AnswerInteraction": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "answer",
+            "title": "Kind",
+            "description": "Discriminador da interação; use `answer`."
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interaction Id",
+            "description": "Identificador da interação que apresentou a pergunta.",
+            "examples": ["123e4567-e89b-12d3-a456-426614174002"]
+          },
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id",
+            "description": "Identificador da pergunta que está sendo respondida.",
+            "examples": ["123e4567-e89b-12d3-a456-426614174003"]
+          },
+          "answer": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AnswerText"
+              },
+              {
+                "$ref": "#/components/schemas/AnswerChoice"
+              },
+              {
+                "$ref": "#/components/schemas/AnswerConfirmation"
+              }
+            ],
+            "title": "Answer",
+            "description": "Resposta em texto, seleção ou confirmação.",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "choice": "#/components/schemas/AnswerChoice",
+                "confirmation": "#/components/schemas/AnswerConfirmation",
+                "text": "#/components/schemas/AnswerText"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "interaction_id", "question_id", "answer"],
+        "title": "AnswerInteraction",
+        "description": "Resposta vinculada à pergunta de esclarecimento de uma interação anterior."
+      },
+      "AnswerResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "answer",
+            "title": "Kind",
+            "description": "Discriminador da resposta; use `answer`."
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "Texto final da resposta.",
+            "examples": ["O lote 12 contém 48 animais."]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "text"],
+        "title": "AnswerResponse",
+        "description": "Resposta final apresentada ao usuário."
+      },
+      "AnswerText": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "text",
+            "title": "Kind",
+            "description": "Discriminador da resposta; use `text`."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Text",
+            "description": "Texto fornecido pelo usuário, com até 8.000 caracteres.",
+            "examples": ["Lote 12"]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "text"],
+        "title": "AnswerText",
+        "description": "Resposta em texto livre a uma pergunta pendente."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InteractionAccepted": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operation Id",
+            "description": "Identificador usado para consultar o estado da operação.",
+            "examples": ["123e4567-e89b-12d3-a456-426614174004"]
+          },
+          "status": {
+            "type": "string",
+            "const": "accepted",
+            "title": "Status",
+            "description": "Estado inicial da operação.",
+            "default": "accepted",
+            "examples": ["accepted"]
+          },
+          "poll_after_ms": {
+            "type": "integer",
+            "title": "Poll After Ms",
+            "description": "Intervalo mínimo sugerido, em milissegundos, antes de consultar novamente.",
+            "default": 1000,
+            "examples": [1000]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["operation_id"],
+        "title": "InteractionAccepted",
+        "description": "Confirmação de que o processamento assíncrono foi aceito."
+      },
+      "InteractionOperationStatus": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Operation Id",
+            "description": "Identificador da operação consultada."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["accepted", "running", "completed", "degraded", "failed", "interrupted"],
+            "title": "Status",
+            "description": "Estado do processamento da interação.",
+            "examples": ["running"]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InteractionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resultado disponível após a conclusão; omitido enquanto não houver resultado."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["operation_id", "status"],
+        "title": "InteractionOperationStatus",
+        "description": "Estado atual de uma operação de interação assíncrona."
+      },
+      "InteractionResult": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Schema Version",
+            "description": "Versão do contrato de resposta.",
+            "default": "1"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["completed", "degraded"],
+            "title": "Status",
+            "description": "Estado da resposta: concluída ou concluída com limitações.",
+            "default": "completed",
+            "examples": ["completed"]
+          },
+          "degradation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degradation Reasons",
+            "description": "Códigos das limitações que afetaram a resposta, quando houver."
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "Data e hora de conclusão em UTC.",
+            "examples": ["2026-10-27T12:00:03Z"]
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id",
+            "description": "Identificador da sessão."
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interaction Id",
+            "description": "Identificador da interação processada."
+          },
+          "public_request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Public Request Id",
+            "description": "Identificador público desta requisição."
+          },
+          "response": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AnswerResponse"
+              },
+              {
+                "$ref": "#/components/schemas/QuestionResponse"
+              }
+            ],
+            "title": "Response",
+            "description": "Pergunta de esclarecimento ou resposta final.",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "answer": "#/components/schemas/AnswerResponse",
+                "question": "#/components/schemas/QuestionResponse"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "interaction_id", "public_request_id", "response"],
+        "title": "InteractionResult",
+        "description": "Resultado final de uma interação processada."
+      },
+      "MessageInteraction": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "message",
+            "title": "Kind",
+            "description": "Discriminador da interação; use `message`."
+          },
+          "client_message_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Client Message Id",
+            "description": "Identificador gerado pelo cliente para deduplicar o envio.",
+            "examples": ["123e4567-e89b-12d3-a456-426614174001"]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Message",
+            "description": "Texto da mensagem do usuário, com até 8.000 caracteres.",
+            "examples": ["Quantos animais há no lote 12?"]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "client_message_id", "message"],
+        "title": "MessageInteraction",
+        "description": "Nova mensagem enviada pelo usuário à sessão."
+      },
+      "QuestionOption": {
+        "properties": {
+          "option_id": {
+            "type": "string",
+            "title": "Option Id",
+            "description": "Identificador estável da opção, usado ao responder à pergunta.",
+            "examples": ["option-1"]
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Texto apresentado ao usuário para esta opção.",
+            "examples": ["Lote 12"]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["option_id", "label"],
+        "title": "QuestionOption",
+        "description": "Opção de resposta identificada pelo serviço."
+      },
+      "QuestionResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "question",
+            "title": "Kind",
+            "description": "Discriminador da resposta; use `question`."
+          },
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id",
+            "description": "Identificador usado para vincular a resposta à pergunta.",
+            "examples": ["123e4567-e89b-12d3-a456-426614174003"]
+          },
+          "input_type": {
+            "type": "string",
+            "enum": ["free_text", "single_choice", "confirmation"],
+            "title": "Input Type",
+            "description": "Tipo de resposta esperado: texto livre, opção única ou confirmação.",
+            "examples": ["single_choice"]
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt",
+            "description": "Pergunta apresentada ao usuário.",
+            "examples": ["Qual lote você quer consultar?"]
+          },
+          "reason_code": {
+            "type": "string",
+            "title": "Reason Code",
+            "description": "Código técnico do motivo do esclarecimento.",
+            "examples": ["MISSING_FIELDS"]
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            },
+            "type": "array",
+            "title": "Options",
+            "description": "Opções apresentadas quando input_type é `single_choice`."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "Prazo de validade da pergunta em UTC.",
+            "examples": ["2026-10-27T12:10:00Z"]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["kind", "question_id", "input_type", "prompt", "reason_code", "expires_at"],
+        "title": "QuestionResponse",
+        "description": "Pergunta de esclarecimento que aguarda uma resposta do usuário."
+      },
+      "Session": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Schema Version",
+            "description": "Versão do contrato de resposta da sessão.",
+            "default": "1",
+            "examples": ["1"]
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id",
+            "description": "Identificador único da sessão.",
+            "examples": ["123e4567-e89b-12d3-a456-426614174000"]
+          },
+          "farm_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Farm Ids",
+            "description": "Identificadores das propriedades autorizadas para esta sessão.",
+            "examples": [["123e4567-e89b-12d3-a456-426614174010"]]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Data e hora de criação da sessão em UTC.",
+            "examples": ["2026-10-27T12:00:00Z"]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "farm_ids", "created_at"],
+        "title": "Session",
+        "description": "Sessão de conversa e propriedades acessíveis ao usuário autenticado."
+      },
+      "SessionMessage": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Message Id",
+            "description": "Identificador único da mensagem."
+          },
+          "interaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interaction Id",
+            "description": "Identificador da interação associada à mensagem."
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Sequence",
+            "description": "Posição cronológica da mensagem na sessão.",
+            "examples": [1]
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"],
+            "title": "Role",
+            "description": "Autor da mensagem: usuário ou assistente.",
+            "examples": ["user"]
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user_input", "assistant_answer", "clarification_question"],
+            "title": "Kind",
+            "description": "Tipo da mensagem armazenada.",
+            "examples": ["user_input"]
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 32000,
+            "minLength": 1,
+            "title": "Content",
+            "description": "Conteúdo público e sanitizado da mensagem.",
+            "examples": ["Quantos animais há no lote 12?"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Data e hora de criação em UTC.",
+            "examples": ["2026-10-27T12:00:00Z"]
+          },
+          "question_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Question Id",
+            "description": "Identificador da pergunta pendente, quando aplicável."
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AnswerText"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnswerChoice"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnswerConfirmation"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "choice": "#/components/schemas/AnswerChoice",
+                    "confirmation": "#/components/schemas/AnswerConfirmation",
+                    "text": "#/components/schemas/AnswerText"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer",
+            "description": "Resposta do usuário vinculada a uma pergunta, quando aplicável."
+          },
+          "response": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AnswerResponse"
+                  },
+                  {
+                    "$ref": "#/components/schemas/QuestionResponse"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "answer": "#/components/schemas/AnswerResponse",
+                    "question": "#/components/schemas/QuestionResponse"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response",
+            "description": "Pergunta ou resposta produzida pelo assistente, quando aplicável."
+          },
+          "redacted": {
+            "type": "boolean",
+            "title": "Redacted",
+            "description": "Indica se dados sensíveis foram removidos do conteúdo.",
+            "default": false
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["completed", "degraded"]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "Estado da interação concluída, quando aplicável."
+          },
+          "degradation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degradation Reasons",
+            "description": "Códigos das limitações da interação, quando houver."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message_id",
+          "interaction_id",
+          "sequence",
+          "role",
+          "kind",
+          "content",
+          "created_at"
+        ],
+        "title": "SessionMessage",
+        "description": "Mensagem pública, já sanitizada, retornada ao titular da sessão."
+      },
+      "SessionMessagesPage": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "1",
+            "title": "Schema Version",
+            "description": "Versão do contrato da página.",
+            "default": "1"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id",
+            "description": "Identificador da sessão consultada."
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionMessage"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Mensagens desta página em ordem cronológica."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Cursor opaco para buscar a próxima página; nulo quando não há próxima página."
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "description": "Indica se há mais mensagens disponíveis.",
+            "examples": [false]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": ["session_id", "items", "next_cursor", "has_more"],
+        "title": "SessionMessagesPage",
+        "description": "Página cronológica de mensagens anteriores à fronteira do cursor."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

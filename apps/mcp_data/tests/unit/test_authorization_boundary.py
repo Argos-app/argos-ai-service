@@ -1,5 +1,6 @@
 """Falhas de autorização devem ocorrer antes de qualquer acesso ao repositório."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -15,7 +16,7 @@ class _Directory:
         self.property_ids = property_ids
 
     async def get_user_property_access(self, firebase_uid):
-        from argos_mcp_data.ports.access_directory import UserPropertyAccess
+        from packages.security.access_directory import UserPropertyAccess
 
         return UserPropertyAccess(user_id=uuid4(), property_ids=self.property_ids)
 
@@ -98,3 +99,30 @@ async def test_analyst_can_resolve_properties_only_inside_delegated_scope():
     assert repository.calls == 1
     assert repository.scope is not None
     assert repository.scope.property_ids == (authorized_id,)
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_data_policy_preserves_scope_limits_and_observability_context():
+    property_ids = tuple(uuid4() for _ in range(101))
+    correlation_id, parent_id = uuid4(), uuid4()
+    context = replace(
+        _context(authorized_property_ids=property_ids),
+        correlation_id=correlation_id,
+        parent_observation_id=parent_id,
+    )
+    policy = AccessPolicy(_Directory(set(property_ids)))
+
+    scope = await policy.authorize(context, operation="cattle.read")
+
+    assert scope.property_ids == property_ids
+    assert scope.correlation_id == correlation_id
+    assert scope.parent_observation_id == parent_id
+    duplicate_claim = replace(context, authorized_property_ids=(property_ids[0], property_ids[0]))
+    selected = await policy.authorize(
+        duplicate_claim,
+        operation="cattle.read",
+        selected_property_ids=(property_ids[0],),
+    )
+    assert selected.property_ids == (property_ids[0],)
+    with pytest.raises(AccessDeniedError):
+        await policy.authorize(None, operation="cattle.read")

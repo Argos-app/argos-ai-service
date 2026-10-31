@@ -154,6 +154,8 @@ class ErrorMetadata(_ObservabilityModel):
 
 
 class Usage(_ObservabilityModel):
+    """Nomes originais do provedor para categorias adicionais, com valores apenas numéricos."""
+
     availability: UsageAvailability
     source: UsageSource | None = None
     input_tokens: NonNegativeCount | None = None
@@ -162,7 +164,7 @@ class Usage(_ObservabilityModel):
     cache_read_tokens: NonNegativeCount | None = None
     cache_write_tokens: NonNegativeCount | None = None
     reasoning_tokens: NonNegativeCount | None = None
-    # Nomes originais do provedor para categorias adicionais, com valores apenas numéricos.
+
     details: dict[BoundedName, NonNegativeCount] = Field(default_factory=dict, max_length=32)
 
 
@@ -199,7 +201,7 @@ class Observation(_ObservabilityModel):
     """
 
     id: str = Field(alias="_id", min_length=36, max_length=36)
-    schema_version: Literal["1", "2"] = "2"
+    schema_version: Literal["2"] = "2"
     correlation_id: UUID | None = None
     parent_observation_id: UUID | None = None
     session_id: UUID | None = None

@@ -19,7 +19,8 @@ class TemplateReportRenderer:
         recipients: tuple[RecipientRef, ...],
         title: str,
     ) -> RenderedReport:
-        del recipients  # destinatários pertencem ao envelope do e-mail, não ao conteúdo.
+        """destinatários pertencem ao envelope do e-mail, não ao conteúdo."""
+        del recipients
         lot = report.requested_lot
         applications = (
             "\n".join(

@@ -36,6 +36,8 @@ class ServiceAuthenticationMiddleware:
         self._delegation_verifier = delegation_verifier
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        """A prontidão é chamada interna de infraestrutura. Rotas de negócio
+        exigem também o contexto assinado do usuário em cada requisição."""
         if scope["type"] != "http" or scope["path"] == "/health/live":
             await self._app(scope, receive, send)
             return
@@ -57,8 +59,6 @@ class ServiceAuthenticationMiddleware:
             await response(scope, receive, send)
             return
 
-        # A prontidão é chamada interna de infraestrutura. Rotas de negócio
-        # exigem também o contexto assinado do usuário em cada requisição.
         if scope.get("path") != "/health/ready":
             delegation_values = [
                 value
@@ -96,10 +96,11 @@ def create_a2a_server(
 ) -> Any:
     """Cria healthchecks e, quando composto, o transporte A2A protegido.
 
-    O transporte não publica um Agent Card sem um registry funcional. Isso
-    permite que etapas posteriores componham o provedor de respostas e a
-    sincronização sem anunciar uma capacidade indisponível.
-    """
+        O transporte não publica um Agent Card sem um registry funcional. Isso
+        permite que etapas posteriores componham o provedor de respostas e a
+        sincronização sem anunciar uma capacidade indisponível.
+
+    A retomada de tarefas após reinício do processo não faz parte do contrato atual."""
 
     settings.validate_runtime(require_providers=False, require_permission_sql=False)
     try:
@@ -146,7 +147,7 @@ def create_a2a_server(
             raise RuntimeError("instale a2a-sdk[http-server] para publicar o endpoint A2A") from exc
 
         card = create_agent_card(settings.a2a_endpoint_url)
-        # Task recovery after process restart is not part of the current contract.
+
         handler = DefaultRequestHandler(
             agent_executor=DocumentA2AExecutor(
                 agent_registry,

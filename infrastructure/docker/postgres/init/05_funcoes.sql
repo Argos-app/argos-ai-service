@@ -1,4 +1,4 @@
--- functions
+-- funções
 
 
 create or replace FUNCTION fn_data_fim_carencia(p_medicine_id UUID, p_data DATE)

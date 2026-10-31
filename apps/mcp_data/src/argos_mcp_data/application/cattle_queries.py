@@ -87,8 +87,8 @@ class CattleQueryService:
     async def list_properties(
         self, context: AccessContext, request: ListPropertiesRequest
     ) -> Page[PropertyRecord]:
-        # The Analyst may resolve a user-provided property name for the
-        # prediction MCP. AccessPolicy still limits results to delegated IDs.
+        """O Analista pode resolver um nome de propriedade informado pelo usuário
+        para o MCP de previsão. A política ainda limita os resultados aos IDs delegados."""
         scope = await self._authorized_scope(
             context,
             request.property_ids,

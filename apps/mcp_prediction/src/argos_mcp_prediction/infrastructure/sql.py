@@ -1,4 +1,4 @@
-"""Adapter asyncpg limitado à leitura em transações read-only."""
+"""Adapter asyncpg limitado à leitura em transações somente leitura."""
 
 from collections.abc import Mapping, Sequence
 from typing import Any

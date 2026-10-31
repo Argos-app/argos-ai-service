@@ -63,6 +63,8 @@ class McpDataClient:
         herd_id: UUID | None = None,
         property_id: UUID | None = None,
     ) -> ReportLotResolution:
+        """A autorização do MCP continua autoritativa; esta é uma verificação adicional
+        bloqueia o candidato antes de encaminhá-lo ao agente."""
         code = lot_code.strip()
         properties = tuple(dict.fromkeys(UUID(str(value)) for value in authorized_property_ids))
         if not code or len(code) > 20:
@@ -108,8 +110,6 @@ class McpDataClient:
                 )
                 page = _LotPage.model_validate(_response_payload(result))
                 for record in page.items:
-                    # MCP authorization remains authoritative; this is an additional
-                    # fail-closed check before the candidate reaches the agent.
                     if record.property_id not in properties:
                         raise ValueError("MCP retornou lote fora do escopo delegado")
                     if record.lot_code.casefold() == code.casefold():

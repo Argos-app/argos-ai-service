@@ -1,4 +1,4 @@
--- indices
+-- índices
 
 
 create index idx_application_carencia

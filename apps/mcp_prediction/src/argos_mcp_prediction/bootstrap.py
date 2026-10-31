@@ -10,7 +10,6 @@ from argos_mcp_prediction.infrastructure import (
     PostgresCoverageRepository,
     UnknownCoverageRepository,
 )
-from argos_mcp_prediction.infrastructure.access_directory import PostgresAccessDirectory
 from argos_mcp_prediction.server import (
     McpPredictionServer,
     create_http_app,
@@ -18,6 +17,7 @@ from argos_mcp_prediction.server import (
 )
 from argos_mcp_prediction.settings import Settings
 from packages.security.access_policy import AccessPolicy
+from packages.security.adapters.postgres_access_directory import PostgresAccessDirectory
 from packages.security.delegation import DelegationTokenVerifier
 
 
@@ -34,7 +34,7 @@ class ServiceRuntime:
 
 
 async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
-    """Abre o pool read-only e compõe a única ferramenta de negócio."""
+    """Abre o pool somente leitura e compõe a única ferramenta de negócio."""
 
     configured = settings or Settings.from_env()
     configured.validate_runtime()

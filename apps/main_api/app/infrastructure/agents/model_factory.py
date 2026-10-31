@@ -6,8 +6,7 @@ from typing import Any
 from app.agents.registry import DEFAULT_AGENT_REGISTRY, ModelPolicyId
 from app.ports.agent import AgentId
 from app.settings import Settings
-
-from packages.model_options import thinking_options
+from langchain_core.runnables import Runnable
 
 
 class ModelRuntimeConfigurationError(RuntimeError):
@@ -15,34 +14,88 @@ class ModelRuntimeConfigurationError(RuntimeError):
 
 
 MODEL_POLICY_SETTINGS = {
-    ModelPolicyId.ROUTER: "model_router_name",
-    ModelPolicyId.FARM: "model_farm_name",
-    ModelPolicyId.DOCTOR: "model_doctor_name",
-    ModelPolicyId.ANALYST: "model_analyst_name",
-    ModelPolicyId.SECRETARY: "model_secretary_name",
-    ModelPolicyId.INFORMATION: "model_information_name",
-    ModelPolicyId.ORCHESTRATOR: "model_orchestrator_name",
-    ModelPolicyId.JUDGE: "model_judge_name",
-    ModelPolicyId.QUESTION_FORMATTER: "model_question_formatter_name",
+    ModelPolicyId.FAST: "model_fast_name",
+    ModelPolicyId.SPECIALIST: "model_specialist_name",
 }
+
+
+class _CrossProviderChatModel(Runnable[Any, Any]):
+    """Combina modelos ligados na mesma chamada usando fallback do LangChain."""
+
+    def __init__(self, primary: Any, fallback: Any, retryable_errors: tuple[type[Exception], ...]):
+        self._primary = primary
+        self._fallback = fallback
+        self._retryable_errors = retryable_errors
+
+    def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
+        return self._primary.with_fallbacks(
+            [self._fallback], exceptions_to_handle=self._retryable_errors
+        ).invoke(input, config=config, **kwargs)
+
+    async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
+        return await self._primary.with_fallbacks(
+            [self._fallback], exceptions_to_handle=self._retryable_errors
+        ).ainvoke(input, config=config, **kwargs)
+
+    def get_num_tokens(self, text: str) -> int:
+        """Conta tokens pelo maior dos dois providers para respeitar ambos os limites."""
+        counts = []
+        for model in (self._primary, self._fallback):
+            counter = getattr(model, "get_num_tokens", None)
+            if not callable(counter):
+                continue
+            count = counter(text)
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                raise ModelRuntimeConfigurationError(
+                    "provider retornou uma contagem de tokens inválida"
+                )
+            counts.append(count)
+        if not counts:
+            raise ModelRuntimeConfigurationError(
+                "nenhum provider configurado oferece contagem de tokens"
+            )
+        return max(counts)
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> Any:
+        primary = self._primary.with_structured_output(schema, **kwargs)
+        fallback = self._fallback.with_structured_output(
+            schema,
+            method="json_schema",
+            **kwargs,
+        )
+        return primary.with_fallbacks([fallback], exceptions_to_handle=self._retryable_errors)
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+        primary = self._primary.bind_tools(tools, **kwargs)
+        fallback_kwargs = dict(kwargs)
+        response_format = fallback_kwargs.pop("response_format", None)
+        if isinstance(response_format, Mapping):
+            specification = response_format.get("json_schema", {})
+            schema = specification.get("schema") if isinstance(specification, Mapping) else None
+            if not isinstance(schema, Mapping):
+                raise ModelRuntimeConfigurationError("LangGraph enviou um JSON Schema inválido")
+            fallback_kwargs["output_config"] = {
+                "format": {"type": "json_schema", "schema": dict(schema)}
+            }
+        fallback = self._fallback.bind_tools(tools, strict=True, **fallback_kwargs)
+        return primary.with_fallbacks(
+            [fallback],
+            exceptions_to_handle=self._retryable_errors,
+        )
 
 
 def validate_model_capabilities(
     models: Mapping[ModelPolicyId, Any],
     *,
     registry=DEFAULT_AGENT_REGISTRY,
-    simulated: bool | None = None,
+    simulated: bool = False,
 ) -> None:
-    """Confere localmente se os modelos dos agentes com ToolStrategy aceitam bind_tools.
+    """Confere suporte local a saída estruturada e às ferramentas declaradas.
 
     A validação é local: ela não chama o provider e não confirma que o endpoint
-    aceita a chamada de ferramenta durante uma requisição real.
+    aceita ferramentas ou saída estruturada durante uma requisição real.
     """
-    if simulated is None:
-        simulated = any(
-            getattr(model, "_llm_type", None) == "argos_simulated" for model in models.values()
-        )
-
+    checked_models: set[int] = set()
     for agent_id in AgentId:
         definition = registry.get(agent_id)
         model = models.get(definition.model_policy)
@@ -50,14 +103,16 @@ def validate_model_capabilities(
             raise ModelRuntimeConfigurationError(
                 f"modelo ausente para a política {definition.model_policy.value}"
             )
-        uses_tool_strategy = (
-            bool(definition.tool_slots)
-            or agent_id in {AgentId.ROUTER, AgentId.QUESTION_FORMATTER}
-            or (simulated and agent_id in {AgentId.ORCHESTRATOR, AgentId.JUDGE})
-        )
-        if not uses_tool_strategy:
-            continue
+        if not simulated and id(model) not in checked_models:
+            structured_output = getattr(model, "with_structured_output", None)
+            if not callable(structured_output):
+                raise ModelRuntimeConfigurationError(
+                    f"modelo de {agent_id.value} não permite saída estruturada nativa"
+                )
+            checked_models.add(id(model))
 
+        if not definition.tool_slots:
+            continue
         bind_tools = getattr(model, "bind_tools", None)
         if not callable(bind_tools):
             raise ModelRuntimeConfigurationError(
@@ -79,10 +134,11 @@ def create_configured_models(
 ) -> tuple[dict[ModelPolicyId, Any] | None, str | None]:
     """Cria os modelos configurados por agente sem consultar o provider no bootstrap.
 
-    O segundo item indica por que o runtime ainda não está disponível. Isso
-    permite manter liveness ativo e readiness fechado enquanto falta configuração
-    ou credencial, sem expor detalhes do segredo no healthcheck.
-    """
+        O segundo item indica por que o runtime ainda não está disponível. Isso
+        permite manter liveness ativo e readiness fechado enquanto falta configuração
+        ou credencial, sem expor detalhes do segredo no healthcheck.
+
+    O adapter de chat é configurado para chamadas sem raciocínio adicional."""
     model_names = {
         policy: getattr(settings, setting_name)
         for policy, setting_name in MODEL_POLICY_SETTINGS.items()
@@ -101,8 +157,12 @@ def create_configured_models(
         for value in model_names.values()
     ):
         return None, "model_configuration_incomplete"
-    if not settings.model_api_key:
+    if not settings.openai_base_url:
+        return None, "model_endpoint_not_configured"
+    if not settings.openai_api_key:
         return None, "model_credentials_not_configured"
+    if settings.anthropic_api_key and not settings.anthropic_base_url:
+        return None, "fallback_model_endpoint_not_configured"
 
     if chat_model_factory is None:
         try:
@@ -114,25 +174,20 @@ def create_configured_models(
         chat_model_factory = ChatOpenAI
 
     shared_options: dict[str, Any] = {
-        "api_key": settings.model_api_key,
+        "api_key": settings.openai_api_key,
+        "base_url": settings.openai_base_url,
         "timeout": settings.model_timeout_seconds,
         "max_retries": settings.model_max_retries,
         "max_tokens": settings.model_max_output_tokens,
+        "reasoning_effort": "none",
     }
-    if settings.model_api_base_url is not None:
-        shared_options["base_url"] = settings.model_api_base_url
-
     try:
         model_instances: dict[str, Any] = {}
         models = {}
         for policy, model_name in model_names.items():
             if model_name not in model_instances:
-                options = thinking_options(
-                    model_name, settings.model_api_base_url, settings.model_thinking
-                )
                 model_instances[model_name] = chat_model_factory(
                     model=model_name,
-                    **({"extra_body": options} if options else {}),
                     **shared_options,
                 )
             models[policy] = model_instances[model_name]
@@ -141,5 +196,65 @@ def create_configured_models(
             "não foi possível inicializar os modelos configurados"
         ) from exc
 
+    if settings.anthropic_api_key:
+        models = _attach_anthropic_fallbacks(models, settings)
     validate_model_capabilities(models)
     return models, None
+
+
+def _attach_anthropic_fallbacks(
+    primary_models: Mapping[ModelPolicyId, Any], settings: Settings
+) -> dict[ModelPolicyId, Any]:
+    """Vincula Claude ao modelo OpenAI sem reexecutar o grafo de agente."""
+    names = {
+        ModelPolicyId.FAST: settings.model_fast_fallback_name,
+        ModelPolicyId.SPECIALIST: settings.model_specialist_fallback_name,
+    }
+    if any(
+        not isinstance(name, str) or not name.strip() or len(name) > 200 for name in names.values()
+    ):
+        raise ModelRuntimeConfigurationError("nomes dos modelos Anthropic estão inválidos")
+    try:
+        from langchain_anthropic import ChatAnthropic
+    except ImportError as exc:
+        raise ModelRuntimeConfigurationError(
+            "provider LangChain Anthropic não está instalado"
+        ) from exc
+
+    shared_options: dict[str, Any] = {
+        "api_key": settings.anthropic_api_key,
+        "base_url": settings.anthropic_base_url,
+        "timeout": settings.model_timeout_seconds,
+        "max_retries": settings.model_max_retries,
+        "max_tokens": settings.model_max_output_tokens,
+    }
+    model_instances: dict[str, Any] = {}
+    fallback_models: dict[ModelPolicyId, Any] = {}
+    try:
+        for policy, model_name in names.items():
+            if model_name not in model_instances:
+                model_instances[model_name] = ChatAnthropic(
+                    model=model_name,
+                    **shared_options,
+                )
+            fallback_models[policy] = model_instances[model_name]
+    except Exception as exc:
+        raise ModelRuntimeConfigurationError(
+            "não foi possível inicializar os modelos Anthropic de fallback"
+        ) from exc
+    try:
+        import openai
+    except ImportError as exc:
+        raise ModelRuntimeConfigurationError("SDK OpenAI não está instalado") from exc
+    retryable_errors = (
+        openai.APIConnectionError,
+        openai.APITimeoutError,
+        openai.RateLimitError,
+        openai.InternalServerError,
+    )
+    return {
+        policy: _CrossProviderChatModel(
+            primary_models[policy], fallback_models[policy], retryable_errors
+        )
+        for policy in ModelPolicyId
+    }

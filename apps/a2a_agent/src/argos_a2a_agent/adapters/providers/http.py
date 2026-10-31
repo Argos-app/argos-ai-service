@@ -37,6 +37,7 @@ class OpenAICompatibleHTTP:
         *,
         recorder: OperationRecorder | None = None,
         operation_route: str = "provider",
+        rate_profile: str | None = None,
     ) -> dict[str, Any]:
         status_code: int | None = None
         try:
@@ -64,14 +65,15 @@ class OpenAICompatibleHTTP:
                     "provedor HTTP indisponível ou retornou resposta inválida"
                 ) from exc
             raise
+        is_embedding = operation_route.rstrip("/").endswith("embeddings")
         if recorder is not None:
-            usage = _provider_usage(result.get("usage"))
-            is_embedding = operation_route.rstrip("/").endswith("embeddings")
+            usage = _provider_usage(result.get("usage"), embedding=is_embedding)
             billing = billing_with_fallback(
                 result,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 embedding=is_embedding,
+                rate_profile=rate_profile,
             )
             recorder.finish(
                 http=_http_metadata(operation_route, status_code),
@@ -80,17 +82,19 @@ class OpenAICompatibleHTTP:
                 billing=billing,
             )
         else:
-            usage = _provider_usage(result.get("usage"))
+            usage = _provider_usage(result.get("usage"), embedding=is_embedding)
             billing = billing_with_fallback(
                 result,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 embedding=operation_route.rstrip("/").endswith("embeddings"),
+                rate_profile=rate_profile,
             )
         attach_provider_billing(
             billing,
             usage.model_dump(mode="json", exclude_none=True),
             embedding=is_embedding,
+            rate_profile=rate_profile,
         )
         return result
 
@@ -114,7 +118,7 @@ def _count(value: Any) -> int | None:
     return None
 
 
-def _provider_usage(value: Any) -> Usage:
+def _provider_usage(value: Any, *, embedding: bool = False) -> Usage:
     if not isinstance(value, dict):
         return Usage(availability=UsageAvailability.ABSENT)
     prompt_details = value.get("prompt_tokens_details")
@@ -128,6 +132,8 @@ def _provider_usage(value: Any) -> Usage:
     if output_tokens is None:
         output_tokens = _count(value.get("completion_tokens"))
     total_tokens = _count(value.get("total_tokens"))
+    if embedding and input_tokens is None:
+        input_tokens = total_tokens
     cache_read = _count(prompt_details.get("cached_tokens"))
     cache_write = _count(prompt_details.get("cache_creation_tokens"))
     reasoning = _count(completion_details.get("reasoning_tokens"))

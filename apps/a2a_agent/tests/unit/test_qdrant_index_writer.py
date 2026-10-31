@@ -185,6 +185,26 @@ def test_upsert_writes_only_allowlisted_payload_into_revision_staging() -> None:
     assert client.collections[collection].distance is Distance.COSINE
 
 
+def test_dual_index_writes_named_openai_and_voyage_vectors():
+    client = FakeQdrantClient()
+    adapter = writer(client, voyage_vector_size=2)
+    item = indexed_chunk()
+    item = IndexedDocumentChunk(
+        chunk=item.chunk,
+        vector=item.vector,
+        metadata=item.metadata,
+        voyage_vector=(0.4, 0.6),
+    )
+
+    run_immediate(adapter.upsert_chunks(REVISION, (item,)))
+
+    collection, points, _ = client.upsert_calls[0]
+    assert points[0].vector == {"openai": list(item.vector), "voyage": [0.4, 0.6]}
+    assert set(client.collections[collection]) == {"openai", "voyage"}
+    assert client.collections[collection]["openai"].size == 3
+    assert client.collections[collection]["voyage"].size == 2
+
+
 def test_upsert_keeps_document_hash_separate_from_corpus_generation_hash() -> None:
     corpus_revision = "c" * 64
     document_revision = "d" * 64

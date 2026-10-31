@@ -17,7 +17,7 @@ from packages.contracts.a2a import DocumentAnswerStatus
 
 
 class DeterministicEmbeddings:
-    async def embed(self, texts):
+    async def embed(self, texts, *, input_type="document"):
         return tuple((float(len(text)), 1.0, 0.5) for text in texts)
 
 

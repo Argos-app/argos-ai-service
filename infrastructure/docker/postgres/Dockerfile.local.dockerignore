@@ -1,0 +1,9 @@
+**
+!infrastructure/
+!infrastructure/docker/
+!infrastructure/docker/postgres/
+!infrastructure/docker/postgres/init/
+!infrastructure/docker/postgres/init/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo

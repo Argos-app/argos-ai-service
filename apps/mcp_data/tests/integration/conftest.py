@@ -15,13 +15,13 @@ from uuid import uuid4
 import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parents[4]
-SQL_ADMIN_DSN = "postgresql://mcp_data_test:mcp_data_test_local_only@127.0.0.1:54329/mcp_data_test"
+SQL_ADMIN_DSN = "postgresql://mcp_data_test:mcp_data_test_local_only@127.0.0.1:54331/mcp_data_test"
 MONGO_URI = "mongodb://127.0.0.1:27029"
 SCHEMA_MODULES = tuple(
     ROOT / "infrastructure" / "docker" / "postgres" / "init" / f"{index:02d}_{name}.sql"
     for index, name in enumerate(
         (
-            "configuracao",
+            "configuration",
             "tabelas",
             "dados_iniciais",
             "indices",
@@ -287,8 +287,11 @@ async def _insert_mongo_documents(database, fixture_ids: dict[str, object]) -> N
 
 
 async def _insert_synthetic_data(sql) -> dict[str, object]:
-    """Cria P1/P3 autorizadas e P2 externa com chaves e rótulos repetidos."""
+    """Cria P1/P3 autorizadas e P2 externa com chaves e rótulos repetidos.
 
+    Simula uma movimentação válida: o animal saiu do lote autorizado antes
+    de entrar na propriedade externa. O schema permite apenas um registro
+    de histórico ativo (exit_date IS NULL) por animal."""
     user_id, owner_id = uuid4(), uuid4()
     property_a, property_b, property_external = uuid4(), uuid4(), uuid4()
     herd_a, herd_b, herd_external = uuid4(), uuid4(), uuid4()
@@ -466,9 +469,6 @@ async def _insert_synthetic_data(sql) -> dict[str, object]:
                (id, animal_exception_id, lot_id, entry_date, exit_date, reason)
                VALUES ($1, $2, $3, $4, $5, 'TESTE')""",
             [
-                # Model a valid move: the animal left its authorized lot before
-                # entering the external property. The schema permits only one
-                # active (exit_date IS NULL) history row per animal.
                 (uuid4(), animal_a, parent_a, today, today),
                 (uuid4(), animal_a, parent_external, today, None),
                 (uuid4(), animal_b, parent_b, today, None),

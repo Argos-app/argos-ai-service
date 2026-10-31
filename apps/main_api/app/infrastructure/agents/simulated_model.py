@@ -25,12 +25,14 @@ class SimulatedChatModel(BaseChatModel):
         return self.bind(tools=tools, **kwargs)
 
     def get_num_tokens(self, text: str) -> int:
-        """Estima tokens de forma local e conservadora, sem tokenizer externo."""
+        """Estima tokens de forma local e conservadora, sem tokenizer externo.
+
+        O simulador só precisa de uma medida determinística para respeitar os
+        limites de contexto durante testes. Três bytes por token é deliberadamente
+        conservador para texto UTF-8 e não depende de modelo ou provider."""
         if not text:
             return 0
-        # O simulador só precisa de uma medida determinística para respeitar os
-        # limites de contexto durante testes. Três bytes por token é deliberadamente
-        # conservador para texto UTF-8 e não depende de modelo ou provider.
+
         return (len(text.encode("utf-8")) + 2) // 3
 
     def _generate(
@@ -280,7 +282,9 @@ _STRUCTURED_NAMES = {
 
 
 def _simulated_session_summary(messages: list[BaseMessage]) -> dict[str, Any]:
-    """Gera um resumo estruturalmente válido sem alegar síntese de provider."""
+    """Gera um resumo estruturalmente válido sem alegar síntese de provider.
+
+    Mantém folga para os demais campos na serialização do contrato."""
     payload_text = _last_human_text(messages)
     try:
         payload = json.loads(payload_text)
@@ -322,7 +326,6 @@ def _simulated_session_summary(messages: list[BaseMessage]) -> dict[str, Any]:
 
     token_budget = payload.get("token_budget")
     if isinstance(token_budget, int) and token_budget > 0:
-        # Mantém folga para os demais campos na serialização do contrato.
         activity = activity[: min(2_500, token_budget * 5)]
     simulated_limitation = (
         "Resumo determinístico do modo simulado; não representa síntese de provider."
@@ -388,13 +391,13 @@ def _requested_medicine_name(text: str) -> str | None:
 
 
 def _agent_for_tool(name: str) -> str:
-    if name.startswith("list_medicine") or name == "mock_consultar_medicamento":
+    if name.startswith("list_medicine") or name == "mock_query_medicine":
         return "doctor"
-    if name in {"estimate_medicine_consumption", "mock_calcular_previsao"}:
+    if name in {"estimate_medicine_consumption", "mock_estimate_prediction"}:
         return "analyst"
-    if name in {"prepare_report", "send_report", "get_report_status", "mock_preparar_relatorio"}:
+    if name in {"prepare_report", "send_report", "get_report_status", "mock_prepare_report"}:
         return "secretary"
-    if "document" in name or "legal" in name or name == "mock_consultar_documental":
+    if "document" in name or "legal" in name or name == "mock_query_documents":
         return "information"
     return "farm"
 
@@ -408,21 +411,21 @@ def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -
             specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
         )
         return {"question": question[:4_000] or "Consulte os documentos sintéticos disponíveis."}
-    if name == "mock_consultar_documental":
+    if name == "mock_query_documents":
         question = str(
             specialist_input.get("goal") or specialist_input.get("brief_sanitized") or ""
         )
         return {"pergunta": question[:4_000] or "Consulte os documentos sintéticos disponíveis."}
-    if name == "mock_consultar_fazenda":
+    if name == "mock_query_farm":
         query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
         return {"consulta": query[:4_000] or "Consulte os dados sintéticos disponíveis."}
-    if name == "mock_consultar_medicamento":
+    if name == "mock_query_medicine":
         query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
         return {"nome": _requested_medicine_name(query) or query[:500]}
-    if name == "mock_calcular_previsao":
+    if name == "mock_estimate_prediction":
         query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
         return {"pergunta": query[:4_000] or "Calcule uma previsão sintética."}
-    if name == "mock_preparar_relatorio":
+    if name == "mock_prepare_report":
         query = str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
         return {"tipo": query[:500] or "relatório sintético"}
     if name in {"list_medicines", "list_medicine_documents"}:
@@ -472,6 +475,8 @@ def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str | No
 def _next_tool(
     names: list[str], specialist_input: dict[str, Any], messages: list[BaseMessage]
 ) -> str | None:
+    """No pedido inicial, ainda não existe preparação persistida nesta execução.
+    Prepare primeiro; só despache depois de o MCP confirmar status prepared."""
     if specialist_input.get("email_send_authorized") is True and "send_report" in names:
         last_email_result = next(
             (
@@ -483,8 +488,6 @@ def _next_tool(
             None,
         )
         if last_email_result is None:
-            # No pedido inicial, ainda não existe preparação persistida nesta execução.
-            # Prepare primeiro; só despache depois de o MCP confirmar status prepared.
             return "prepare_report" if "prepare_report" in names else None
         if last_email_result.name == "send_report":
             return None

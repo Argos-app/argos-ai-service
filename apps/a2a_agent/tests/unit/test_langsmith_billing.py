@@ -52,13 +52,16 @@ def test_a2a_langsmith_metadata_supports_configured_rate_estimate(monkeypatch):
             calls.append(kwargs)
 
     monkeypatch.setattr("langsmith.run_helpers.get_current_run_tree", lambda: RunTree())
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    billing = configured_rate_billing(input_tokens=200, output_tokens=None, embedding=True)
+    monkeypatch.setenv("MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    billing = configured_rate_billing(
+        input_tokens=200, output_tokens=None, embedding=True, rate_profile="embedding"
+    )
 
     attach_provider_billing(
         billing,
         {"input_tokens": 200, "total_tokens": 200},
         embedding=True,
+        rate_profile="embedding",
     )
 
     assert calls[0]["metadata"]["argos_billing"] == {

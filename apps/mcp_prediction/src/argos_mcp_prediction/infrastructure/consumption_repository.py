@@ -1,4 +1,7 @@
-"""Agregação PostgreSQL parametrizada, restrita ao escopo e sem paginação de eventos."""
+"""Agregação PostgreSQL parametrizada, restrita ao escopo e sem paginação de eventos.
+
+Joins: modulos/02_tabelas.sql e infrastructure/cattle_repository.py do MCP de dados.
+Consumo: dose * head_count_applied, conforme 06_triggers.sql e 07_procedures.sql."""
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -17,8 +20,7 @@ from packages.security.errors import AccessDeniedError
 _MAX_GROUPS = 1000
 _MAX_MONTHLY_ROWS = _MAX_GROUPS * 12
 
-# Joins: modulos/02_tabelas.sql e infrastructure/cattle_repository.py do MCP de dados.
-# Consumo: dose * head_count_applied, conforme 06_triggers.sql e 07_procedures.sql.
+
 _CONSUMPTION_SQL = """
     WITH scoped_applications AS (
         SELECT a.id, p.id AS property_id, m.id AS medicine_id,

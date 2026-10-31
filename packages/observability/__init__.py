@@ -4,6 +4,7 @@ from .billing import (
     billing_from_usage_payload,
     billing_with_fallback,
     configured_rate_billing,
+    configured_rate_profile,
     langsmith_usage_metadata,
     provider_billing,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "BestEffortObservationCollector",
     "provider_billing",
     "configured_rate_billing",
+    "configured_rate_profile",
     "langsmith_usage_metadata",
     "billing_with_fallback",
     "billing_from_usage_payload",

@@ -6,7 +6,7 @@ import json
 import re
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 from app.domain.sessions import (
     ExecutionEvent,
@@ -77,10 +77,6 @@ def _safe_text(value: Any) -> str:
     return sanitized
 
 
-def _event_id(invocation_id: UUID, state: ExecutionStatus) -> UUID:
-    return uuid5(invocation_id, state.value)
-
-
 class ExecutionObserver:
     """Produz eventos correlacionados para uma interação do usuário."""
 
@@ -100,7 +96,7 @@ class ExecutionObserver:
         now = _utcnow()
         await self._append(
             ExecutionEvent(
-                event_id=_event_id(invocation_id, ExecutionStatus.STARTED),
+                event_id=invocation_id,
                 invocation_id=invocation_id,
                 session_id=self._session_id,
                 interaction_id=self._interaction_id,
@@ -124,7 +120,7 @@ class ExecutionObserver:
         status = ExecutionStatus.FAILED if failed else ExecutionStatus.SUCCEEDED
         await self._append(
             ExecutionEvent(
-                event_id=_event_id(invocation_id, status),
+                event_id=invocation_id,
                 invocation_id=invocation_id,
                 session_id=self._session_id,
                 interaction_id=self._interaction_id,
@@ -181,7 +177,7 @@ class ExecutionObserver:
             )
         await self._append(
             ExecutionEvent(
-                event_id=_event_id(invocation_id, status),
+                event_id=invocation_id,
                 invocation_id=invocation_id,
                 session_id=self._session_id,
                 interaction_id=self._interaction_id,

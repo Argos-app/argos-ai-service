@@ -11,7 +11,11 @@ from typing import Any
 from langchain_core.messages.ai import add_usage
 
 from app.settings import Settings
-from packages.observability import billing_from_usage_payload, langsmith_usage_metadata
+from packages.observability import (
+    billing_from_usage_payload,
+    configured_rate_profile,
+    langsmith_usage_metadata,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,10 +47,15 @@ def _usage_metadata_from_outputs(outputs: Any) -> dict[str, Any] | None:
     return dict(usage) if isinstance(usage, Mapping) else None
 
 
-def _attach_provider_billing(run: Any, *, billing: Any | None = None) -> None:
-    """Attach cost and token usage before LangSmith persists the completed run."""
+def _attach_provider_billing(
+    run: Any, *, billing: Any | None = None, rate_profile: str | None = None
+) -> None:
+    """Anexa custo e uso de tokens antes de o LangSmith persistir a execução concluída.
+
+    RunTree.set valida o schema de uso do LangSmith e combina os metadados.
+    O tracer envia tokens e custo juntos na atualização terminal."""
     outputs = getattr(run, "outputs", None)
-    billing = billing or billing_from_usage_payload(outputs)
+    billing = billing or billing_from_usage_payload(outputs, rate_profile=rate_profile)
     if billing is None:
         return
 
@@ -61,13 +70,24 @@ def _attach_provider_billing(run: Any, *, billing: Any | None = None) -> None:
         usage_metadata = dict(current_usage)
     if usage_metadata is None:
         usage_metadata = {}
-    usage_metadata = langsmith_usage_metadata(billing, usage_metadata)
+    usage_metadata = langsmith_usage_metadata(billing, usage_metadata, rate_profile=rate_profile)
 
-    # RunTree.set validates the LangSmith usage schema and merges metadata. The
-    # tracer then sends tokens and cost together in its single terminal patch.
     run.set(metadata=metadata, usage_metadata=usage_metadata)
     if isinstance(outputs, dict):
         outputs["usage_metadata"] = dict(usage_metadata)
+
+
+def _run_rate_profile(run: Any) -> str | None:
+    extra = getattr(run, "extra", None)
+    if not isinstance(extra, Mapping):
+        return None
+    metadata = extra.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    invocation = extra.get("invocation_params")
+    invocation = invocation if isinstance(invocation, Mapping) else {}
+    provider = metadata.get("ls_provider") or metadata.get("provider")
+    model = metadata.get("ls_model_name") or invocation.get("model") or invocation.get("model_name")
+    return configured_rate_profile(provider, model)
 
 
 @dataclass(slots=True)
@@ -123,7 +143,7 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         )
 
         def anonymizer(data: Any) -> Any:
-            """Mask PII while preserving the technical keys used to find a trace."""
+            """Oculta dados pessoais e preserva as chaves técnicas do trace."""
             value = deepcopy(data)
             preserved: list[tuple[tuple[Any, ...], str]] = []
 
@@ -161,12 +181,19 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         )
 
         class BillingAwareLangChainTracer(LangChainTracer):
-            """Persists configured/provider cost with the terminal token usage."""
+            """Persiste o custo configurado ou informado pelo provider junto ao uso de tokens."""
 
             def _on_llm_end(self, run: Any) -> None:
-                billing = billing_from_usage_payload(getattr(run, "outputs", None))
+                profile = _run_rate_profile(run)
+                billing = billing_from_usage_payload(
+                    getattr(run, "outputs", None), rate_profile=profile
+                )
                 if billing is not None:
-                    _attach_provider_billing(run, billing=billing)
+                    _attach_provider_billing(
+                        run,
+                        billing=billing,
+                        rate_profile=profile,
+                    )
                     self._update_run_single(run)
                     return
                 super()._on_llm_end(run)
@@ -183,7 +210,7 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         if client is not None:
             client.close()
         _LOGGER.warning(
-            "LangSmith tracing could not be initialized (%s)",
+            "não foi possível inicializar o rastreamento do LangSmith (%s)",
             type(exc).__name__,
         )
         return None

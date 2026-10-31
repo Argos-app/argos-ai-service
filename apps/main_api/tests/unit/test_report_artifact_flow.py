@@ -14,7 +14,7 @@ from app.domain.report_artifacts import (
     ReportArtifactExpiredError,
     ReportArtifactNotFoundError,
 )
-from app.graph.workflow import no_especialista
+from app.graph.workflow_nodes import run_specialist_node
 from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
 from app.ports.data_client import ReportLotCandidate, ReportLotResolution
@@ -72,7 +72,7 @@ class _FakeArtifactRepository:
                 and artifact.task_id == scope["task_id"]
             ):
                 return artifact
-        raise ReportArtifactNotFoundError("not found")
+        raise ReportArtifactNotFoundError("não encontrado")
 
 
 def _envelope(user_id: UUID, property_id: UUID, lot_id: UUID) -> LotReportEnvelope:
@@ -237,7 +237,7 @@ async def test_secretary_receives_only_validated_artifact_reference():
     limits = ExecutionLimits(4, 4)
     limits.record_tool_success("farm", "get_lot_report_source", '{"report_source_ready": true}')
     with execution_limits_scope(limits):
-        farm_update = await no_especialista(
+        farm_update = await run_specialist_node(
             state,
             factory=_FakeFactory(farm=_FakeAgent(farm_result)),
             agent_id=AgentId.FARM,
@@ -250,7 +250,7 @@ async def test_secretary_receives_only_validated_artifact_reference():
         SpecialistResult(agent="secretary", status="success", answer="Preparação aguardando.")
     )
 
-    await no_especialista(
+    await run_specialist_node(
         resumed_state,
         factory=_FakeFactory(secretary=secretary_agent),
         agent_id=AgentId.SECRETARY,
@@ -279,7 +279,7 @@ async def test_secretary_is_blocked_when_farm_dependency_has_no_artifact():
     )
     secretary_task = state["ordered_tasks"][1]
 
-    update = await no_especialista(
+    update = await run_specialist_node(
         state,
         factory=_FakeFactory(secretary=secretary_agent),
         agent_id=AgentId.SECRETARY,
@@ -334,7 +334,7 @@ async def test_secretary_blocks_artifact_bound_to_another_session():
         SpecialistResult(agent="secretary", status="success", answer="Não deveria executar.")
     )
 
-    update = await no_especialista(
+    update = await run_specialist_node(
         state,
         factory=_FakeFactory(secretary=secretary_agent),
         agent_id=AgentId.SECRETARY,
@@ -383,7 +383,7 @@ async def test_expired_report_source_routes_back_to_farm_once():
         }
     )
 
-    update = await no_especialista(
+    update = await run_specialist_node(
         state,
         factory=_FakeFactory(
             secretary=_FakeAgent(

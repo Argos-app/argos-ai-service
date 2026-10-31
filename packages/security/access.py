@@ -60,27 +60,15 @@ class AuthorizedScope:
         operation: str,
         selected_property_ids: tuple[UUID, ...] | None = None,
     ) -> AuthorizedScope:
-        if context.expires_at.tzinfo is None or context.expires_at <= datetime.now(UTC):
-            raise AccessDeniedError("contexto de acesso expirado")
-        if operation not in context.operations:
-            raise AccessDeniedError("operação fora do contexto autorizado")
-        claimed = set(context.authorized_property_ids)
-        if (
-            not claimed
-            or len(claimed) != len(context.authorized_property_ids)
-            or not claimed.issubset(current_property_ids)
-        ):
-            raise AccessDeniedError("contexto de propriedades desatualizado")
-
-        selection = (
-            context.authorized_property_ids
-            if selected_property_ids is None
-            else selected_property_ids
+        selection = select_authorized_properties(
+            context,
+            current_property_ids=current_property_ids,
+            operation=operation,
+            selected_property_ids=selected_property_ids,
+            max_selection=100,
+            allow_duplicate_claims=False,
+            denied_error=AccessDeniedError,
         )
-        if not 1 <= len(selection) <= 100 or len(set(selection)) != len(selection):
-            raise AccessDeniedError("seleção de propriedades inválida")
-        if not set(selection).issubset(claimed):
-            raise AccessDeniedError("seleção de propriedades fora do escopo autorizado")
 
         return cls(
             user_id=user_id,
@@ -91,3 +79,40 @@ class AuthorizedScope:
             request_id=context.request_id,
             expires_at=context.expires_at,
         )
+
+
+def select_authorized_properties(
+    context: AccessContext,
+    *,
+    current_property_ids: set[UUID],
+    operation: str,
+    selected_property_ids: tuple[UUID, ...] | None,
+    max_selection: int | None,
+    allow_duplicate_claims: bool,
+    denied_error: type[Exception],
+) -> tuple[UUID, ...]:
+    """Aplica regras compartilhadas preservando os limites de cada serviço."""
+    if context.expires_at.tzinfo is None or context.expires_at <= datetime.now(UTC):
+        raise denied_error("contexto de acesso expirado")
+    if operation not in context.operations:
+        raise denied_error("operação fora do contexto autorizado")
+    claimed = set(context.authorized_property_ids)
+    if (
+        not claimed
+        or (not allow_duplicate_claims and len(claimed) != len(context.authorized_property_ids))
+        or not claimed.issubset(current_property_ids)
+    ):
+        raise denied_error("contexto de propriedades desatualizado")
+
+    selection = (
+        context.authorized_property_ids if selected_property_ids is None else selected_property_ids
+    )
+    if (
+        not selection
+        or (max_selection is not None and len(selection) > max_selection)
+        or len(set(selection)) != len(selection)
+    ):
+        raise denied_error("seleção de propriedades inválida")
+    if not set(selection).issubset(claimed):
+        raise denied_error("seleção de propriedades fora do escopo autorizado")
+    return tuple(selection)

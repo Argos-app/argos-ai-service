@@ -75,3 +75,16 @@ async def test_maps_mongo_duplicate_key_to_domain_error() -> None:
 
     with pytest.raises(ReportAlreadyExistsError):
         await repository.save(prepared)
+
+
+@pytest.mark.parametrize("field", ["attachments", "state"])
+@pytest.mark.asyncio
+async def test_rejects_mongo_documents_missing_current_fields(field: str) -> None:
+    collection = FakeCollection()
+    repository = MongoReportRepository(collection)
+    prepared = report()
+    await repository.save(prepared)
+    collection.document.pop(field)
+
+    with pytest.raises(KeyError, match=field):
+        await repository.get(prepared.report_id)

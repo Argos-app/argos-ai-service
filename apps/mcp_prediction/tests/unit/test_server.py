@@ -135,6 +135,12 @@ async def test_same_mcp_session_uses_each_request_context_and_revalidates_access
     configured_settings,
     signed_delegation,
 ):
+    """A ferramenta de teste exercita os metadados da requisição do SDK.
+
+    O runtime não expõe ferramentas de negócio. Um token assinado válido não mantém acesso
+    revogado após uma chamada anterior bem-sucedida. A inicialização da sessão não substitui
+    a delegação da requisição atual.
+    """
     server = create_mcp_server(configured_settings, object())
     verifier = DelegationTokenVerifier(
         dict(configured_settings.trusted_delegation_keys),
@@ -161,7 +167,6 @@ async def test_same_mcp_session_uses_each_request_context_and_revalidates_access
     directory.get_user_property_access.side_effect = lookup
     policy = AccessPolicy(directory)
 
-    # Test-only tool exercises the SDK request metadata; runtime still has no business tools.
     @server.tool()
     async def inspect_authorized_scope() -> dict[str, str]:
         scope = await authorize_mcp_call(policy, operation="prediction.read")
@@ -231,12 +236,12 @@ async def test_same_mcp_session_uses_each_request_context_and_revalidates_access
                 "request_id": claims["request_id"],
             }
         assert directory.get_user_property_access.await_count == 2
-        # A valid signed token cannot retain access revoked after an earlier successful call.
+
         current[claims_a["sub"]] = set()
         denied = await call(token_a, 4)
         assert result_json(denied)["result"]["isError"]
         assert directory.get_user_property_access.await_count == 3
-        # Session initialization never substitutes for a delegation on the current request.
+
         missing = {key: value for key, value in headers.items() if key != "X-Argos-Delegation"}
         denied = await client.post(
             "/mcp", headers=missing, json={"jsonrpc": "2.0", "id": 5, "method": "tools/list"}

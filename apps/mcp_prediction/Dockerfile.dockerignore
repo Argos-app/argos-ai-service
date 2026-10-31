@@ -1,7 +1,7 @@
 **
 !apps/
 !apps/mcp_prediction/
-!apps/mcp_prediction/requirements.txt
+!apps/mcp_prediction/pylock.toml
 !apps/mcp_prediction/src/
 !apps/mcp_prediction/src/**
 !packages/
@@ -9,3 +9,6 @@
 !packages/contracts/**
 !packages/security/
 !packages/security/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo

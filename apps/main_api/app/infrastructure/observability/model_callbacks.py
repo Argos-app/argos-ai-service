@@ -11,6 +11,9 @@ from uuid import UUID
 
 from langchain_core.callbacks import AsyncCallbackHandler
 
+from app.agents.registry import DEFAULT_AGENT_REGISTRY
+from app.application.operation_observation import OperationRecorder
+from app.ports.agent import AgentId
 from packages.observability import (
     Billing,
     CancellationState,
@@ -26,8 +29,6 @@ from packages.observability import (
     billing_with_fallback,
     current_correlation_id,
 )
-
-from .recording import OperationRecorder
 
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:/-]{1,120}$")
 _PROVIDER_MODULES = {
@@ -123,7 +124,7 @@ def _log_provider_failure(
 ) -> None:
     correlation_id = current_correlation_id()
     _LOGGER.warning(
-        "provider model request failed agent=%s provider=%s model=%s http_status=%s "
+        "falha na requisição ao modelo agent=%s provider=%s model=%s http_status=%s "
         "request_id=%s correlation_id=%s error_type=%s",
         agent or "unknown",
         provider,
@@ -260,7 +261,13 @@ def _usage_from_message(message: Any, llm_output: Any) -> Usage:
     )
 
 
-def _billing_from_message(message: Any, llm_output: Any, usage: Usage) -> Billing | None:
+def _billing_from_message(
+    message: Any,
+    llm_output: Any,
+    usage: Usage,
+    *,
+    rate_profile: str | None,
+) -> Billing | None:
     return billing_with_fallback(
         {
             "llm_output": llm_output,
@@ -269,6 +276,7 @@ def _billing_from_message(message: Any, llm_output: Any, usage: Usage) -> Billin
         },
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
+        rate_profile=rate_profile,
     )
 
 
@@ -323,17 +331,21 @@ class ModelUsageCallback(AsyncCallbackHandler):
     async def on_llm_end(self, response: Any, *, run_id: UUID, **kwargs: Any) -> None:
         del kwargs
         recorder = self._recorders.pop(run_id, None)
-        self._requests.pop(run_id, None)
+        provider_model = self._requests.pop(run_id, None)
         if recorder is None:
             return
         message = self._first_message(response)
         try:
             usage = _usage_from_message(message, getattr(response, "llm_output", None))
+            profile = _rate_profile(self._agent, provider_model[0]) if provider_model else None
             recorder.finish(
                 model_returned=_returned_model(response, message),
                 usage=usage,
                 billing=_billing_from_message(
-                    message, getattr(response, "llm_output", None), usage
+                    message,
+                    getattr(response, "llm_output", None),
+                    usage,
+                    rate_profile=profile,
                 ),
             )
         except Exception:
@@ -375,7 +387,7 @@ class ModelUsageCallback(AsyncCallbackHandler):
             )
 
     def finish_pending(self, error: BaseException) -> None:
-        """Close provider observations when cancellation bypasses LangChain callbacks."""
+        """Finaliza observações quando o cancelamento ignora os callbacks do LangChain."""
         cancelled = isinstance(error, asyncio.CancelledError)
         for run_id, (provider, model) in tuple(self._requests.items()):
             _log_provider_failure(
@@ -432,3 +444,14 @@ class ModelUsageCallback(AsyncCallbackHandler):
                 if message is not None:
                     return message
         return None
+
+
+def _rate_profile(agent: str | None, provider: str) -> str | None:
+    if agent in {"session_summary", "user_memory"}:
+        policy = "fast"
+    else:
+        try:
+            policy = DEFAULT_AGENT_REGISTRY.get(AgentId(agent)).model_policy.value
+        except TypeError, ValueError, LookupError:
+            return None
+    return f"{policy}_fallback" if provider == "anthropic" else policy

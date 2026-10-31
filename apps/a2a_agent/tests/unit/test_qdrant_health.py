@@ -89,3 +89,23 @@ async def test_readiness_rejects_named_vectors_not_supported_by_the_reader_contr
             vector_size=2048,
             distance="Cosine",
         )
+
+
+@pytest.mark.asyncio
+async def test_readiness_accepts_configured_openai_and_voyage_named_vectors():
+    client = _Client(
+        {
+            "openai": SimpleNamespace(size=1536, distance=SimpleNamespace(value="Cosine")),
+            "voyage": SimpleNamespace(size=1024, distance=SimpleNamespace(value="Cosine")),
+        }
+    )
+
+    await check_qdrant_collection(
+        client,
+        collection="argos_documents",
+        vector_size=1536,
+        voyage_vector_size=1024,
+        distance="Cosine",
+    )
+
+    assert client.collection_name == "argos_documents"

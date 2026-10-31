@@ -8,6 +8,10 @@ corpus global de leis e termos/condições. O artefato contém somente
 `apps/a2a_agent` e os contratos e primitivas de segurança compartilhados; não
 instala nem importa o `main_api` ou outros MCPs.
 
+O runtime usa Python 3.14.3, o SDK A2A, Starlette/Uvicorn, Pydantic, HTTPX,
+Qdrant e PostgreSQL. MongoDB, Redis e LangSmith são opcionais para
+observabilidade; as dependências estão em `requirements.txt` e `pylock.toml`.
+
 ## Build e execução
 
 O build é feito na raiz do monorepo para copiar apenas as dependências
@@ -15,34 +19,38 @@ compartilhadas explicitamente:
 
 ```powershell
 docker build -f apps/a2a_agent/Dockerfile -t argos-a2a-agent:local .
-Copy-Item apps/a2a_agent/.env.example apps/a2a_agent/.env
-# Edite .env com URLs, modelos e credenciais do deployment.
-docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml up --build -d
+docker compose --profile apps up --build -d
 ```
 
-O Compose publica a porta somente em `127.0.0.1`, usa filesystem raiz somente
-leitura, executa sem root, limita CPU/memória, monta PDFs e código de adapters
-como somente leitura e preserva o manifesto em volume separado. O Qdrant é
-externo ao Compose de produção e precisa expor chaves distintas de leitura e de
-escrita do índice.
+O Compose da raiz inicia a pilha local integrada e usa a configuração do `.env`
+da raiz. Para executar o container separadamente, configure as dependências e
+variáveis de ambiente necessárias; o Qdrant exige credenciais de leitura e
+escrita.
 
 O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
 metadados sintéticos para demonstração e homologação; eles não são leis nem
-contratos reais e não devem embasar orientação jurídica. `A2A_DOCUMENTS_PATH`
-pode apontar para outro diretório local aprovado, sempre com `catalog.json` e
-arquivos PDF allowlisted. O Compose monta a origem como somente leitura. A
-origem cloud permanece fora desta entrega até a definição do provedor e de sua
+contratos reais e não devem embasar orientação jurídica.
+`A2A_DOCUMENT_SOURCE_ROOT` pode apontar para outro diretório aprovado disponível
+ao processo, sempre com `catalog.json` e arquivos PDF allowlisted. A origem
+cloud permanece fora desta entrega até a definição do provedor e de sua
 configuração de acesso.
 
 ## Integrações do runtime
 
 O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
-`/chat/completions`. Configure os endpoints HTTPS, chaves, nomes dos modelos e
-uma revisão imutável do modelo de embeddings. Essa revisão participa do
-fingerprint de indexação; alterá-la força o sincronizador a criar uma nova
-geração compatível com Qdrant. O modelo e a dimensão devem ser os mesmos usados
-para indexar e consultar. Cada chamada de resposta também recebe o teto
-`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 1200); o deadline delegado e os timeouts
+`/chat/completions`, e um adapter HTTP para os embeddings Voyage. Configure as
+URLs base `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL`, os endpoints completos
+`OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL`, além das chaves, nomes dos
+modelos e dimensões dos dois espaços. O código não presume URLs de provedores:
+informe endpoints compatíveis com o protocolo esperado, incluindo gateways como
+OpenRouter quando oferecerem a API adequada. Para respostas, o fallback
+Anthropic usa o endpoint `/v1/messages` relativo à base configurada. A
+sincronização indexa os documentos em vetores Qdrant nomeados (`openai` e
+`voyage`); a consulta usa o índice correspondente ao provedor que conseguiu
+gerar o vetor. A revisão dos modelos e dimensões participa do fingerprint de
+indexação; alterá-la força o sincronizador a criar uma nova geração compatível
+com Qdrant. Cada chamada de resposta também recebe o teto
+`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 4096); o deadline delegado e os timeouts
 existentes limitam a duração da tarefa.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
@@ -78,8 +86,8 @@ O principal inclui correlation ID, ID do span pai, `session_id` e
 `correlation_id`, `parent_observation_id`, `session_id` e `interaction_id` na
 observação A2A e nos spans de execução. O ID de protocolo da task continua
 distinto. A resposta da API principal expõe `X-Argos-Correlation-ID`; veja o
-guia de [operação](../../docs/operacao-observabilidade.md) para seguir a
-requisição nas collections de ambos os serviços. A coleta Mongo funciona sem
+guia de [operação](../../packages/observability/docs/operations.md) para seguir
+a requisição nas collections de ambos os serviços. A coleta Mongo funciona sem
 LangSmith.
 
 O tracing LangSmith é opcional. Configure `A2A_LANGSMITH_API_KEY` como segredo
@@ -96,11 +104,14 @@ endpoint HTTPS pode ser definido por `A2A_LANGSMITH_ENDPOINT`. Para chaves de
 escopo organizacional, configure `A2A_LANGSMITH_WORKSPACE_ID` com o ID do
 workspace. Quando há uso de tokens, o serviço persiste custo explícito do
 provider ou uma estimativa configurada no Mongo e o propaga ao LangSmith. As
-variáveis opcionais `MODEL_INPUT_COST_PER_MILLION_TOKENS` e
-`MODEL_OUTPUT_COST_PER_MILLION_TOKENS` são tarifas globais em USD por milhão;
-embeddings usam somente a tarifa de entrada. `billing.cost_source` identifica
-`provider` ou `configured_rate`. Sem uso/tarifa suficientes, o custo fica
-ausente. Consulte o guia operacional para limites e semântica dos valores.
+tarifas opcionais em USD por milhão são configuradas separadamente por
+especialista, fallback especialista, embedding OpenAI e fallback Voyage, pelas
+variáveis `MODEL_SPECIALIST_*`, `MODEL_SPECIALIST_FALLBACK_*`,
+`MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS` e
+`MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS`. Embeddings usam só
+tarifa de entrada. `billing.cost_source` identifica `provider` ou
+`configured_rate`. Sem uso/tarifa suficientes, o custo fica ausente. Consulte o
+guia operacional para limites e semântica dos valores.
 
 ## Contrato A2A
 
@@ -159,17 +170,17 @@ não podem ser retomadas após reinício.
   procedimento operacional desse ambiente antes de reabrir tráfego.
 - Os limites funcionais vigentes incluem 20 resultados por busca, 50 documentos
   por página, agregações limitadas a 10.000 documentos/100 grupos, trechos de
-  até três páginas e timeout Qdrant de até 30 segundos. Os limites de container
-  são 1 CPU e 1 GiB e devem ser revistos com medições do workload.
-- A integração com Informações no principal e a escolha de uma origem cloud
-  ainda são pendências separadas; este container usa o corpus local configurado.
+  até três páginas e timeout Qdrant de até 30 segundos. Os limites do container
+  devem ser definidos com medições do workload.
+- O especialista Informações da Main API pode chamar este serviço quando a
+  integração estiver configurada. Este container usa o corpus local configurado.
 
 ## Verificações
 
 ```powershell
 python -m ruff check apps/a2a_agent
 python -m pytest apps/a2a_agent/tests/unit -q
-docker compose --env-file apps/a2a_agent/.env -f apps/a2a_agent/compose.yaml config --quiet
+docker compose --profile apps config --quiet
 ```
 
 A homologação com Qdrant real está documentada em

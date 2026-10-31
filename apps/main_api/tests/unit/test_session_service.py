@@ -22,7 +22,8 @@ from app.application.contracts.interactions import (
 )
 from app.application.errors import ApplicationError, ApplicationErrorCode
 from app.application.identity import ActorContext
-from app.application.session_service import SessionApplicationService, _response_from_state
+from app.application.session_helpers import _response_from_state
+from app.application.session_service import SessionApplicationService
 from app.domain.email_preparations import (
     EmailPreparation,
     PendingRecipientOption,
@@ -42,6 +43,7 @@ from app.domain.sessions import (
     ProcessingLease,
     SessionRecord,
 )
+from app.graph.conversation_flow import LangGraphConversationFlow
 
 from packages.contracts import (
     PreparedReport,
@@ -442,7 +444,7 @@ def _prepared_email(principal_id: UUID, session_id: UUID) -> EmailPreparation:
     )
 
 
-def _service(graph=None, **options):
+def _service(graph=None, *, flow=None, **options):
     sessions = FakeSessionRepository()
     interactions = FakeInteractionRepository()
     conversations = FakeConversationRepository()
@@ -452,11 +454,42 @@ def _service(graph=None, **options):
         interactions=interactions,
         conversations=conversations,
         session_work=work,
-        graph_provider=lambda: graph,
+        graph_provider=lambda: (
+            flow
+            if flow is not None
+            else LangGraphConversationFlow(graph)
+            if graph is not None
+            else None
+        ),
         renew_seconds=60,
         **options,
     )
     return service, sessions, interactions, conversations
+
+
+@pytest.mark.asyncio
+async def test_session_accepts_a_conversation_flow_without_langgraph():
+    class FakeFlow:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, message, **kwargs):
+            self.calls.append((message, kwargs))
+            return {"final_answer": "Resposta do fluxo."}
+
+    flow = FakeFlow()
+    service, _, _, _ = _service(flow=flow)
+    principal = _principal()
+    session = await service.create_session(principal)
+    result = await service.create_interaction(
+        principal,
+        session.session_id,
+        MessageCommand(kind="message", client_message_id=uuid4(), message="Consultar"),
+    )
+
+    assert result.response.text == "Resposta do fluxo."
+    assert flow.calls[0][0] == "Consultar"
+    assert flow.calls[0][1]["session_id"] == str(session.session_id)
 
 
 @pytest.mark.asyncio
@@ -543,7 +576,7 @@ async def test_lease_loss_cancels_processing_before_finalization(
 ):
     graph = FakeGraph()
     service, sessions, interactions, conversations = _service(graph)
-    service._renew_seconds = 0.001
+    service._recovery._renew_seconds = 0.001
     principal = _principal()
     session = await service.create_session(principal)
     started = asyncio.Event()
@@ -565,13 +598,15 @@ async def test_lease_loss_cancels_processing_before_finalization(
         return False
 
     target, method = (
-        (service, "_build_interaction_context") if phase == "context" else (graph, "ainvoke")
+        (service._execution, "_build_interaction_context")
+        if phase == "context"
+        else (graph, "ainvoke")
     )
     monkeypatch.setattr(target, method, blocked_phase)
     monkeypatch.setattr(sessions, "renew_lease", renew)
     finalize = AsyncMock()
     release = AsyncMock(wraps=sessions.release_lease)
-    monkeypatch.setattr(service, "_finalize_interaction", finalize)
+    monkeypatch.setattr(service._execution, "_finalize_interaction", finalize)
     monkeypatch.setattr(sessions, "release_lease", release)
 
     with pytest.raises(ApplicationError) as caught:
@@ -592,7 +627,7 @@ async def test_lease_loss_cancels_processing_before_finalization(
     assert len(conversations.messages) == 1
     assert next(iter(interactions.records.values())).status == InteractionStatus.RUNNING
     if renewal != "refused":
-        assert "session lease renewal failed" in caplog.text
+        assert "falha ao renovar o lease" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -610,7 +645,7 @@ async def test_request_cancellation_stops_processing_and_releases_lease(monkeypa
         finally:
             stopped.set()
 
-    monkeypatch.setattr(service, "_build_interaction_context", blocked_context)
+    monkeypatch.setattr(service._execution, "_build_interaction_context", blocked_context)
     task = asyncio.create_task(
         service.create_interaction(
             principal,
@@ -887,10 +922,10 @@ async def test_ambiguous_recipient_choice_resolves_to_protected_email_selector()
         answer=ChoiceAnswer(kind="choice", option_id=selected_option_id),
     )
 
-    result = await service._validate_answer(
+    result = await service._recovery._validate_answer(
         sessions.records[session.session_id],
         answer,
-        graph,
+        LangGraphConversationFlow(graph),
         new_recipient_selectors={},
     )
 
@@ -957,10 +992,10 @@ async def test_email_confirmation_answer_is_bound_to_saved_report(confirm):
         answer=ConfirmationAnswer(kind="confirmation", confirm=confirm),
     )
 
-    result = await service._validate_answer(
+    result = await service._recovery._validate_answer(
         sessions.records[session.session_id],
         answer,
-        graph,
+        LangGraphConversationFlow(graph),
         new_recipient_selectors={},
     )
 
@@ -1062,7 +1097,7 @@ async def test_explicit_send_intent_creates_persisted_confirmation_question():
         ),
         principal=principal,
         session=session,
-        graph=graph,
+        graph=LangGraphConversationFlow(graph),
         running=SimpleNamespace(interaction_id=uuid4()),
     )
     context = SimpleNamespace(graph_config={"configurable": {"thread_id": str(session.session_id)}})
@@ -1073,7 +1108,7 @@ async def test_explicit_send_intent_creates_persisted_confirmation_question():
         ),
     }
 
-    updated = await service._attach_send_confirmation(accepted, context, state)
+    updated = await service._execution._attach_send_confirmation(accepted, context, state)
 
     assert updated["clarification_request"].input_type == "confirmation"
     assert updated["clarification_request"].reason_code == "EMAIL_SEND_CONFIRMATION"
@@ -1103,7 +1138,7 @@ async def test_dispatched_explicit_send_does_not_attach_a_late_confirmation_ques
         ),
         principal=principal,
         session=session,
-        graph=graph,
+        graph=LangGraphConversationFlow(graph),
         running=SimpleNamespace(interaction_id=uuid4()),
     )
     context = SimpleNamespace(graph_config={"configurable": {"thread_id": str(session.session_id)}})
@@ -1119,7 +1154,7 @@ async def test_dispatched_explicit_send_does_not_attach_a_late_confirmation_ques
         ),
     }
 
-    updated = await service._attach_send_confirmation(accepted, context, state)
+    updated = await service._execution._attach_send_confirmation(accepted, context, state)
 
     assert updated is state
     assert "clarification_request" not in updated

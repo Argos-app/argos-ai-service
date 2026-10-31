@@ -6,7 +6,7 @@ nenhuma base de usuário ou de desenvolvimento é utilizada.
 
 ```powershell
 python -m venv .venv/mcp-prediction-integration
-.venv/mcp-prediction-integration/Scripts/python.exe -m pip install -r apps/mcp_prediction/tests/integration/requirements.txt
+.venv/mcp-prediction-integration/Scripts/python.exe -m pip install -r requirements-dev.txt
 docker compose -f apps/mcp_prediction/tests/integration/compose.yaml up -d --wait
 $env:MCP_PREDICTION_RUN_INTEGRATION="1"
 .venv/mcp-prediction-integration/Scripts/python.exe -m pytest apps/mcp_prediction/tests/integration -v -p no:cacheprovider

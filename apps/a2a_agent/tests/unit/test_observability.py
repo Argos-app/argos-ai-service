@@ -103,12 +103,15 @@ def test_provider_billing_requires_explicit_currency_or_usd_field() -> None:
 
 
 def test_a2a_provider_usage_aliases_are_used_for_configured_rate_fallback(monkeypatch) -> None:
-    monkeypatch.setenv("MODEL_INPUT_COST_PER_MILLION_TOKENS", "2.5")
-    monkeypatch.setenv("MODEL_OUTPUT_COST_PER_MILLION_TOKENS", "10")
+    monkeypatch.setenv("MODEL_SPECIALIST_INPUT_COST_PER_MILLION_TOKENS", "2.5")
+    monkeypatch.setenv("MODEL_SPECIALIST_OUTPUT_COST_PER_MILLION_TOKENS", "10")
     usage = _provider_usage({"input_tokens": 200, "output_tokens": 50})
 
     billing = billing_with_fallback(
-        {}, input_tokens=usage.input_tokens, output_tokens=usage.output_tokens
+        {},
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        rate_profile="specialist",
     )
 
     assert billing is not None

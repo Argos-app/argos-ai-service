@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 def test_graph_provider_injects_report_source_signature_verifier(monkeypatch):
     service_dependencies = import_module("app.api.v1.dependencies.services")
-    specialist_module = import_module("app.agents.specialists")
+    specialist_module = import_module("app.infrastructure.agents.specialists")
     workflow_module = import_module("app.graph.workflow")
     verifier = object()
     captured = {}

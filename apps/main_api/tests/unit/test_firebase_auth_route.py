@@ -164,6 +164,7 @@ async def test_exchange_requires_configuration(auth_http_app, dependency):
 async def test_expired_jwt_can_be_exchanged_again_without_changing_identity(
     auth_http_app, auth_clock, auth_user, auth_codec
 ):
+    """Somente as trocas consultam Firebase."""
     app, users, verifier = auth_http_app
     async with _client(app) as client:
         first = await client.post("/v1/auth/firebase", headers={"Authorization": "Bearer first"})
@@ -180,7 +181,7 @@ async def test_expired_jwt_can_be_exchanged_again_without_changing_identity(
         assert auth_codec.verify(new_token).user_id == auth_user.user_id
         result = await client.get("/protected", headers={"Authorization": f"Bearer {new_token}"})
     assert result.status_code == 200
-    assert verifier.verify.call_count == 2  # Somente as trocas consultam Firebase.
+    assert verifier.verify.call_count == 2
 
 
 @pytest.mark.parametrize(
@@ -196,6 +197,7 @@ async def test_expired_jwt_can_be_exchanged_again_without_changing_identity(
 async def test_current_database_state_overrides_still_valid_jwt(
     auth_http_app, auth_user, auth_codec, overrides, status
 ):
+    """Token ainda não expirou."""
     app, users, verifier = auth_http_app
     token = auth_codec.issue(auth_user.user_id, auth_user.firebase_uid)
     async with _client(app) as client:
@@ -203,7 +205,7 @@ async def test_current_database_state_overrides_still_valid_jwt(
         assert (await client.get("/protected", headers=headers)).status_code == 200
         users.find_by_firebase_uid.return_value = replace(auth_user, **overrides)
         assert (await client.get("/protected", headers=headers)).status_code == status
-    assert auth_codec.verify(token).user_id == auth_user.user_id  # Token ainda não expirou.
+    assert auth_codec.verify(token).user_id == auth_user.user_id
     verifier.verify.assert_not_called()
 
 

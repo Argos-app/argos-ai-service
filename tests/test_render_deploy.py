@@ -1,4 +1,4 @@
-"""Rollout selection, native entry points and Render API failure handling."""
+"""Seleção de publicações, pontos de entrada nativos e tratamento de falhas da API do Render."""
 
 import json
 import os
@@ -30,7 +30,6 @@ def test_application_change_only_deploys_that_service(service):
     "path",
     [
         "packages/contracts/lot_report.py",
-        "packages/model_options.py",
         "packages/new_package/module.py",
         "scripts/render/build.sh",
         ".github/workflows/deploy.yml",
@@ -44,7 +43,42 @@ def test_shared_changes_deploy_all_consumers(path):
 
 
 def test_documentation_and_local_infrastructure_do_not_deploy():
-    assert plan.affected_services(["README.md", "docs/api.md", "compose.yaml"]) == []
+    assert (
+        plan.affected_services(
+            ["README.md", "infrastructure/mongodb/configuration.md", "compose.yaml"]
+        )
+        == []
+    )
+
+
+def test_service_documentation_selects_its_service():
+    assert plan.affected_services(["apps/main_api/docs/api-contract.md"]) == []
+
+
+@pytest.mark.parametrize(
+    "path", ["apps/main_api/docs/openapi-main-api.json", "apps/main_api/swagger.yaml"]
+)
+def test_openapi_contract_selects_its_service(path):
+    assert plan.affected_services([path]) == ["main_api"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/render/README.md",
+        "packages/observability/docs/operations.md",
+        "apps/mcp_email/AGENTS.md",
+        "packages/contracts/docs/example.json",
+    ],
+)
+def test_documentation_does_not_select_services(path):
+    assert plan.affected_services([path]) == []
+
+
+def test_documentation_does_not_hide_code_changes():
+    assert plan.affected_services(
+        ["packages/contracts/README.md", "apps/mcp_data/src/main.py"]
+    ) == ["mcp_data"]
 
 
 def test_git_range_includes_multiple_commits_deletions_and_cross_service_moves(
@@ -109,7 +143,7 @@ def test_initial_and_manual_rollouts_deploy_every_service(
 
 def test_unrelated_branch_cannot_select_an_environment(monkeypatch):
     monkeypatch.setenv("DEPLOY_BRANCH", "feature/cloud")
-    with pytest.raises(SystemExit, match="Only develop and main"):
+    with pytest.raises(SystemExit, match="Somente as branches develop e main"):
         plan.main()
 
 
@@ -195,7 +229,7 @@ def test_failed_deploy_or_wrong_live_commit_does_not_report_success(result, monk
 def test_timeout_reports_deployment_link(monkeypatch):
     responses = iter([SERVICE, {"id": "dep-test"}])
     monkeypatch.setattr(deploy, "request", lambda *args: next(responses))
-    with pytest.raises(RuntimeError, match="Timed out.*dep-test"):
+    with pytest.raises(RuntimeError, match="Tempo limite.*dep-test"):
         deploy.deploy("srv-test", "token", SHA, "develop", timeout=0)
 
 

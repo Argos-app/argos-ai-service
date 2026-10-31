@@ -44,7 +44,7 @@ _USER_ACCESS_SELECT = """
 
 
 class ReadOnlySqlReader:
-    """Executa consultas parametrizadas em transações explicitamente read-only."""
+    """Executa consultas parametrizadas em transações explicitamente somente leitura."""
 
     def __init__(self, pool: Any, *, acquire_timeout_seconds: float) -> None:
         self._pool = pool

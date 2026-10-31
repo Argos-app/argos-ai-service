@@ -5,7 +5,7 @@ from typing import Any
 
 
 class AsyncpgSqlReader:
-    """Leitor asyncpg; o pool força transações read-only no lado PostgreSQL."""
+    """Leitor asyncpg; o pool força transações somente leitura no PostgreSQL."""
 
     def __init__(self, pool: Any) -> None:
         self._pool = pool

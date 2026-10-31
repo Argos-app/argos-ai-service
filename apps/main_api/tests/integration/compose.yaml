@@ -21,7 +21,7 @@ services:
         image: mongo:7.0
         command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
         ports:
-            - "127.0.0.1:27027:27017"
+            - "127.0.0.1:27030:27017"
         tmpfs:
             - /data/db
         healthcheck:

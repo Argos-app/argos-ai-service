@@ -236,7 +236,7 @@ create table medicine_batch
     constraint ck_medicine_batch_minmax check (min_stock is null or max_stock is null or max_stock >= min_stock)
 );
 
--- tabels operacionais
+-- tabelas operacionais
 create table application
 (
     id                  UUID primary key        default gen_random_uuid(),

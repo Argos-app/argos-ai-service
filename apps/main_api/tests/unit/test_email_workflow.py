@@ -53,7 +53,7 @@ class _Artifacts:
     async def get(self, reference, **scope):
         self.scope = (reference, scope)
         if reference != self.artifact.reference:
-            raise LookupError("not found")
+            raise LookupError("não encontrado")
         return self.artifact
 
     async def get_owned(self, *, reference, principal_user_id, session_id):
@@ -62,7 +62,7 @@ class _Artifacts:
             or principal_user_id != self.artifact.principal_user_id
             or session_id != self.artifact.session_id
         ):
-            raise LookupError("not found")
+            raise LookupError("não encontrado")
         return self.artifact
 
 
@@ -146,7 +146,7 @@ class _Preparations:
                 "origin",
             )
             if any(getattr(existing, field) != getattr(authorization, field) for field in fields):
-                raise EmailSendAuthorizationConflictError("authorization conflict")
+                raise EmailSendAuthorizationConflictError("conflito de autorização")
             return existing
         self.authorizations[key] = authorization
         return authorization
@@ -168,7 +168,7 @@ class _Preparations:
         if authorization.origin == SendAuthorizationOrigin.CONFIRMED_QUESTION:
             if authorization.question_id == question_id:
                 return authorization
-            raise EmailSendAuthorizationConflictError("different confirmation")
+            raise EmailSendAuthorizationConflictError("confirmação diferente")
         confirmed = replace(
             authorization,
             origin=SendAuthorizationOrigin.CONFIRMED_QUESTION,
@@ -225,7 +225,7 @@ class _Preparations:
     async def save_send_operation_reference(self, reference):
         existing = self.operation_references.get(reference.authorization_id)
         if existing is not None and existing.operation_id != reference.operation_id:
-            raise EmailSendAuthorizationConflictError("operation conflict")
+            raise EmailSendAuthorizationConflictError("conflito de operação")
         self.operation_references[reference.authorization_id] = reference
         return reference
 
@@ -357,6 +357,62 @@ def test_prepare_report_uses_protected_context_persists_full_response_and_reuses
     )
     assert preparations.authorizations == {}
     assert artifacts.scope[1]["task_id"] == artifact.task_id
+
+
+@pytest.mark.asyncio
+async def test_expired_preparation_reuses_reference_when_refreshing_same_fingerprint():
+    artifact, property_id = _artifact()
+    prepared = PreparedReport(
+        report_id=uuid4(),
+        status=PreparedReportStatus.PREPARED,
+        requested_by=artifact.principal_user_id,
+        recipients=(RecipientRef(recipient_id=uuid4(), name="Ana", email="ana@example.com"),),
+        subject="Relatório",
+        body="Resumo",
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    preparations = _Preparations()
+    client = _EmailClient(prepared)
+    workflow = EmailWorkflow(
+        email_client=client,
+        report_artifacts=_Artifacts(artifact),
+        preparations=preparations,
+    )
+    context = {
+        "argos_user_id": str(artifact.principal_user_id),
+        "session_id": str(artifact.session_id),
+        "interaction_id": str(uuid4()),
+        "argos_authorized_property_ids": (str(property_id),),
+        "argos_report_artifact_scopes": {
+            str(artifact.reference): {
+                "interaction_id": str(artifact.interaction_id),
+                "task_id": artifact.task_id,
+            }
+        },
+        "recipient_selectors": {"[DESTINATARIO_1]": {"kind": "name", "value": "Ana"}},
+    }
+
+    await workflow.prepare(
+        report_artifact_ref=artifact.reference,
+        report_title="Relatório do lote",
+        configurable=context,
+    )
+    key = next(iter(preparations.records))
+    original = preparations.records[key]
+    expired = original.prepared_report.model_copy(
+        update={"expires_at": datetime.now(UTC) - timedelta(seconds=1)}
+    )
+    preparations.records[key] = replace(original, prepared_report=expired)
+    context["interaction_id"] = str(uuid4())
+    await workflow.prepare(
+        report_artifact_ref=artifact.reference,
+        report_title="Relatório do lote",
+        configurable=context,
+    )
+    renewed = next(iter(preparations.records.values()))
+    assert renewed.reference == original.reference
+    assert len(client.calls) == 2
 
 
 def test_explicit_send_reserves_one_authorization_and_stable_idempotency_key():
@@ -903,7 +959,7 @@ def test_lost_send_response_retries_with_same_report_and_idempotency_key():
     def respond(name, arguments):
         calls.append(arguments["payload"])
         if len(calls) == 1:
-            raise TimeoutError("response lost after remote operation")
+            raise TimeoutError("resposta perdida após a operação remota")
         return SimpleNamespace(structuredContent=result.model_dump(mode="json"), content=[])
 
     client = _EmailClient(respond)

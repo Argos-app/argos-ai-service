@@ -1,12 +1,8 @@
 """Wrappers LangChain locais para chamadas MCP autenticadas e limitadas por agente."""
 
-import json
-from collections.abc import Callable, Mapping
-from typing import Any
+from collections.abc import Callable
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from app.agents.tools.email import (
     build_email_prepare_tool,
@@ -16,64 +12,21 @@ from app.agents.tools.email import (
 from app.agents.tools.farm_reports import build_farm_report_tool
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.email_workflow import EmailWorkflow
-from app.infrastructure.mcp.client import McpClients, McpToolServerClient
+from app.infrastructure.mcp.client import McpClients
 from app.infrastructure.mcp.data_client import McpDataClient
 from app.infrastructure.mcp.delegation import McpDelegationTokenIssuer
-from app.infrastructure.mcp.tool_schemas import MCP_TOOL_PAYLOAD_SCHEMAS
+from app.infrastructure.mcp.tool_adapter import (
+    McpToolBindingConfigurationError,
+    _make_tool,
+    _unavailable_tool,
+)
+from app.infrastructure.mcp.tool_adapter import (
+    McpToolInput as McpToolInput,
+)
 from app.ports.agent import AgentId
 from app.ports.email_preparation_repository import EmailPreparationRepository
 from app.ports.report_artifact_repository import ReportArtifactRepository
 from packages.observability import ObservationCollector
-
-
-class McpToolBindingConfigurationError(ValueError):
-    """Clientes MCP não podem ser expostos sem o emissor de delegações exigido."""
-
-
-class McpToolInput(BaseModel):
-    """Formato de transporte dos servidores Argos: um objeto `payload` por tool."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    payload: dict[str, Any]
-
-
-_PAYLOAD_ALIASES: dict[str, dict[str, str]] = {
-    "list_lots": {"code": "lot_code"},
-    "list_applications": {"medication_name": "medicine_name"},
-    "estimate_medicine_consumption": {
-        "property_id": "property_ids",
-        "medicine_name": "medicine_names",
-    },
-}
-
-
-def _normalize_model_payload(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Map common LLM argument variants to the canonical MCP contract."""
-    normalized = dict(payload)
-    for alias, canonical in _PAYLOAD_ALIASES.get(name, {}).items():
-        if alias not in normalized or normalized[alias] is None:
-            continue
-        value = normalized.pop(alias)
-        if canonical.endswith("_ids") or canonical.endswith("_names"):
-            value = value if isinstance(value, (list, tuple)) else [value]
-        existing = normalized.get(canonical)
-        if existing is None:
-            normalized[canonical] = value
-            continue
-        if canonical.endswith("_ids") or canonical.endswith("_names"):
-            existing = list(existing)
-        if existing != value:
-            raise ValueError(f"argumentos {alias} e {canonical} conflitantes")
-
-    if normalized.get("property_id") is not None:
-        value = [normalized.pop("property_id")]
-        existing = normalized.get("property_ids")
-        if existing is not None and list(existing) != value:
-            raise ValueError("argumentos property_id e property_ids conflitantes")
-        normalized["property_ids"] = value
-    return normalized
-
 
 _FARM_TOOLS = {
     "list_properties": (
@@ -85,9 +38,8 @@ _FARM_TOOLS = {
         "uma lista; omita se o usuário não informou IDs."
     ),
     "list_lots": (
-        "Consulta lotes autorizados. Prefira lot_code (por exemplo, HC-LOTE-001); code também "
-        "é aceito e normalizado. property_ids é uma lista; property_id também é aceito para "
-        "um único ID. Use IDs informados pelo usuário ou retornados por list_properties."
+        "Consulta lotes autorizados. Use lot_code (por exemplo, HC-LOTE-001) e property_ids "
+        "como lista. Use IDs informados pelo usuário ou retornados por list_properties."
     ),
     "list_exception_animals": "Consulta animais em exceção nas propriedades autorizadas.",
     "list_applications": "Consulta aplicações de medicamentos nas propriedades autorizadas.",
@@ -139,116 +91,6 @@ _CATTLE_OPERATIONS = frozenset(
 )
 
 
-def _trusted_config(config: RunnableConfig | None) -> Mapping[str, Any]:
-    configurable = (config or {}).get("configurable") or {}
-    if not isinstance(configurable, Mapping):
-        raise ValueError("contexto autenticado da chamada MCP está ausente")
-    return configurable
-
-
-def _mcp_result_text(result: Any) -> str:
-    """Retorna conteúdo útil ao agente sem expor envelope interno do transporte."""
-    structured = getattr(result, "structuredContent", None)
-    if structured is not None:
-        return json.dumps(structured, ensure_ascii=False, default=str)
-    content = getattr(result, "content", ())
-    text_blocks = [text for block in content if (text := getattr(block, "text", None))]
-    if text_blocks:
-        return "\n".join(text_blocks)
-    return "O MCP retornou uma resposta vazia."
-
-
-def _delegation_headers(
-    *,
-    service: str,
-    agent: str,
-    operation: str,
-    config: RunnableConfig | None,
-    issuer: McpDelegationTokenIssuer | None,
-) -> dict[str, str]:
-    if issuer is None:
-        raise McpToolBindingConfigurationError(f"emissor de delegação ausente para o MCP {service}")
-    context = _trusted_config(config)
-    firebase_uid = context.get("argos_firebase_uid")
-    property_ids = context.get("argos_authorized_property_ids")
-    request_id = context.get("argos_request_id")
-    if not firebase_uid or not property_ids or not request_id:
-        raise ValueError("identidade e propriedades autorizadas são obrigatórias para a tool MCP")
-    return issuer.headers_for_call(
-        service=service,
-        firebase_uid=firebase_uid,
-        authorized_property_ids=property_ids,
-        agent=agent,
-        operation=operation,
-        request_id=request_id,
-    )
-
-
-def _make_tool(
-    client: McpToolServerClient,
-    *,
-    name: str,
-    description: str,
-    issuer: McpDelegationTokenIssuer | None,
-    agent: str | None = None,
-    operation: str | None = None,
-) -> StructuredTool:
-    payload_schema = MCP_TOOL_PAYLOAD_SCHEMAS.get(name)
-    args_schema = create_model(
-        f"{name.title().replace('_', '')}Input",
-        __base__=McpToolInput,
-        payload=(payload_schema or dict[str, Any], Field(description=description)),
-    )
-
-    async def invoke(
-        payload: dict[str, Any] | BaseModel,
-        config: RunnableConfig,
-    ) -> str:
-        if payload_schema is None:
-            request_payload = dict(payload)
-        else:
-            raw_payload = (
-                payload.model_dump(mode="python") if isinstance(payload, BaseModel) else payload
-            )
-            normalized_payload = _normalize_model_payload(name, raw_payload)
-            request_payload = payload_schema.model_validate(normalized_payload).model_dump(
-                mode="json", exclude_none=True
-            )
-        request_headers: dict[str, str] | None = None
-        if agent is not None and operation is not None:
-            request_headers = _delegation_headers(
-                service=client.service_name,
-                agent=agent,
-                operation=operation,
-                config=config,
-                issuer=issuer,
-            )
-        result = await client.call_tool(
-            name,
-            {"payload": request_payload},
-            request_headers=request_headers,
-        )
-        return _mcp_result_text(result)
-
-    return StructuredTool.from_function(
-        coroutine=invoke,
-        name=name,
-        description=description,
-        args_schema=args_schema,
-    )
-
-
-def _unavailable_tool(name: str, description: str, message: str) -> StructuredTool:
-    def unavailable() -> str:
-        return message
-
-    return StructuredTool.from_function(
-        func=unavailable,
-        name=name,
-        description=description,
-    )
-
-
 def build_mcp_tool_bindings(
     clients: McpClients,
     delegation_issuer: McpDelegationTokenIssuer | None,
@@ -257,15 +99,17 @@ def build_mcp_tool_bindings(
     observation_collector: ObservationCollector | None = None,
     report_signature_checker: Callable[[bytes, str, str], bool] | None = None,
 ) -> dict[AgentId, dict[str, tuple[StructuredTool, ...]]]:
-    """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação."""
+    """Cria toolsets estáticos por agente; o modelo nunca escolhe agente/operação.
+
+    Receber McpClients indica configuração explícita de produção.
+    Serviços ausentes geram ferramentas indisponíveis, sem fallback silencioso para mocks."""
     if (clients.data is not None or clients.prediction is not None) and delegation_issuer is None:
         raise McpToolBindingConfigurationError(
             "MAIN_API_MCP_DELEGATION_* é obrigatório para os MCPs de dados e predição"
         )
 
     bindings: dict[AgentId, dict[str, tuple[StructuredTool, ...]]] = {}
-    # Receiving an McpClients object is an explicit production configuration.
-    # Missing services get unavailable tools rather than silently falling back to mocks.
+
     mcp_configured = True
     if clients.data is not None:
         farm_tools = tuple(

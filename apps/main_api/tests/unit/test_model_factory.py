@@ -1,6 +1,7 @@
 """Configuração e capacidades do runtime de modelos do principal."""
 
 import json
+import sys
 from dataclasses import replace
 
 import pytest
@@ -8,14 +9,129 @@ from app.agent_schemas.results import RoutePlan, SpecialistAgentId
 from app.agents.registry import ModelPolicyId
 from app.infrastructure.agents.model_factory import (
     ModelRuntimeConfigurationError,
+    _attach_anthropic_fallbacks,
+    _CrossProviderChatModel,
     create_configured_models,
     validate_model_capabilities,
 )
+from app.infrastructure.agents.session_summary_generator import LangChainSessionSummaryGenerator
 from app.infrastructure.agents.simulated_model import SimulatedChatModel
 from app.settings import Settings
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ProviderStrategy
 from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableLambda
+from pydantic import BaseModel
 
 from packages.contracts.prediction import EstimateMedicineConsumptionRequest
+
+
+class _BoundModel:
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+        self.calls = []
+
+    def _runnable(self):
+        def invoke(_input):
+            if self.error is not None:
+                raise self.error
+            return self.result
+
+        return RunnableLambda(invoke)
+
+    def with_structured_output(self, schema, **kwargs):
+        self.calls.append(("structured", schema, kwargs))
+        return self._runnable()
+
+    def bind_tools(self, tools, **kwargs):
+        self.calls.append(("tools", tools, kwargs))
+        return self._runnable()
+
+
+class _StructuredAnswer(BaseModel):
+    answer: str
+
+
+def test_direct_invoke_uses_fallback_for_retryable_error():
+    def fail(_input):
+        raise RuntimeError("indisponível")
+
+    model = _CrossProviderChatModel(
+        RunnableLambda(fail), RunnableLambda(lambda _: "fallback"), (RuntimeError,)
+    )
+    assert model.invoke("entrada") == "fallback"
+
+
+@pytest.mark.asyncio
+async def test_direct_ainvoke_uses_fallback_for_retryable_error():
+    def fail(_input):
+        raise RuntimeError("indisponível")
+
+    model = _CrossProviderChatModel(
+        RunnableLambda(fail), RunnableLambda(lambda _: "fallback"), (RuntimeError,)
+    )
+    assert await model.ainvoke("entrada") == "fallback"
+
+
+def test_cross_provider_model_uses_native_structured_output_fallback():
+    primary = _BoundModel(error=RuntimeError("OpenAI unavailable"))
+    fallback = _BoundModel(result={"answer": "ok"})
+    model = _CrossProviderChatModel(primary, fallback, (RuntimeError,))
+
+    result = model.with_structured_output(dict).invoke("input")
+
+    assert result == {"answer": "ok"}
+    assert fallback.calls[0][0] == "structured"
+    assert fallback.calls[0][2]["method"] == "json_schema"
+
+
+def test_cross_provider_model_counts_tokens_for_both_providers():
+    class TokenCountingModel(_BoundModel):
+        def __init__(self, token_count):
+            super().__init__()
+            self.token_count = token_count
+
+        def get_num_tokens(self, _text):
+            return self.token_count
+
+    model = _CrossProviderChatModel(
+        TokenCountingModel(8),
+        TokenCountingModel(13),
+        (RuntimeError,),
+    )
+
+    assert model.get_num_tokens("summary input") == 13
+    assert LangChainSessionSummaryGenerator(model, input_token_limit=1_000)
+
+
+def test_cross_provider_model_binds_tools_on_both_providers_without_agent_replay():
+    primary = _BoundModel(error=RuntimeError("OpenAI unavailable"))
+    fallback = _BoundModel(result="tool call")
+    model = _CrossProviderChatModel(primary, fallback, (RuntimeError,))
+    tools = [object()]
+
+    result = model.bind_tools(tools).invoke("input")
+
+    assert result == "tool call"
+    assert primary.calls == [("tools", tools, {})]
+    assert fallback.calls == [("tools", tools, {"strict": True})]
+
+
+def test_cross_provider_runnable_is_accepted_by_langgraph_agent_factory():
+    model = _CrossProviderChatModel(
+        _BoundModel(result={"answer": "primary"}),
+        _BoundModel(result={"answer": "fallback"}),
+        (RuntimeError,),
+    )
+
+    agent = create_agent(
+        model=model,
+        tools=[],
+        response_format=ProviderStrategy(_StructuredAnswer, strict=True),
+    )
+
+    assert agent is not None
 
 
 def _configured_model_names(**overrides):
@@ -38,17 +154,52 @@ class _FakeChatModel:
 
 
 def test_models_are_unavailable_until_real_provider_credentials_are_configured():
-    models, reason = create_configured_models(Settings(**_configured_model_names()))
+    models, reason = create_configured_models(
+        Settings(
+            openai_base_url="https://openai.example/v1",
+            model_fast_name="fast-test",
+            model_specialist_name="specialist-test",
+        )
+    )
 
     assert models is None
     assert reason == "model_credentials_not_configured"
 
 
 def test_partial_model_configuration_is_reported_without_starting_provider():
-    models, reason = create_configured_models(Settings(model_router_name="router-test"))
+    models, reason = create_configured_models(Settings(model_fast_name="fast-test"))
 
     assert models is None
     assert reason == "model_configuration_incomplete"
+
+
+def test_provider_model_runtime_requires_endpoint_environment_value():
+    models, reason = create_configured_models(
+        Settings(
+            openai_api_key="test-secret",
+            model_fast_name="fast-test",
+            model_specialist_name="specialist-test",
+        )
+    )
+
+    assert models is None
+    assert reason == "model_endpoint_not_configured"
+
+
+def test_fallback_provider_key_requires_its_endpoint():
+    models, reason = create_configured_models(
+        Settings(
+            openai_api_key="openai-key",
+            openai_base_url="https://openai.example/v1",
+            anthropic_api_key="anthropic-key",
+            model_fast_name="fast-test",
+            model_specialist_name="specialist-test",
+        ),
+        chat_model_factory=lambda **options: _FakeChatModel(**options),
+    )
+
+    assert models is None
+    assert reason == "fallback_model_endpoint_not_configured"
 
 
 def test_simulated_mode_builds_models_without_external_credentials():
@@ -57,7 +208,7 @@ def test_simulated_mode_builds_models_without_external_credentials():
     assert reason is None
     assert models is not None
     validate_model_capabilities(models)
-    assert models[ModelPolicyId.ROUTER]._llm_type == "argos_simulated"
+    assert models[ModelPolicyId.FAST]._llm_type == "argos_simulated"
 
 
 def test_simulated_model_emits_a_valid_route_plan():
@@ -414,7 +565,7 @@ def test_simulated_prediction_tool_arguments_match_mcp_contract():
     assert request.horizon_days == 7
 
 
-def test_factory_maps_each_internal_policy_to_its_configured_model():
+def test_factory_builds_fast_and_specialist_models_only():
     calls = []
 
     def factory(**options):
@@ -423,28 +574,91 @@ def test_factory_maps_each_internal_policy_to_its_configured_model():
 
     models, reason = create_configured_models(
         Settings(
-            model_api_base_url="https://models.example/v1",
-            model_api_key="test-secret",
-            **_configured_model_names(),
+            openai_api_key="test-secret",
+            openai_base_url="https://openai.example/v1",
+            model_fast_name="fast-test",
+            model_specialist_name="specialist-test",
         ),
         chat_model_factory=factory,
     )
 
     assert reason is None
     assert models is not None
-    assert len(calls) == len(ModelPolicyId)
-    for policy in ModelPolicyId:
-        assert models[policy].model == f"{policy.value}-test"
-    assert models[ModelPolicyId.ROUTER] is not models[ModelPolicyId.JUDGE]
-    assert models[ModelPolicyId.FARM] is not models[ModelPolicyId.ANALYST]
-    assert models[ModelPolicyId.ROUTER] is not models[ModelPolicyId.FARM]
+    assert len(calls) == 2
+    assert models[ModelPolicyId.FAST].model == "fast-test"
+    assert models[ModelPolicyId.SPECIALIST].model == "specialist-test"
+    assert models[ModelPolicyId.FAST] is not models[ModelPolicyId.SPECIALIST]
     assert calls[0]["api_key"] == "test-secret"
-    assert calls[0]["max_retries"] == 2
-    assert calls[0]["max_tokens"] == 4096
+    assert all(call["max_retries"] == 2 for call in calls)
+    assert all(call["max_tokens"] == 4096 for call in calls)
+    assert all(call["reasoning_effort"] == "none" for call in calls)
+    assert all(call["base_url"] == "https://openai.example/v1" for call in calls)
+    assert all("extra_body" not in call for call in calls)
 
 
-def test_factory_reuses_instance_when_agents_share_a_model_name():
-    names = _configured_model_names(router="shared-test", judge="shared-test")
+def test_factory_uses_configured_openai_base_url():
+    calls = []
+
+    def factory(**options):
+        calls.append(options)
+        return _FakeChatModel(**options)
+
+    create_configured_models(
+        Settings(
+            openai_api_key="test-secret",
+            openai_base_url="https://openai-gateway.example/v1",
+            model_fast_name="fast-test",
+            model_specialist_name="specialist-test",
+        ),
+        chat_model_factory=factory,
+    )
+
+    assert all(call["base_url"] == "https://openai-gateway.example/v1" for call in calls)
+
+
+def test_factory_uses_configured_anthropic_base_url(monkeypatch):
+    from types import SimpleNamespace
+
+    calls = []
+
+    class _FallbackFakeChatModel(_FakeChatModel):
+        def bind_tools(self, _tools, **_options):
+            return self
+
+    def fallback_factory(**options):
+        calls.append(options)
+        return _FallbackFakeChatModel(**options)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "langchain_anthropic",
+        SimpleNamespace(ChatAnthropic=fallback_factory),
+    )
+    settings = Settings(
+        openai_api_key="openai-key",
+        anthropic_api_key="anthropic-key",
+        anthropic_base_url="https://anthropic-gateway.example",
+        model_fast_fallback_name="fallback-fast-test",
+        model_specialist_fallback_name="fallback-specialist-test",
+        model_fast_name="fast-test",
+        model_specialist_name="specialist-test",
+    )
+    primary_models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
+    _attach_anthropic_fallbacks(primary_models, settings)
+
+    assert len(calls) == 2
+    assert all(call["base_url"] == "https://anthropic-gateway.example" for call in calls)
+
+
+def test_provider_base_urls_are_validated():
+    with pytest.raises(ValueError, match="OPENAI_BASE_URL"):
+        Settings(openai_base_url="file:///tmp/provider")
+
+    with pytest.raises(ValueError, match="ANTHROPIC_BASE_URL"):
+        Settings(anthropic_base_url="https://user:password@provider.example")
+
+
+def test_factory_reuses_instance_when_both_roles_share_a_model_name():
     calls = []
 
     def factory(**options):
@@ -452,43 +666,59 @@ def test_factory_reuses_instance_when_agents_share_a_model_name():
         return _FakeChatModel(**options)
 
     models, reason = create_configured_models(
-        Settings(model_api_key="test-secret", **names),
+        Settings(
+            openai_api_key="test-secret",
+            openai_base_url="https://openai.example/v1",
+            model_fast_name="shared-test",
+            model_specialist_name="shared-test",
+        ),
         chat_model_factory=factory,
     )
 
     assert reason is None
     assert models is not None
-    assert models[ModelPolicyId.ROUTER] is models[ModelPolicyId.JUDGE]
-    assert len(calls) == len(ModelPolicyId) - 1
+    assert models[ModelPolicyId.FAST] is models[ModelPolicyId.SPECIALIST]
+    assert len(calls) == 1
 
 
-def test_nvidia_factory_disables_optional_thinking_without_changing_agent_models():
-    name = "nvidia/nemotron-3.5-super-vl-120b-a12b"
-    models, reason = create_configured_models(
-        Settings(
-            model_api_base_url="https://integrate.api.nvidia.com/v1",
-            model_api_key="test-secret",
-            **_configured_model_names(**{p.value: name for p in ModelPolicyId}),
-        ),
-        chat_model_factory=_FakeChatModel,
-    )
-    assert reason is None
-    assert models[ModelPolicyId.ROUTER].options["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
-
-
-def test_per_agent_model_names_are_loaded_from_environment(monkeypatch):
-    for policy in ModelPolicyId:
-        monkeypatch.setenv(
-            f"MAIN_API_MODEL_{policy.value.upper()}",
-            f"{policy.value}-env",
-        )
+def test_fast_and_specialist_model_names_are_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_MODEL_FAST", "fast-env")
+    monkeypatch.setenv("OPENAI_MODEL_SPECIALIST", "specialist-env")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://openai-gateway.example/v1/")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://anthropic-gateway.example/")
+    monkeypatch.setenv("ANTHROPIC_MODEL_FAST_FALLBACK", "haiku-env")
+    monkeypatch.setenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK", "sonnet-env")
 
     settings = Settings.from_env()
 
-    for policy in ModelPolicyId:
-        assert getattr(settings, f"model_{policy.value}_name") == f"{policy.value}-env"
+    assert settings.model_fast_name == "fast-env"
+    assert settings.model_specialist_name == "specialist-env"
+    assert settings.anthropic_api_key == "anthropic-test-key"
+    assert settings.openai_base_url == "https://openai-gateway.example/v1"
+    assert settings.anthropic_base_url == "https://anthropic-gateway.example"
+    assert settings.model_fast_fallback_name == "haiku-env"
+    assert settings.model_specialist_fallback_name == "sonnet-env"
+
+
+def test_provider_urls_are_not_defaulted_from_environment(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.openai_base_url is None
+    assert settings.anthropic_base_url is None
+
+
+def test_fallback_models_have_no_built_in_names(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_MODEL_FAST_FALLBACK", raising=False)
+    monkeypatch.delenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK", raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.model_fast_fallback_name is None
+    assert settings.model_specialist_fallback_name is None
 
 
 @pytest.mark.parametrize(
@@ -532,17 +762,15 @@ def test_document_a2a_timeout_is_loaded_from_environment(monkeypatch):
     assert Settings.from_env().document_a2a_timeout_seconds == 50
 
 
-@pytest.mark.parametrize(
-    "policy",
-    [ModelPolicyId.ROUTER, ModelPolicyId.QUESTION_FORMATTER],
-)
-def test_model_factory_rejects_tool_strategy_agent_without_tool_binding(policy):
+def test_model_factory_rejects_model_without_native_structured_output():
     class NoToolBinding:
         pass
 
-    models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
-    models[policy] = NoToolBinding()
-    with pytest.raises(ModelRuntimeConfigurationError, match="vincular ferramentas"):
+    models = {
+        ModelPolicyId.FAST: NoToolBinding(),
+        ModelPolicyId.SPECIALIST: _FakeChatModel(model="specialist"),
+    }
+    with pytest.raises(ModelRuntimeConfigurationError, match="saída estruturada nativa"):
         validate_model_capabilities(models)
 
 
@@ -552,29 +780,18 @@ def test_model_factory_rejects_specialist_without_tool_support():
             return self
 
     models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
-    models[ModelPolicyId.FARM] = NoToolBinding()
+    models[ModelPolicyId.SPECIALIST] = NoToolBinding()
     with pytest.raises(ModelRuntimeConfigurationError, match="vincular ferramentas"):
         validate_model_capabilities(models)
 
 
-def test_model_factory_rejects_orchestrator_without_tool_support():
+def test_model_factory_does_not_require_tools_for_fast_agents():
     class NativeStructuredOnly:
         def with_structured_output(self, _schema):
             return self
 
-    models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
-    models[ModelPolicyId.ORCHESTRATOR] = NativeStructuredOnly()
-
-    validate_model_capabilities(models)
-    with pytest.raises(ModelRuntimeConfigurationError, match="vincular ferramentas"):
-        validate_model_capabilities(models, simulated=True)
-
-
-def test_model_factory_does_not_require_tool_binding_for_provider_judge():
-    class NoToolBinding:
-        pass
-
-    models = {policy: _FakeChatModel(model=policy.value) for policy in ModelPolicyId}
-    models[ModelPolicyId.JUDGE] = NoToolBinding()
-
+    models = {
+        ModelPolicyId.FAST: NativeStructuredOnly(),
+        ModelPolicyId.SPECIALIST: _FakeChatModel(model="specialist"),
+    }
     validate_model_capabilities(models)

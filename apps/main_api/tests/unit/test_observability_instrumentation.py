@@ -7,9 +7,9 @@ from uuid import uuid4
 import pytest
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
 from app.application.email_workflow import EmailWorkflow
+from app.application.operation_observation import OperationRecorder
 from app.infrastructure.mcp.client import MCP_TOOL_ALLOWLISTS, McpToolServerClient
 from app.infrastructure.observability.langchain_callbacks import ObservabilityToolCallback
-from app.infrastructure.observability.recording import OperationRecorder
 from app.main import create_app
 from app.settings import Settings
 
@@ -84,7 +84,7 @@ async def test_tool_callback_marks_mock_and_unavailable_without_storing_content(
     callback = ObservabilityToolCallback(collector, "fazenda")
     mock_run_id = uuid4()
     await callback.on_tool_start(
-        {"name": "mock_consultar_fazenda"},
+        {"name": "mock_query_farm"},
         '{"api_key":"do-not-store"}',
         run_id=mock_run_id,
     )

@@ -58,9 +58,9 @@ class DocumentCorpusSynchronizer:
         self._lock = asyncio.Lock()
 
     async def ensure_current(self) -> CorpusSyncResult:
-        # Espera uma sincronização em andamento terminar. Rejeitar imediatamente
-        # fazia consultas simultâneas sobre um corpus já publicado retornarem
-        # "unavailable" mesmo quando a sincronização concorrente terminava bem.
+        """Espera uma sincronização em andamento terminar. Rejeitar imediatamente
+        fazia consultas simultâneas sobre um corpus já publicado retornarem
+        "unavailable" mesmo quando a sincronização concorrente terminava bem."""
         async with self._lock:
             try:
                 return await self._synchronize()
@@ -70,6 +70,10 @@ class DocumentCorpusSynchronizer:
                 raise CorpusSynchronizationError("falha na sincronização do corpus") from exc
 
     async def _synchronize(self) -> CorpusSyncResult:
+        """Recupera o último estado confirmado após interrupção entre a
+        troca do alias e a publicação atômica do manifesto.
+        Remove resíduos de uma execução interrompida antes de reutilizar a
+        revisão determinística como nova geração de staging."""
         source_documents = await self._list_complete_source()
         current_documents = {item.document_id: item for item in source_documents}
         old_manifest = await self._manifests.load()
@@ -86,8 +90,6 @@ class DocumentCorpusSynchronizer:
                     "a geração declarada pelo manifesto não existe no Qdrant"
                 )
             if not await self._index_writer.is_published(old_manifest.corpus_revision):
-                # Recupera o último estado confirmado após interrupção entre a
-                # troca do alias e a publicação atômica do manifesto.
                 await self._index_writer.publish(old_manifest.corpus_revision)
 
         changed_ids = tuple(
@@ -136,8 +138,6 @@ class DocumentCorpusSynchronizer:
             generated_at=datetime.now(UTC),
         )
 
-        # Remove resíduos de uma execução interrompida antes de reutilizar a
-        # revisão determinística como nova geração de staging.
         if await self._index_writer.is_published(new_revision):
             await self._index_writer.unpublish(new_revision)
         await self._index_writer.discard(new_revision)

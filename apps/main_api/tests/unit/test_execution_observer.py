@@ -1,7 +1,8 @@
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from app.domain.sessions import ExecutionStatus, ExecutionTarget
+from app.domain.sessions import ExecutionEvent, ExecutionStatus, ExecutionTarget
 from app.infrastructure.agents.execution_observer import ExecutionObserver
 from app.ports.execution_event_repository import ExecutionEventWriteError
 
@@ -15,6 +16,22 @@ class FakeExecutionEventRepository:
         if self.fail:
             raise OSError("database details must not escape")
         self.events.append(event)
+
+
+def test_execution_event_requires_invocation_id_as_event_id():
+    now = datetime.now(UTC)
+
+    with pytest.raises(ValueError, match="event_id deve ser igual a invocation_id"):
+        ExecutionEvent(
+            event_id=uuid4(),
+            invocation_id=uuid4(),
+            session_id=uuid4(),
+            interaction_id=uuid4(),
+            target=ExecutionTarget.AGENT,
+            target_name="farm",
+            status=ExecutionStatus.STARTED,
+            created_at=now,
+        )
 
 
 @pytest.mark.asyncio
@@ -37,7 +54,7 @@ async def test_agent_events_are_correlated_and_sanitized():
     assert started.status == ExecutionStatus.STARTED
     assert succeeded.status == ExecutionStatus.SUCCEEDED
     assert started.invocation_id == succeeded.invocation_id == invocation_id
-    assert started.event_id != succeeded.event_id
+    assert started.event_id == succeeded.event_id == invocation_id
     assert "user@example.invalid" in started.sanitized_input
     assert "must-not-persist" not in started.sanitized_input
     assert "123.456.789-01" not in succeeded.sanitized_output

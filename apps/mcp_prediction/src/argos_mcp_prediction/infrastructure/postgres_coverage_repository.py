@@ -1,4 +1,4 @@
-"""Leitura read-only de uma view operacional de cobertura validada."""
+"""Leitura somente leitura de uma view operacional de cobertura validada."""
 
 import re
 from datetime import UTC, date, datetime, timedelta

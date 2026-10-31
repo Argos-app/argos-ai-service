@@ -236,7 +236,10 @@ def _factory(
 async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
     mcp_harness, message, expected_dispatch
 ):
-    """Exercises API → graph → real email MCP → Mongo/Mailpit using a signed fake Farm source."""
+    """Exercita o fluxo API → grafo → MCP de e-mail → Mongo/Mailpit com fonte assinada.
+
+    Uma nova instância da API reproduz a interação HTTP persistida sem chamar o grafo ou o MCP.
+    """
     mongo_uri = os.getenv("MAIN_API_MONGO_TEST_URI")
     if not mongo_uri:
         pytest.skip("defina MAIN_API_MONGO_TEST_URI para executar a integração do consumidor")
@@ -376,17 +379,18 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             assert public_result["response"]["kind"] == "answer"
             public_text = public_result["response"]["text"]
             if expected_dispatch:
-                authorization = await mongo[database_name]["ai_email_send_authorizations"].find_one(
+                authorization = await mongo[database_name]["ai_email_workflows"].find_one(
                     {
+                        "record_type": "authorization",
                         "principal_user_id": str(user_id),
                         "session_id": session_id,
                         "source_interaction_id": public_result["interaction_id"],
                     }
                 )
                 assert authorization is not None
-                operation_reference = await mongo[database_name][
-                    "ai_email_operation_references"
-                ].find_one({"_id": authorization["_id"]})
+                operation_reference = await mongo[database_name]["ai_email_workflows"].find_one(
+                    {"_id": f"operation:{authorization['_id']}"}
+                )
                 assert operation_reference is not None
                 assert operation_reference["last_known_status"] == "accepted"
                 assert "O provedor aceitou o despacho" in public_text
@@ -411,15 +415,14 @@ async def test_public_api_prepares_sends_and_replays_without_duplicate_email(
             assert await harness.database.ai_email_dispatches.count_documents({}) == expected_count
             assert await harness.database.ai_email_prepared_reports.count_documents({}) == 1
 
-            stored_action_count = await mongo[database_name][
-                "ai_email_send_authorizations"
-            ].count_documents({})
+            stored_action_count = await mongo[database_name]["ai_email_workflows"].count_documents(
+                {"record_type": "authorization"}
+            )
             stored_operation_count = await mongo[database_name][
-                "ai_email_operation_references"
-            ].count_documents({})
+                "ai_email_workflows"
+            ].count_documents({"record_type": "operation_reference"})
             assert stored_action_count == stored_operation_count == expected_count
 
-        # A new API instance replays the persisted HTTP interaction without calling the graph/MCP.
         restarted_app = create_app(settings)
         with TestClient(restarted_app) as restarted_client:
             restarted_app.state.user_access_repository = _UserAccessRepository(users)

@@ -9,7 +9,7 @@ Execute na raiz do repositório com Docker em execução:
 
 ```powershell
 python -m venv .venv/a2a-integration
-.venv/a2a-integration/Scripts/python.exe -m pip install -r apps/a2a_agent/tests/integration/requirements.txt
+.venv/a2a-integration/Scripts/python.exe -m pip install -r requirements-dev.txt
 docker compose -f apps/a2a_agent/tests/integration/compose.yaml up -d
 $env:A2A_RUN_INTEGRATION="1"
 .venv/a2a-integration/Scripts/python.exe -m pytest apps/a2a_agent/tests/integration -v -p no:cacheprovider

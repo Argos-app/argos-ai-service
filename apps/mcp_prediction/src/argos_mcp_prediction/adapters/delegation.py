@@ -15,9 +15,9 @@ _ACCESS_CONTEXT_KEY = "argos_mcp_prediction_access_context"
 
 
 def get_access_context() -> AccessContext:
-    # O SDK transporta a requisição HTTP atual nos metadados de cada mensagem.
-    # Um ContextVar próprio seria herdado da inicialização da sessão MCP e
-    # manteria uma delegação antiga nas chamadas seguintes da mesma sessão.
+    """O SDK transporta a requisição HTTP atual nos metadados de cada mensagem.
+    Um ContextVar próprio seria herdado da inicialização da sessão MCP e
+    manteria uma delegação antiga nas chamadas seguintes da mesma sessão."""
     try:
         request = request_ctx.get().request
     except LookupError as exc:
@@ -53,6 +53,7 @@ class DelegationContextMiddleware:
         self._verifier = verifier
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Copiar o estado evita compartilhar identidade entre requisições."""
         if scope["type"] != "http" or scope.get("path") != "/mcp":
             await self._app(scope, receive, send)
             return
@@ -75,7 +76,6 @@ class DelegationContextMiddleware:
             )(scope, receive, send)
             return
 
-        # Copiar o estado evita compartilhar identidade entre requisições.
         scoped_request = {
             **scope,
             "state": {**scope.get("state", {}), _ACCESS_CONTEXT_KEY: context},

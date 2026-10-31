@@ -398,7 +398,7 @@ class MongoConversationRepository:
         before_sequence: int | None,
         limit: int,
     ) -> tuple[ConversationMessage, ...]:
-        # A API solicita uma linha extra para calcular has_more sem contagem.
+        """A API solicita uma linha extra para calcular has_more sem contagem."""
         if not 1 <= limit <= 101:
             raise ValueError("limit deve estar entre 1 e 101")
         query: dict[str, Any] = {"session_id": str(session_id), "user_id": str(user_id)}
@@ -470,9 +470,9 @@ def _event_from_document(document: dict[str, Any]) -> ExecutionEvent:
         target_name=document["target_name"],
         status=ExecutionStatus(document["status"]),
         created_at=document["created_at"],
-        attempt=document.get("attempt", 1),
-        sanitized_input=document.get("sanitized_input"),
-        sanitized_output=document.get("sanitized_output"),
+        attempt=document["attempt"],
+        sanitized_input=document["sanitized_input"],
+        sanitized_output=document["sanitized_output"],
         messages=tuple(
             ExecutionMessage(
                 role=ExecutionMessageRole(item["role"]),
@@ -480,10 +480,10 @@ def _event_from_document(document: dict[str, Any]) -> ExecutionEvent:
                 tool_name=item.get("tool_name"),
                 tool_call_id=item.get("tool_call_id"),
             )
-            for item in document.get("messages", [])
+            for item in document["messages"]
         ),
-        safe_error_code=document.get("safe_error_code"),
-        completed_at=document.get("completed_at"),
+        safe_error_code=document["safe_error_code"],
+        completed_at=document["completed_at"],
     )
 
 
@@ -503,17 +503,56 @@ class MongoExecutionEventRepository:
         )
 
     async def append(self, event: ExecutionEvent) -> None:
+        """Permite novos horários em retentativas, mas exige a mesma identidade e resultado."""
         session = await self._sessions.find_one({"_id": str(event.session_id)})
         if session is None:
             raise KeyError(f"sessão não encontrada: {event.session_id}")
         document = _event_document(event, UUID(session["user_id"]))
+        if event.target == ExecutionTarget.TOOL and event.messages:
+            document["sanitized_input"] = None
+            document["sanitized_output"] = None
         try:
             await self._collection.insert_one(document)
         except Exception as exc:
             if not _is_duplicate(exc):
                 raise
             existing = await self._collection.find_one({"_id": str(event.event_id)})
-            if existing != document:
+            identity = (
+                "invocation_id",
+                "session_id",
+                "interaction_id",
+                "user_id",
+                "target",
+                "target_name",
+                "attempt",
+            )
+            if existing is None or any(existing.get(key) != document[key] for key in identity):
+                raise PersistenceConflictError("event_id já usado com outro evento") from exc
+            if document["sanitized_input"] is None and event.target != ExecutionTarget.TOOL:
+                document["sanitized_input"] = existing.get("sanitized_input")
+            if (
+                existing["status"] == ExecutionStatus.STARTED.value
+                and event.status != ExecutionStatus.STARTED
+            ):
+                document["created_at"] = existing["created_at"]
+                result = await self._collection.replace_one(
+                    {"_id": document["_id"], "status": ExecutionStatus.STARTED.value}, document
+                )
+                if result.matched_count:
+                    return
+                existing = await self._collection.find_one({"_id": document["_id"]})
+            if (
+                event.status == ExecutionStatus.STARTED
+                and existing["status"] != ExecutionStatus.STARTED.value
+            ):
+                return
+            comparable_existing = {key: value for key, value in existing.items()}
+            comparable_document = {key: value for key, value in document.items()}
+
+            for key in ("created_at", "completed_at"):
+                comparable_existing.pop(key, None)
+                comparable_document.pop(key, None)
+            if comparable_existing != comparable_document:
                 raise PersistenceConflictError("event_id já usado com outro evento") from exc
 
     async def list_for_interactions(
@@ -580,7 +619,7 @@ class MongoSessionSummaryRepository:
         self._collection = collection
 
     async def ensure_indexes(self) -> None:
-        # _id is the unique session key; this collection keeps only the current revision.
+        """_id é a chave única da sessão; esta coleção mantém somente a revisão atual."""
         return None
 
     async def get_current(self, session_id: UUID) -> SessionSummary | None:
@@ -824,12 +863,7 @@ class MongoPersistence:
         self.session_summaries = MongoSessionSummaryRepository(database[names.session_summaries])
         self.user_memory = MongoUserMemoryRepository(database[names.user_memory])
         self.report_artifacts = MongoReportArtifactRepository(database[names.report_artifacts])
-        self.email_preparations = MongoEmailPreparationRepository(
-            database[names.email_preparations],
-            database[names.pending_recipient_resolutions],
-            database[names.email_send_authorizations],
-            database[names.email_operation_references],
-        )
+        self.email_preparations = MongoEmailPreparationRepository(database[names.email_workflows])
         self.session_work = MongoSessionWorkRepository(
             database,
             sessions,

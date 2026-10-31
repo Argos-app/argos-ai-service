@@ -1,11 +1,11 @@
 """Contexto imutável de delegação e escopo efetivo por consulta."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID
 
 from argos_mcp_data.domain.errors import AccessDeniedError
-from packages.security.access import AccessContext
+from packages.security.access import AccessContext, select_authorized_properties
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,23 +32,15 @@ class AuthorizedScope:
         operation: str,
         selected_property_ids: tuple[UUID, ...] | None = None,
     ) -> AuthorizedScope:
-        if context.expires_at.tzinfo is None or context.expires_at <= datetime.now(UTC):
-            raise AccessDeniedError("contexto de acesso expirado")
-        if operation not in context.operations:
-            raise AccessDeniedError("operação fora do contexto autorizado")
-        claimed = set(context.authorized_property_ids)
-        if not claimed or not claimed.issubset(current_property_ids):
-            raise AccessDeniedError("contexto de propriedades desatualizado")
-
-        selection = (
-            context.authorized_property_ids
-            if selected_property_ids is None
-            else selected_property_ids
+        selection = select_authorized_properties(
+            context,
+            current_property_ids=current_property_ids,
+            operation=operation,
+            selected_property_ids=selected_property_ids,
+            max_selection=None,
+            allow_duplicate_claims=True,
+            denied_error=AccessDeniedError,
         )
-        if not selection or len(set(selection)) != len(selection):
-            raise AccessDeniedError("seleção de propriedades inválida")
-        if not set(selection).issubset(claimed):
-            raise AccessDeniedError("seleção de propriedades fora do escopo autorizado")
 
         return cls(
             user_id=user_id,

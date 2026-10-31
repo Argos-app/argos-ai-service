@@ -11,7 +11,7 @@ COPY apps/mcp_prediction/pylock.toml /app/pylock.toml
 RUN python -m pip install --no-cache-dir --disable-pip-version-check "pip==${PIP_VERSION}" \
     && python -m pip install --no-cache-dir --disable-pip-version-check -r /app/pylock.toml
 
-# Keep the internal contracts/security code inside this service artifact.
+# Inclui os contratos e o código de segurança compartilhados neste artefato do serviço.
 COPY apps/mcp_prediction/src/ /app/src/
 COPY packages/contracts/ /app/packages/contracts/
 COPY packages/security/ /app/packages/security/

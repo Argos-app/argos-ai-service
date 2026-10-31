@@ -34,9 +34,12 @@ class ReadOnlyQdrantReader:
         *,
         query_filter: Mapping[str, Any],
         limit: int,
+        vector_name: str | None = None,
     ) -> Sequence[Mapping[str, Any]]:
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
             raise ValueError("limit deve ser um inteiro entre 1 e 20")
+        if vector_name is not None and vector_name not in {"openai", "voyage"}:
+            raise ValueError("vector_name deve ser openai ou voyage")
         if not vector or any(
             isinstance(value, bool)
             or not isinstance(value, (int, float))
@@ -44,6 +47,7 @@ class ReadOnlyQdrantReader:
             for value in vector
         ):
             raise ValueError("a consulta vetorial deve conter números finitos")
+        kwargs = {"using": vector_name} if vector_name is not None else {}
         result = await self._client.query_points(
             collection_name=self._collection,
             query=list(vector),
@@ -51,6 +55,7 @@ class ReadOnlyQdrantReader:
             limit=limit,
             with_payload=True,
             with_vectors=False,
+            **kwargs,
         )
         return tuple(point.model_dump(mode="json") for point in result.points)
 

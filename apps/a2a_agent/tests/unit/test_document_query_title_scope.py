@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-import pytest
 from argos_a2a_agent.application.document_queries import SearchDocuments
 from argos_a2a_agent.application.ensure_current_corpus import EnsureCurrentCorpusOutcome
 from argos_a2a_agent.domain.models import (
@@ -16,6 +15,14 @@ from packages.contracts.a2a import CorpusRefreshStatus, DocumentType
 from packages.contracts.documents import SearchDocumentsRequest
 
 CORPUS_REVISION = "a" * 64
+
+
+def run_immediate(coroutine):
+    try:
+        coroutine.send(None)
+    except StopIteration as result:
+        return result.value
+    raise AssertionError("os adapters fake não devem ceder controle de I/O")
 
 
 def _metadata(title: str, document_type: DocumentType) -> DocumentMetadata:
@@ -48,6 +55,7 @@ class _Repository:
     def __init__(self, documents):
         self.documents = tuple(documents)
         self.search_filters = None
+        self.search_vector_name = None
 
     def _filtered(self, filters: DocumentFilter):
         selected = self.documents
@@ -67,11 +75,13 @@ class _Repository:
         documents = self._filtered(filters)[:page_size]
         return DocumentPage(documents=documents, next_cursor=None, complete=True)
 
-    async def search(self, vector, *, filters, limit):
+    async def search(self, vector, *, filters, limit, vector_name=None):
+        """Simula um índice semântico que posiciona termos acima de uma lei nesta consulta."""
         del vector
         self.search_filters = filters
+        self.search_vector_name = vector_name
         selected = self._filtered(filters)
-        # Simulate a semantic index that ranks terms above a law for this query.
+
         document = next(
             (item for item in selected if item.document_type == DocumentType.TERMS_CONDITIONS),
             selected[0],
@@ -93,22 +103,70 @@ class _Repository:
 
 
 class _Embeddings:
-    async def embed(self, texts):
+    def __init__(self, *, fail=False):
+        self.fail = fail
+
+    async def embed(self, texts, *, input_type="document"):
+        assert input_type == "query"
+        if self.fail:
+            raise RuntimeError("OpenAI indisponível")
         return ((0.1, 0.2),) if len(texts) == 1 else ()
 
 
-@pytest.mark.asyncio
-async def test_explicit_document_title_limits_semantic_search_to_that_document():
+def test_explicit_document_title_limits_semantic_search_to_that_document():
     law = _metadata("Lei Sintética Global de Demonstração", DocumentType.LAW)
     terms = _metadata("Termos e Condições de Uso", DocumentType.TERMS_CONDITIONS)
     repository = _Repository((law, terms))
     query = SearchDocuments(_EnsureCurrent(), repository, _Embeddings())
 
-    response = await query.execute(
-        SearchDocumentsRequest(query="Explique a Lei sintética global de demonstração."),
-        context=None,
+    response = run_immediate(
+        query.execute(
+            SearchDocumentsRequest(query="Explique a Lei sintética global de demonstração."),
+            context=None,
+        )
     )
 
     assert response.hits[0].document_id == law.document_id
     assert repository.search_filters is not None
     assert repository.search_filters.document_ids == (law.document_id,)
+
+
+def test_search_falls_back_to_matching_voyage_vector_index():
+    document = _metadata("Lei Sintética Global de Demonstração", DocumentType.LAW)
+    repository = _Repository((document,))
+
+    class VoyageEmbeddings:
+        async def embed(self, texts, *, input_type="document"):
+            assert input_type == "query"
+            return ((0.5, 0.25, 0.1),) if len(texts) == 1 else ()
+
+    query = SearchDocuments(
+        _EnsureCurrent(),
+        repository,
+        _Embeddings(fail=True),
+        VoyageEmbeddings(),
+    )
+
+    run_immediate(query.execute(SearchDocumentsRequest(query="Qual é a lei?"), context=None))
+
+    assert repository.search_vector_name == "voyage"
+
+
+def test_search_selects_openai_named_vector_when_both_indexes_are_configured():
+    document = _metadata("Lei Sintética Global de Demonstração", DocumentType.LAW)
+    repository = _Repository((document,))
+
+    class VoyageEmbeddings:
+        async def embed(self, texts, *, input_type="document"):
+            return ((0.5, 0.25, 0.1),) if len(texts) == 1 else ()
+
+    query = SearchDocuments(
+        _EnsureCurrent(),
+        repository,
+        _Embeddings(),
+        VoyageEmbeddings(),
+    )
+
+    run_immediate(query.execute(SearchDocumentsRequest(query="Qual é a lei?"), context=None))
+
+    assert repository.search_vector_name == "openai"

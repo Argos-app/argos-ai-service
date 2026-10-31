@@ -4,9 +4,9 @@ from langchain_core.runnables import RunnableConfig
 
 
 @tool(description="Simula consulta de aplicações e lotes. Nunca acessa dados verídicos.")
-def mock_consultar_fazenda(consulta: str, config: RunnableConfig) -> str:
-    configuravel = (config or {}).get("configurable", {})
-    farm_id = configuravel.get("farm_id")
+def mock_query_farm(consulta: str, config: RunnableConfig) -> str:
+    configurable = (config or {}).get("configurable", {})
+    farm_id = configurable.get("farm_id")
 
     if farm_id != "farm-demo":
         return (
@@ -25,7 +25,7 @@ def mock_consultar_fazenda(consulta: str, config: RunnableConfig) -> str:
 
 
 @tool(description="Simula busca documental sem fornecer orientação clínica.")
-def mock_consultar_medicamento(nome: str) -> str:
+def mock_query_medicine(nome: str) -> str:
     return (
         f"SIMULAÇÃO: busca por '{nome}'. Nenhuma bula real foi consultada. "
         "Este mock não contém dose, indicação, contraindicação nem carência. "
@@ -34,7 +34,7 @@ def mock_consultar_medicamento(nome: str) -> str:
 
 
 @tool(description="Simula previsão para testar o Analista; não usa dados verídicos.")
-def mock_calcular_previsao(pergunta: str) -> str:
+def mock_estimate_prediction(pergunta: str) -> str:
     return (
         f"SIMULAÇÃO para '{pergunta}'. Resultado FICTÍCIO: 12 aplicações "
         "no próximo período. Premissa: dados sintéticos de teste. "
@@ -45,9 +45,9 @@ def mock_calcular_previsao(pergunta: str) -> str:
 
 
 @tool(description="Simula preparação de relatório. Nunca gera arquivo nem envia e-mail.")
-def mock_preparar_relatorio(tipo: str, config: RunnableConfig) -> str:
-    configuravel = (config or {}).get("configurable", {})
-    farm_id = configuravel.get("farm_id")
+def mock_prepare_report(tipo: str, config: RunnableConfig) -> str:
+    configurable = (config or {}).get("configurable", {})
+    farm_id = configurable.get("farm_id")
 
     if farm_id != "farm-demo":
         return "MOCK: fazenda de teste não identificada. Relatório não preparado."
@@ -60,7 +60,7 @@ def mock_preparar_relatorio(tipo: str, config: RunnableConfig) -> str:
 
 
 @tool(description="Simula indisponibilidade do Documental; não consulta PDFs.")
-def mock_consultar_documental(pergunta: str) -> str:
+def mock_query_documents(pergunta: str) -> str:
     return (
         f"MOCK: pergunta recebida: '{pergunta}'. "
         "Serviço Documental indisponível neste teste. "
@@ -70,7 +70,7 @@ def mock_consultar_documental(pergunta: str) -> str:
 
 
 @tool(description="Simula indisponibilidade da busca de leis; não consulta PDFs.")
-def mock_consultar_legal(
+def mock_query_law(
     question: str,
     jurisdiction: str | None = None,
     reference_date: str | None = None,
@@ -82,16 +82,16 @@ def mock_consultar_legal(
     )
 
 
-MOCK_FARM_TOOLS = [mock_consultar_fazenda]
-MOCK_DOCTOR_TOOLS = [mock_consultar_medicamento]
-MOCK_ANALYST_TOOLS = [mock_calcular_previsao]
-MOCK_SECRETARY_TOOLS = [mock_preparar_relatorio]
-MOCK_INFORMATION_TOOLS = [mock_consultar_documental, mock_consultar_legal]
+MOCK_FARM_TOOLS = [mock_query_farm]
+MOCK_DOCTOR_TOOLS = [mock_query_medicine]
+MOCK_ANALYST_TOOLS = [mock_estimate_prediction]
+MOCK_SECRETARY_TOOLS = [mock_prepare_report]
+MOCK_INFORMATION_TOOLS = [mock_query_documents, mock_query_law]
 
 MOCK_AGENT_TOOL_BINDINGS = {
     AgentId.FARM: {"farm_data": tuple(MOCK_FARM_TOOLS)},
     AgentId.DOCTOR: {"medicine_reference": tuple(MOCK_DOCTOR_TOOLS)},
     AgentId.ANALYST: {"prediction": tuple(MOCK_ANALYST_TOOLS)},
-    AgentId.SECRETARY: {"report_delivery": (mock_preparar_relatorio,)},
+    AgentId.SECRETARY: {"report_delivery": (mock_prepare_report,)},
     AgentId.INFORMATION: {"documental_a2a": tuple(MOCK_INFORMATION_TOOLS)},
 }

@@ -1,5 +1,6 @@
 """Verificações do contrato HTTP antes das integrações externas."""
 
+import json
 import sys
 from importlib import import_module
 from pathlib import Path
@@ -22,6 +23,11 @@ QuestionResponse = import_module("app.api.v1.models.interactions").QuestionRespo
 
 
 client = TestClient(app)
+
+
+def test_published_openapi_matches_application_schema() -> None:
+    snapshot = Path(__file__).resolve().parents[2] / "docs" / "openapi-main-api.json"
+    assert json.loads(snapshot.read_text(encoding="utf-8")) == app.openapi()
 
 
 class _FakeChatModel:
@@ -133,6 +139,10 @@ def test_planned_routes_are_present() -> None:
     ].endswith("/InteractionAccepted")
     firebase_auth = paths["/v1/auth/firebase"]["post"]
     assert "requestBody" not in firebase_auth
+    assert firebase_auth["responses"]["422"]["description"] == "Erro de validação"
+    assert firebase_auth["responses"]["422"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("/HTTPValidationError")
     assert any(
         parameter["name"].casefold() == "authorization" and parameter["in"] == "header"
         for parameter in firebase_auth["parameters"]

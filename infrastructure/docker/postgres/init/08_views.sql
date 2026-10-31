@@ -1,4 +1,4 @@
--- views analitcas
+-- visões analíticas
 
 
 create or replace view vw_saldo_estoque as

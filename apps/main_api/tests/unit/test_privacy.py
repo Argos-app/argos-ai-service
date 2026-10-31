@@ -1,7 +1,7 @@
 from uuid import uuid4
 
 from app.application.contracts.interactions import MessageCommand
-from app.application.session_service import _normalize_input
+from app.application.session_helpers import _normalize_input
 from app.privacy import merge_recipient_selectors, minimize_pii, protect_user_input
 
 

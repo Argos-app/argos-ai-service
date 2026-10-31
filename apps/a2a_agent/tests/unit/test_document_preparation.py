@@ -155,7 +155,8 @@ class FakeEmbeddings:
         self.vectors = vectors
         self.calls = []
 
-    async def embed(self, texts):
+    async def embed(self, texts, *, input_type="document"):
+        assert input_type == "document"
         self.calls.append(tuple(texts))
         if self.vectors is not None:
             return self.vectors(len(texts), len(self.calls))
@@ -180,6 +181,27 @@ def test_preparation_batches_embeddings_and_returns_chunks_without_writing_index
     assert all(item.chunk.document_id == source.metadata.document_id for item in indexed)
     assert all(item.chunk.revision_hash == source.metadata.revision_hash for item in indexed)
     assert all(len(item.vector) == 2 for item in indexed)
+
+
+def test_preparation_indexes_each_chunk_in_openai_and_voyage_spaces() -> None:
+    source = source_document()
+
+    class VoyageEmbeddings:
+        async def embed(self, texts, *, input_type="document"):
+            assert input_type == "document"
+            return tuple((0.5, 0.25, 0.1, 0.05) for _ in texts)
+
+    use_case = PrepareDocumentForIndex(
+        FakeParser(),
+        FakeEmbeddings(),
+        TextChunker(max_chars=100, overlap_chars=10),
+        embedding_batch_size=2,
+        voyage_embeddings=VoyageEmbeddings(),
+    )
+
+    indexed = run_immediate(use_case.execute(source))
+
+    assert all(item.voyage_vector == (0.5, 0.25, 0.1, 0.05) for item in indexed)
 
 
 @pytest.mark.parametrize(

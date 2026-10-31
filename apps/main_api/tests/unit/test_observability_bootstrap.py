@@ -68,7 +68,7 @@ async def test_mongo_failure_disables_observability_without_failing_bootstrap(ca
 
     assert writer is None
     assert isinstance(collector, DisabledObservationCollector)
-    assert "observability disabled" in caplog.text
+    assert "observabilidade desativada" in caplog.text
     assert caplog.records[-1].component == "main_api_observability"
     assert "sensitive" not in caplog.text
     assert database.requested_collections == []

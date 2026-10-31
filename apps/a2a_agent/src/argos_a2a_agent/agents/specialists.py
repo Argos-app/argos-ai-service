@@ -460,6 +460,8 @@ class MixedDocumentAgent(_DocumentSpecialist):
         request: DocumentQuestionRequest,
         context: DocumentAccessContext | None,
     ) -> DocumentAnswerResponse:
+        """O sincronizador serializa acessos e devolve updating a outra chamada;
+        execução sequencial evita que este próprio coordenador provoque esse estado."""
         if request.skill != DocumentSkill.MIXED:
             raise ValueError("o agente misto exige skill=mixed")
         self._check_deadline(request)
@@ -486,8 +488,6 @@ class MixedDocumentAgent(_DocumentSpecialist):
                 ),
             )
 
-        # O sincronizador serializa acessos e devolve updating a outra chamada;
-        # execução sequencial evita que este próprio coordenador provoque esse estado.
         documental_answer = await self._documental.execute(request, context)
         legal_answer = await self._legal.execute(request, context)
         if documental_answer.corpus_revision != legal_answer.corpus_revision:
@@ -586,7 +586,7 @@ def _evidence(source: DocumentSourceReference) -> AgentEvidence:
 def _uninterpreted_evidence_answer(
     evidence: Sequence[AgentEvidence],
 ) -> GeneratedDocumentAnswer | None:
-    """Preserve retrieved excerpts when the provider cannot return a cited synthesis."""
+    """Preserva os trechos recuperados quando o provider não retorna uma síntese com citações."""
     selected = evidence[:_MAX_FALLBACK_EVIDENCE_ITEMS]
     blocks: list[str] = []
     citations: list[str] = []
