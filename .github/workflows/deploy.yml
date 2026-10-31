@@ -19,7 +19,7 @@ jobs:
     plan:
         name: Select services and environment
         if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         outputs:
             services: ${{ steps.services.outputs.services }}
             has_changes: ${{ steps.services.outputs.has_changes }}
@@ -61,7 +61,7 @@ jobs:
         name: Wait for CI of the exact commit
         needs: plan
         if: needs.plan.outputs.has_changes == 'true'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 35
         steps:
             - uses: actions/github-script@v7
@@ -94,7 +94,7 @@ jobs:
         name: Deploy ${{ matrix.service }} to ${{ needs.plan.outputs.environment }}
         needs: [plan, ci]
         if: needs.plan.outputs.has_changes == 'true'
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         environment: ${{ needs.plan.outputs.environment }}
         strategy:
