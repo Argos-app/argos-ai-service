@@ -17,7 +17,7 @@ permissions:
 jobs:
     quality:
         name: Quality checks
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -128,7 +128,7 @@ jobs:
 
     unit-tests:
         name: Unit tests
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         needs: quality
         steps:
             - name: Checkout code
@@ -160,7 +160,7 @@ jobs:
 
     main-api-integration:
         name: Main API Mongo integration tests
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         needs: [quality, unit-tests]
         steps:
             - name: Checkout code
@@ -225,7 +225,7 @@ jobs:
 
     a2a-integration:
         name: A2A and Qdrant integration tests
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         needs: [quality, unit-tests]
         steps:
             - name: Checkout code
@@ -265,7 +265,7 @@ jobs:
 
     mcp-data-prediction-integration:
         name: MCP data and prediction integration tests
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         needs: [quality, unit-tests]
         steps:
             - name: Checkout code

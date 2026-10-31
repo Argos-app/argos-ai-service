@@ -39,20 +39,19 @@ configuração de acesso.
 
 O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
 `/chat/completions`, e um adapter HTTP para os embeddings Voyage. Configure as
-`OPENAI_BASE_URL` aponta para a API oficial da OpenAI e
-`OPENAI_EMBEDDINGS_URL` para seu endpoint de embeddings. `ANTHROPIC_BASE_URL`
-aponta para `https://openrouter.ai/api`; o fallback usa `/v1/messages` nessa
-base. `VOYAGE_EMBEDDINGS_URL` aponta para o endpoint OpenRouter
-`/api/v1/embeddings`, com o modelo `voyageai/voyage-4-large`. Use a mesma
-`OPENROUTER_API_KEY` para os fallbacks Claude e Voyage. Configure também os
-nomes dos modelos e as dimensões dos dois espaços. A sincronização indexa os
-documentos em vetores Qdrant nomeados (`openai` e
-`voyage`); a consulta usa o índice correspondente ao provedor que conseguiu
-gerar o vetor. A revisão dos modelos e dimensões participa do fingerprint de
-indexação; alterá-la força o sincronizador a criar uma nova geração compatível
-com Qdrant. Cada chamada de resposta tem limite fixo de 4096 tokens de saída.
-Os timeouts de provider e Qdrant e a validade das delegações também são
-políticas fixas do serviço, não variáveis de ambiente.
+`OPENAI_BASE_URL` aponta para a API oficial da OpenAI e `OPENAI_EMBEDDINGS_URL`
+para seu endpoint de embeddings. `ANTHROPIC_BASE_URL` aponta para
+`https://openrouter.ai/api`; o fallback usa `/v1/messages` nessa base.
+`VOYAGE_EMBEDDINGS_URL` aponta para o endpoint OpenRouter `/api/v1/embeddings`,
+com o modelo `voyageai/voyage-4-large`. Use a mesma `OPENROUTER_API_KEY` para os
+fallbacks Claude e Voyage. Configure também os nomes dos modelos e as dimensões
+dos dois espaços. A sincronização indexa os documentos em vetores Qdrant
+nomeados (`openai` e `voyage`); a consulta usa o índice correspondente ao
+provedor que conseguiu gerar o vetor. A revisão dos modelos e dimensões
+participa do fingerprint de indexação; alterá-la força o sincronizador a criar
+uma nova geração compatível com Qdrant. Cada chamada de resposta tem limite fixo
+de 4096 tokens de saída. Os timeouts de provider e Qdrant e a validade das
+delegações também são políticas fixas do serviço, não variáveis de ambiente.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
 os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o

@@ -6,20 +6,21 @@ No modo `provider`, `.env` usa a API oficial da OpenAI em `OPENAI_BASE_URL` e
 `OPENAI_EMBEDDINGS_URL`; Anthropic, Voyage e Jev usam OpenRouter por meio da
 mesma `OPENROUTER_API_KEY`. `ANTHROPIC_BASE_URL` e `VOYAGE_EMBEDDINGS_URL`
 apontam para os endpoints Anthropic Messages e OpenRouter Embeddings. Os nomes
-dos modelos e os endpoints ficam configuráveis. A Main API usa `OPENAI_MODEL_FAST` para roteador,
-orquestrador, juiz e formatador, e `OPENAI_MODEL_SPECIALIST` para especialistas.
-O A2A usa `OPENAI_MODEL_SPECIALIST` para respostas documentais e
-`OPENAI_EMBEDDINGS_MODEL` para o índice principal do RAG. O fallback usa
-`VOYAGE_EMBEDDINGS_MODEL`. O Qdrant mantém os vetores OpenAI
-e Voyage como vetores nomeados separados na mesma coleção. Saídas estruturadas
-são solicitadas por JSON Schema nativo.
+dos modelos e os endpoints ficam configuráveis. A Main API usa
+`OPENAI_MODEL_FAST` para roteador, orquestrador, juiz e formatador, e
+`OPENAI_MODEL_SPECIALIST` para especialistas. O A2A usa
+`OPENAI_MODEL_SPECIALIST` para respostas documentais e `OPENAI_EMBEDDINGS_MODEL`
+para o índice principal do RAG. O fallback usa `VOYAGE_EMBEDDINGS_MODEL`. O
+Qdrant mantém os vetores OpenAI e Voyage como vetores nomeados separados na
+mesma coleção. Saídas estruturadas são solicitadas por JSON Schema nativo.
 
 No modo `provider`, a Main API também avalia a entrada pelo Jev via OpenRouter,
 com Decisions da OpenAI como fallback. Configure `JEV_URL`, `JEV_MODEL`,
 `DECISIONS_URL` e `OPENAI_API_KEY` no `.env` da raiz; as URLs são endpoints
 completos e a chave `OPENROUTER_API_KEY` autentica JEV. Se ambos falharem ou
-estiverem sem configuração, a entrada é bloqueada por indisponibilidade. O modo `simulated` usa apenas o guardrail
-determinístico. Limiares, timeout e tarifas estão descritos no
+estiverem sem configuração, a entrada é bloqueada por indisponibilidade. O modo
+`simulated` usa apenas o guardrail determinístico. Limiares, timeout e tarifas
+estão descritos no
 [fluxo de agentes](../../apps/main_api/docs/agent-workflow.md).
 
 Opcionalmente, `OPENROUTER_API_KEY` habilita fallback de respostas: configure
@@ -37,8 +38,8 @@ com tools quando necessário. O bootstrap verifica as interfaces localmente, sem
 fazer uma chamada ao provider; valide a compatibilidade real em homologação.
 
 Os timeouts de execução e de dependências, o orçamento de chamadas e a validade
-das preparações são políticas fixas do código, não exigem variáveis no `.env`.
-O retorno permanece degradado quando a interpretação falha, mas preserva
+das preparações são políticas fixas do código, não exigem variáveis no `.env`. O
+retorno permanece degradado quando a interpretação falha, mas preserva
 resultados externos verificados. Nenhuma ação de e-mail é repetida para reparar
 a saída do modelo.
 

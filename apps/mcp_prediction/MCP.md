@@ -107,8 +107,8 @@ automaticamente. Configure os valores fora do repositório:
 resposta não contém estimativa numérica. Não use `synthetic` para rotular dados
 reais, nem `recorded` para fixtures.
 
-Timeouts SQL e validade máxima de delegação são políticas fixas do serviço e
-não são configuradas por variável de ambiente.
+Timeouts SQL e validade máxima de delegação são políticas fixas do serviço e não
+são configuradas por variável de ambiente.
 
 ## Diagnóstico e correlação
 

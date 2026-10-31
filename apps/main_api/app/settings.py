@@ -332,10 +332,7 @@ class Settings:
             or not 1 <= self.execution_timeout_seconds <= 300
         ):
             raise ValueError("limites e timeouts devem ser positivos")
-        if (
-            not 0 < self.input_risk_threshold <= 1
-            or not 0 < self.input_risk_timeout_seconds <= 120
-        ):
+        if not 0 < self.input_risk_threshold <= 1 or not 0 < self.input_risk_timeout_seconds <= 120:
             raise ValueError("configuração de avaliação de risco inválida")
         for rate in (
             self.jev_input_rate,

@@ -31,9 +31,9 @@ necessário. A observabilidade prepara índices em segundo plano. Portanto, nem
 todas as collections precisam aparecer antes do primeiro uso. As credenciais de
 escrita precisam permitir também a criação das collections e dos índices.
 
-`cattle_documents` e `medicine_documents` são fontes de negócio externas: o
-MCP de dados só as consulta e não as cria nem popula. O produtor deve fornecer
-os documentos no database configurado. O `mongo_seed` do Compose integrado gera
+`cattle_documents` e `medicine_documents` são fontes de negócio externas: o MCP
+de dados só as consulta e não as cria nem popula. O produtor deve fornecer os
+documentos no database configurado. O `mongo_seed` do Compose integrado gera
 dados sintéticos locais; ele não abastece os ambientes de deploy.
 
 Os nomes da Main API, inclusive `ai_email_workflows`, `ai_langgraph_checkpoints`
