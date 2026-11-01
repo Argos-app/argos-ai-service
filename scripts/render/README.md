@@ -138,12 +138,12 @@ preenchidos com as URLs e credenciais dos provedores ou gateways escolhidos.
   (`*_RESOURCE_SERVER_URL`, `A2A_ENDPOINT_URL`) devem coincidir com as usadas
   pelos clientes, incluindo esquema, host, porta e caminho.
 - No A2A, configure `APP_ENV` também para o ambiente correto de observabilidade.
-  O launcher usa `apps/a2a_agent/data/documents` como corpus padrão, que contém
-  documentos sintéticos de demonstração; use um corpus aprovado para operação.
-  Por padrão o manifesto fica em `/tmp/argos-a2a/manifest.json`, é efêmero e
-  pode ser reconstruído após reinícios. Para persistência, configure disco e
-  sobrescreva `A2A_MANIFEST_PATH` com caminho absoluto. Se usar corpus externo,
-  configure também `A2A_DOCUMENT_SOURCE_ROOT` com caminho absoluto.
+  Configure `A2A_DOCUMENT_SOURCE_ROOT` com o caminho absoluto de um corpus
+  aprovado disponível no serviço e `A2A_DOCUMENT_CATALOG_NAME` com o nome do
+  catálogo. Os arquivos do repositório são sintéticos de demonstração. Por
+  padrão o manifesto fica em `/tmp/argos-a2a/manifest.json`, é efêmero e pode
+  ser reconstruído após reinícios. Para persistência, configure disco e
+  sobrescreva `A2A_MANIFEST_PATH` com caminho absoluto.
 
 O sucesso dos cinco deploys não é uma transação: durante a atualização podem
 coexistir versões diferentes. Mudanças em contratos compartilhados devem manter

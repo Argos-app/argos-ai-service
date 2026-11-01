@@ -63,9 +63,13 @@ ignorado pelo Git. Ele contém senhas aleatórias para PostgreSQL e chaves Ed255
 para delegações MCP e assinatura de relatórios, além das opções centralizadas
 para modelos, SMTP e LangSmith. Configure todo o Compose integrado nesse único
 arquivo. As variáveis são encaminhadas apenas aos containers que as utilizam.
-Para recriá-lo, especifique `--force`; isso invalida as credenciais de uma pilha
-já iniciada. O arquivo `.env.example` da raiz serve como referência; prefira o
-script para gerar o `.env` com as credenciais internas.
+`A2A_DOCUMENT_SOURCE_ROOT` define o caminho absoluto da pasta de documentos no
+container e `A2A_DOCUMENT_CATALOG_NAME` define o catálogo. O Compose monta os
+documentos sintéticos do repositório nesse caminho; para outra fonte, ajuste a
+origem da montagem em `compose.yaml`. Para recriá-lo, especifique `--force`;
+isso invalida as credenciais de uma pilha já iniciada. O arquivo `.env.example`
+da raiz serve como referência; prefira o script para gerar o `.env` com as
+credenciais internas.
 
 Para estimar custos quando o provider não retorna preço, configure tarifas em
 USD por milhão de tokens para os perfis `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
@@ -180,6 +184,7 @@ Verifique o estado e os health checks:
 docker compose --profile apps ps
 Invoke-WebRequest http://localhost:8080/health/live
 Invoke-WebRequest http://localhost:8080/health/ready
+docker compose exec -T a2a_agent python -c 'import os,urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/health/ready",headers={"Authorization":"Bearer "+os.environ["A2A_INTERNAL_SERVICE_TOKEN"]}); print(urllib.request.urlopen(r,timeout=10).status)'
 ```
 
 `live` confirma que o processo da API está ativo. `ready` exige persistência,
@@ -240,6 +245,79 @@ substitui o workspace.
 Os `.env.example` dentro de cada aplicação continuam disponíveis somente como
 referência para execução individual fora do Compose. O Compose da raiz não lê
 esses arquivos.
+
+## Exercitar uma interação pela API
+
+Com a pilha pronta, `APP_ENV=local` e `AUTH_MODE=stub`, execute no PowerShell. O
+mesmo roteiro serve ao Kubernetes após o port-forward descrito no respectivo
+guia. Use uma mensagem nova por execução; preserve o mesmo `client_message_id`
+se precisar repetir um POST cuja resposta se perdeu.
+
+```powershell
+$api = "http://127.0.0.1:8080"
+$headers = @{ Authorization = "Bearer local-dev" }
+$session = Invoke-RestMethod -Method Post -Uri "$api/v1/sessions" -Headers $headers
+$sessionId = $session.session_id
+$body = @{
+    kind = "message"
+    client_message_id = [guid]::NewGuid().ToString()
+    message = "Quais fazendas tenho disponíveis?"
+} | ConvertTo-Json
+$accepted = Invoke-RestMethod -Method Post -Uri "$api/v1/sessions/$sessionId/interactions/async" -Headers $headers -ContentType "application/json" -Body $body
+$operationId = $accepted.operation_id
+$attempts = 0
+do {
+    Start-Sleep -Milliseconds ([Math]::Max(1000, [int]$accepted.poll_after_ms))
+    $operation = Invoke-RestMethod -Uri "$api/v1/sessions/$sessionId/interactions/$operationId" -Headers $headers
+    $operation.status
+    $attempts++
+} while ($operation.status -in @("accepted", "running") -and $attempts -lt 120)
+$operation | ConvertTo-Json -Depth 20
+Invoke-RestMethod -Uri "$api/v1/sessions/$sessionId/messages" -Headers $headers | ConvertTo-Json -Depth 20
+```
+
+`completed` ou `degraded` inclui `result.response`, que pode ser uma resposta ou
+uma pergunta estruturada; `failed` e `interrupted` não são resultados aprovados.
+Para responder a uma pergunta, use os IDs e o formato do
+[contrato HTTP](../../apps/main_api/docs/api-contract.md). Uma pergunta que
+depende de documentos ou dados deve usar fixtures adequadas ao ambiente.
+
+## Validar providers e fallbacks
+
+No `.env` da raiz, selecione `ARGOS_MODEL_MODE=provider`, preencha as chaves,
+URLs e modelos da OpenAI e do OpenRouter e configure as dimensões dos dois
+espaços vetoriais. Confira também `JEV_URL`, `JEV_MODEL`, `DECISIONS_URL` e
+`DECISIONS_MODEL`. A configuração de embeddings Voyage e a chave OpenRouter são
+exigidas pelo A2A em `provider`. Recrie os serviços e execute a interação acima.
+A prontidão não verifica uma chamada real aos modelos. A sincronização do corpus
+pode realizar chamadas de embedding e gerar custos mesmo antes da pergunta.
+
+Para confirmar as chamadas, consulte `ai_observations` e `ai_a2a_observations`
+por `interaction_id` ou `session_id`, incluindo operação, estado, provider e
+modelo; consulte o
+[guia de observabilidade](../../packages/observability/docs/operations.md). No
+Compose, por exemplo, consulte as chamadas recentes com:
+
+```powershell
+docker compose exec -T mongo mongosh argos_ai --quiet --eval 'db.ai_observations.find({provider:{$exists:true}},{session_id:1,interaction_id:1,operation_name:1,provider:1,model_requested:1,status:1}).sort({started_at:-1}).limit(10).forEach(printjson)'
+docker compose exec -T mongo mongosh argos_ai --quiet --eval 'db.ai_a2a_observations.find({provider:{$exists:true}},{session_id:1,interaction_id:1,operation_name:1,provider:1,model_requested:1,status:1}).sort({started_at:-1}).limit(10).forEach(printjson)'
+```
+
+Substitua `argos_ai` pelo valor de `MONGO_DATABASE` se tiver sido alterado. Com
+LangSmith configurado, examine também os traces do Agent e ambiente
+correspondentes. Ausência de observações não prova ausência de chamada: a
+gravação é de melhor esforço. Uma resposta concluída sem rastros verificáveis
+não confirma qual provider foi usado.
+
+Para testar fallback, use somente credenciais e endpoints de teste. Induza uma
+falha transitória controlada no provider primário da chamada que deseja avaliar,
+repita a interação e confira nos rastros a tentativa primária e a do fallback.
+Uma chave inválida pode gerar erro de autenticação e não necessariamente acionar
+fallback. Para JEV, verifique separadamente a tentativa Decisions; se ambos
+falharem, espere a mensagem de indisponibilidade. Testar embeddings também exige
+corpus indexado nos dois espaços; indisponibilizar o primário durante a
+indexação inicial pode impedir a preparação. Restaure a configuração e recrie os
+serviços ao terminar.
 
 ## Execução individual
 

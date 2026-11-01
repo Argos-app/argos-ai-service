@@ -79,11 +79,15 @@ variáveis necessárias ao Secret. Ambos são ignorados pelo Git:
 
 O gerador cria chaves de delegação/assinatura e tokens internos aleatórios; o
 script de preparação valida as chaves requeridas e adapta a sintaxe das chaves
-JSON ao formato de env file do Kustomize. O `.env` também é usado pelo Docker
-Compose e pode conter credenciais de providers reais; para Kubernetes local,
-mantenha `ARGOS_MODEL_MODE=simulated` e SMTP vazio para usar Mailpit. Para
-descartar os arquivos locais, remova `.env` e `k8s/local/secret.env` depois de
-encerrar o ambiente.
+JSON ao formato de env file do Kustomize. As variáveis
+`A2A_DOCUMENT_SOURCE_ROOT` e `A2A_DOCUMENT_CATALOG_NAME` também são copiadas
+para o Secret. O caminho padrão aponta para os PDFs sintéticos incluídos na
+imagem; outro caminho precisa estar disponível no container.
+
+O `.env` também é usado pelo Docker Compose e pode conter credenciais de
+providers reais; para Kubernetes local, mantenha `ARGOS_MODEL_MODE=simulated` e
+SMTP vazio para usar Mailpit. Para descartar os arquivos locais, remova `.env` e
+`k8s/local/secret.env` depois de encerrar o ambiente.
 
 Construa as cinco imagens do serviço e a imagem PostgreSQL que incorpora os
 scripts SQL versionados. Com Kind, use o auxiliar, que também carrega as
@@ -154,6 +158,13 @@ do Mailpit em `http://127.0.0.1:8025` para conferir o e-mail simulado. A
 aplicação só envia se o fluxo e os dados de destinatário autorizados permitirem;
 subir Mailpit não cria documentos de negócio.
 
+Para um roteiro executável de criação de sessão, envio, consulta do resultado e
+histórico, use
+[Exercitar uma interação pela API](../../infrastructure/docker/README.md#exercitar-uma-interação-pela-api)
+depois do port-forward. O roteiro usa o token stub e funciona nos dois modos de
+modelo. Uma sessão criada com sucesso e Pods prontos não comprovam uma chamada
+ao provider ou o funcionamento dos dados documentais.
+
 A configuração Kubernetes não carrega automaticamente documentos empresariais
 para as collections `cattle_documents` e `medicine_documents`. No Compose, o
 perfil `apps` executa `mongo_seed` para preencher essas collections com dados
@@ -217,7 +228,63 @@ testes de integração das aplicações a partir do host. Um cluster com Pods Re
 confirma disponibilidade e conectividade básica, não o aceite de todos os fluxos
 de negócio.
 
-Para experimentar o modo `provider`, defina `MAIN_API_MODEL_MODE=provider` no
-deployment e crie o Secret opcional `argos-input-risk` com as variáveis de risco
-documentadas em `apps/main_api/.env.example`. Sem provedores configurados, o
-grafo bloqueia entradas por indisponibilidade. O padrão local é `simulated`.
+## Testar providers no cluster local
+
+Os manifests versionados iniciam os dois serviços em `simulated`. Alterar apenas
+o Secret `argos-input-risk` e o modo da Main API não configura os modelos nem o
+A2A. Para experimentar `provider`, use um cluster descartável e configure os
+dois deployments. O exemplo abaixo altera os deployments em execução; reaplicar
+os manifests ou recriar o cluster requer refazer a configuração. Não versione o
+arquivo de credenciais.
+
+1. Crie um arquivo temporário de variáveis, por exemplo
+   `$env:TEMP\argos-providers.env`, em UTF-8, com uma linha `NOME=valor` para
+   cada variável abaixo. Preencha chaves e valores com dados do ambiente de
+   teste, usando `.env.example` da raiz como referência:
+
+    ```text
+    OPENAI_API_KEY=<chave-de-teste>
+    OPENAI_BASE_URL=<base-openai>
+    OPENAI_EMBEDDINGS_URL=<endpoint-embeddings-openai>
+    OPENAI_MODEL_FAST=<modelo-rapido>
+    OPENAI_MODEL_SPECIALIST=<modelo-especialista>
+    OPENAI_EMBEDDINGS_MODEL=<modelo-embedding>
+    OPENROUTER_API_KEY=<chave-de-teste>
+    VOYAGE_EMBEDDINGS_URL=<endpoint-embeddings-fallback>
+    VOYAGE_EMBEDDINGS_MODEL=<modelo-embedding-fallback>
+    ANTHROPIC_BASE_URL=<base-fallback>
+    ANTHROPIC_MODEL_FAST_FALLBACK=<modelo-rapido-fallback>
+    ANTHROPIC_MODEL_SPECIALIST_FALLBACK=<modelo-especialista-fallback>
+    JEV_URL=<endpoint-jev>
+    JEV_MODEL=<modelo-jev>
+    DECISIONS_URL=<endpoint-decisions>
+    DECISIONS_MODEL=<modelo-decisions>
+    ```
+
+2. Importe o arquivo como Secret e configure ambos os serviços. As dimensões
+   abaixo correspondem aos exemplos `text-embedding-3-small` e `voyage-4-large`;
+   ajuste-as aos modelos escolhidos.
+
+    ```powershell
+    kubectl -n argos-local create secret generic argos-providers --from-env-file="$env:TEMP\argos-providers.env" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl -n argos-local set env deployment/main-api --from=secret/argos-providers
+    kubectl -n argos-local set env deployment/a2a-agent --from=secret/argos-providers
+    kubectl -n argos-local set env deployment/main-api MAIN_API_MODEL_MODE=provider
+    kubectl -n argos-local set env deployment/a2a-agent A2A_MODEL_MODE=provider A2A_QDRANT_VECTOR_SIZE=1536 A2A_QDRANT_VOYAGE_VECTOR_SIZE=1024
+    kubectl -n argos-local rollout status deployment/main-api --timeout=5m
+    kubectl -n argos-local rollout status deployment/a2a-agent --timeout=5m
+    ```
+
+3. A imagem contém PDFs sintéticos. Para outro corpus, disponibilize os PDFs e o
+   catálogo no container e configure `A2A_DOCUMENT_SOURCE_ROOT` e
+   `A2A_DOCUMENT_CATALOG_NAME`; o manifesto usa o volume `a2a-state`. Execute o
+   roteiro HTTP e a
+   [validação de providers e fallbacks](../../infrastructure/docker/README.md#validar-providers-e-fallbacks).
+   Sem decisão válida do JEV ou do Decisions, a entrada é bloqueada por
+   indisponibilidade. A sincronização pode consumir embeddings.
+
+As variáveis inseridas diretamente por `kubectl set env` alteram o deployment
+local. Para voltar ao cenário simulado sem carregar sobrescritas de provider,
+recrie o cluster descartável e siga a preparação inicial. Remover o cluster
+descarta seus dados locais. Apague também o arquivo temporário de credenciais
+quando não precisar mais dele.

@@ -29,11 +29,11 @@ escrita.
 
 O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
 metadados sintéticos para demonstração e homologação; eles não são leis nem
-contratos reais e não devem embasar orientação jurídica.
-`A2A_DOCUMENT_SOURCE_ROOT` pode apontar para outro diretório aprovado disponível
-ao processo, sempre com `catalog.json` e arquivos PDF allowlisted. A origem
-cloud permanece fora desta entrega até a definição do provedor e de sua
-configuração de acesso.
+contratos reais e não devem embasar orientação jurídica. Configure
+`A2A_DOCUMENT_SOURCE_ROOT` com o diretório absoluto disponível ao processo e
+`A2A_DOCUMENT_CATALOG_NAME` com o nome do catálogo nesse diretório, junto aos
+arquivos PDF allowlisted. A origem cloud permanece fora desta entrega até a
+definição do provedor e de sua configuração de acesso.
 
 ## Integrações do runtime
 
