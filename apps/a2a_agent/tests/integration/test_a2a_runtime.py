@@ -205,6 +205,7 @@ def _spawn_server(harness: A2AHarness, tmp_path: Path) -> subprocess.Popen:
             "A2A_QDRANT_VECTOR_SIZE": "3",
             "A2A_QDRANT_DISTANCE": "Cosine",
             "A2A_DOCUMENT_SOURCE_ROOT": str(harness.source_root),
+            "A2A_DOCUMENT_CATALOG_NAME": "catalog.json",
             "A2A_MANIFEST_PATH": str(harness.manifest_path),
             "A2A_INTERNAL_SERVICE_TOKEN": SERVICE_TOKEN,
             "A2A_RESOURCE_SERVER_URL": harness.endpoint,

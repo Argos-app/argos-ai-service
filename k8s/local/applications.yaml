@@ -764,7 +764,28 @@ spec:
                             name: A2A_PERMISSION_SQL_DSN,
                             value: "postgresql://argos_reader:$(POSTGRES_READER_PASSWORD)@postgres:5432/$(POSTGRES_DB)",
                         }
-                      - { name: A2A_DOCUMENT_SOURCE_ROOT, value: /var/lib/argos/a2a/documents }
+                      - {
+                            name: A2A_DOCUMENT_SOURCE_ROOT,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: A2A_DOCUMENT_SOURCE_ROOT,
+                                        },
+                                },
+                        }
+                      - {
+                            name: A2A_DOCUMENT_CATALOG_NAME,
+                            valueFrom:
+                                {
+                                    secretKeyRef:
+                                        {
+                                            name: argos-local-secrets,
+                                            key: A2A_DOCUMENT_CATALOG_NAME,
+                                        },
+                                },
+                        }
                       - { name: A2A_MANIFEST_PATH, value: /var/lib/argos/a2a/state/manifest.json }
                   startupProbe:
                       httpGet: { path: /health/live, port: http }

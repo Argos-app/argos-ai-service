@@ -98,6 +98,7 @@ def test_a2a_capture_content_requires_explicit_api_key():
         qdrant_collection="documents",
         qdrant_vector_size=3,
         document_source_root=Path.cwd() / "documents",
+        document_catalog_name="catalog.json",
         manifest_path=Path.cwd() / "manifest.json",
         internal_service_token="service-token",
         resource_server_url="https://resource.example",

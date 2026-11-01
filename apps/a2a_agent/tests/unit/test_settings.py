@@ -13,6 +13,7 @@ def _runtime_settings() -> Settings:
         qdrant_collection="documents",
         qdrant_vector_size=3,
         document_source_root=Path.cwd(),
+        document_catalog_name="catalog.json",
         manifest_path=Path.cwd() / "manifest.json",
         internal_service_token="service-token",
         resource_server_url="http://127.0.0.1:8000/a2a",
@@ -21,6 +22,18 @@ def _runtime_settings() -> Settings:
         a2a_endpoint_url="http://127.0.0.1:8000/a2a",
         model_mode="simulated",
     )
+
+
+def test_document_source_requires_explicit_environment(monkeypatch):
+    monkeypatch.delenv("A2A_DOCUMENT_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("A2A_DOCUMENT_CATALOG_NAME", raising=False)
+    settings = Settings.from_env()
+    assert settings.document_source_root is None
+    assert settings.document_catalog_name == ""
+    with pytest.raises(ValueError, match="A2A_DOCUMENT_CATALOG_NAME"):
+        replace(_runtime_settings(), document_catalog_name="").validate_runtime(
+            require_providers=False, require_permission_sql=False
+        )
 
 
 def test_observability_collection_name_is_fixed(monkeypatch):

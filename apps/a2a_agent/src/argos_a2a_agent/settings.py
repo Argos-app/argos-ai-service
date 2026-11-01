@@ -59,7 +59,7 @@ class Settings:
     qdrant_voyage_vector_size: int | None = 1024
     qdrant_distance: str = "Cosine"
     document_source_root: Path | None = None
-    document_catalog_name: str = "catalog.json"
+    document_catalog_name: str = ""
     manifest_path: Path | None = None
     internal_service_token: str | None = field(default=None, repr=False)
     resource_server_url: str | None = None
@@ -139,7 +139,7 @@ class Settings:
                 if os.getenv("A2A_DOCUMENT_SOURCE_ROOT")
                 else None
             ),
-            document_catalog_name=os.getenv("A2A_DOCUMENT_CATALOG_NAME", "catalog.json"),
+            document_catalog_name=os.getenv("A2A_DOCUMENT_CATALOG_NAME", ""),
             manifest_path=(
                 Path(os.environ["A2A_MANIFEST_PATH"]) if os.getenv("A2A_MANIFEST_PATH") else None
             ),

@@ -337,7 +337,8 @@ services:
             A2A_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
             A2A_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
             A2A_PERMISSION_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
-            A2A_DOCUMENT_SOURCE_ROOT: /var/lib/argos/a2a/documents
+            A2A_DOCUMENT_SOURCE_ROOT: ${A2A_DOCUMENT_SOURCE_ROOT:?configure A2A_DOCUMENT_SOURCE_ROOT}
+            A2A_DOCUMENT_CATALOG_NAME: ${A2A_DOCUMENT_CATALOG_NAME:?configure A2A_DOCUMENT_CATALOG_NAME}
             A2A_MANIFEST_PATH: /var/lib/argos/a2a/state/manifest.json
         depends_on:
             postgres:
@@ -349,7 +350,7 @@ services:
         ports:
             - "127.0.0.1:${A2A_PUBLISHED_PORT:-8001}:8000"
         volumes:
-            - ./apps/a2a_agent/data/documents:/var/lib/argos/a2a/documents:ro
+            - ./apps/a2a_agent/data/documents:${A2A_DOCUMENT_SOURCE_ROOT:?configure A2A_DOCUMENT_SOURCE_ROOT}:ro
             - a2a-state:/var/lib/argos/a2a/state
         read_only: true
         tmpfs: ["/tmp:mode=1777,size=16m"]

@@ -58,6 +58,8 @@ def main() -> None:
         "POSTGRES_READER_PASSWORD": secrets.token_urlsafe(32),
         "MONGO_DATABASE": "argos_ai",
         "ARGOS_MODEL_MODE": "simulated",
+        "A2A_DOCUMENT_SOURCE_ROOT": "/var/lib/argos/a2a/documents",
+        "A2A_DOCUMENT_CATALOG_NAME": "catalog.json",
         "MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS": "",
         "MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS": "",
         "MODEL_FAST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS": "",
