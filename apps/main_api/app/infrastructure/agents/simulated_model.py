@@ -45,7 +45,12 @@ class SimulatedChatModel(BaseChatModel):
         del stop, run_manager
         tools = kwargs.get("tools") or ()
         names = [_tool_name(tool) for tool in tools]
-        structured = next((name for name in names if name in _STRUCTURED_NAMES), None)
+        response_format = kwargs.get("response_format") or {}
+        json_schema = response_format.get("json_schema", {})
+        native_name = json_schema.get("name")
+        structured = native_name or next(
+            (name for name in names if name in _STRUCTURED_NAMES), None
+        )
         business_tools = [name for name in names if name and name not in _STRUCTURED_NAMES]
         if structured == "SpecialistResult" and business_tools:
             specialist_input = _specialist_input(messages)
@@ -63,15 +68,23 @@ class SimulatedChatModel(BaseChatModel):
                 )
             else:
                 call_name, args = self._structured_call(structured, messages)
-                message = AIMessage(
-                    content="",
-                    tool_calls=[{"name": call_name, "args": args, "id": str(uuid4())}],
+                message = (
+                    AIMessage(content=json.dumps(args, ensure_ascii=False))
+                    if native_name
+                    else AIMessage(
+                        content="",
+                        tool_calls=[{"name": call_name, "args": args, "id": str(uuid4())}],
+                    )
                 )
         elif structured:
             call_name, args = self._structured_call(structured, messages)
-            message = AIMessage(
-                content="",
-                tool_calls=[{"name": call_name, "args": args, "id": str(uuid4())}],
+            message = (
+                AIMessage(content=json.dumps(args, ensure_ascii=False))
+                if native_name
+                else AIMessage(
+                    content="",
+                    tool_calls=[{"name": call_name, "args": args, "id": str(uuid4())}],
+                )
             )
         elif tools:
             tool_name = next((name for name in names if name), "")

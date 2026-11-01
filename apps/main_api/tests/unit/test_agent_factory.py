@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain.agents import create_agent
 from langchain.agents.structured_output import ProviderStrategy
 from langchain.tools import tool
 from pydantic import ValidationError
@@ -31,6 +32,17 @@ from app.infrastructure.agents.specialists import build_agent_factory
 from app.infrastructure.mcp.client import McpClients
 from app.infrastructure.observability.model_callbacks import ModelUsageCallback
 from app.ports.agent import AgentId
+
+
+def test_simulated_model_returns_native_structured_route() -> None:
+    agent = create_agent(
+        model=SimulatedChatModel(),
+        tools=[],
+        response_format=ProviderStrategy(RoutePlan, strict=True),
+    )
+    result = agent.invoke({"messages": [{"role": "user", "content": "Liste minhas fazendas"}]})
+    assert isinstance(result["structured_response"], RoutePlan)
+    assert result["structured_response"].tasks[0].agent.value == "farm"
 
 
 def test_model_output_contracts_ignore_unknown_provider_fields() -> None:
