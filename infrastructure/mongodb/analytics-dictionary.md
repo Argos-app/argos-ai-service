@@ -213,9 +213,11 @@ externo e ainda precisam de confirmação para BI.
 interação pode produzir múltiplas mensagens e eventos. `interaction_id` da API é
 um UUID distinto do `correlation_id` observacional, que é por requisição HTTP.
 `report_artifact_ref` relaciona preparação de e-mail ao envelope; `report_id`
-relaciona a API à collection de relatórios preparados do MCP; `operation_id`
-liga autorização ao dispatch. Não há chave estrangeira Mongo; valide órfãos e
-expiração antes de joins.
+relaciona a API à collection de relatórios preparados do MCP. Para ligar uma
+autorização ao dispatch, consulte a referência em `ai_email_workflows` com `_id`
+igual a `operation:<authorization UUID>` e use seu `operation_id` para localizar
+o `_id` em `ai_email_dispatches`. Não há chave estrangeira Mongo; valide órfãos
+e expiração antes de joins.
 
 Exemplo sintético: `{ "_id": "<uuid>`, `"session_id": "<uuid>`,
 `"interaction_id": "<uuid>`, `"status": "completed"`,
