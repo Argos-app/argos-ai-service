@@ -1,8 +1,5 @@
 # Deploy no Render
 
-Para preparar credenciais, variáveis de cada serviço e executar o deploy manual,
-consulte o [passo a passo de configuração](deployment-setup.md).
-
 O workflow `.github/workflows/deploy.yml` atualiza serviços conectados ao Git
 usando o runtime Python nativo do Render. Cada aplicação instala seu próprio
 `apps/<serviço>/pylock.toml`; `packages/` acompanha o checkout. O Actions envia
