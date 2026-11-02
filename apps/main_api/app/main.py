@@ -1,6 +1,7 @@
 """Ponto de entrada HTTP do serviço principal."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -50,6 +51,11 @@ from packages.observability import (
     observation_scope,
 )
 from packages.security.signatures import TrustedEd25519SignatureVerifier
+
+
+def _readiness_unavailable(reason: str) -> JSONResponse:
+    logging.getLogger("uvicorn.error").warning("Main API não está pronta: %s", reason)
+    return JSONResponse(status_code=503, content={"status": "unavailable", "reason": reason})
 
 
 class BodySizeLimitMiddleware:
@@ -344,71 +350,38 @@ def create_app(
     )
     async def ready(request: Request):
         if getattr(app.state, "persistence", None) is None:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "reason": "session_store_not_configured"},
-            )
+            return _readiness_unavailable("session_store_not_configured")
         if (
             configured.firebase_project_id is None or app.state.access_token_codec is None
         ) and not (configured.app_env == "local" and configured.auth_mode == "stub"):
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "reason": "identity_not_configured"},
-            )
+            return _readiness_unavailable("identity_not_configured")
         if app.state.model_initialization_error is not None:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "status": "unavailable",
-                    "reason": app.state.model_initialization_error,
-                },
-            )
+            return _readiness_unavailable(app.state.model_initialization_error)
         if app.state.models is None:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "reason": "model_runtime_not_configured"},
-            )
+            return _readiness_unavailable("model_runtime_not_configured")
         if getattr(app.state, "checkpointer", None) is None:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "reason": "graph_runtime_not_configured"},
-            )
+            return _readiness_unavailable("graph_runtime_not_configured")
         if configured.auth_database_url and app.state.user_access_repository is None:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "reason": "auth_database_not_configured"},
-            )
+            return _readiness_unavailable("auth_database_not_configured")
         if app.state.agent_graph is None:
             try:
                 from app.api.v1.dependencies.services import _graph_provider
 
                 _graph_provider(request)
             except Exception:
-                return JSONResponse(
-                    status_code=503,
-                    content={"status": "unavailable", "reason": "agent_runtime_not_configured"},
-                )
+                return _readiness_unavailable("agent_runtime_not_configured")
         try:
             await app.state.mongo_database.command("ping")
         except Exception:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "reason": "session_store_unavailable"},
-            )
+            return _readiness_unavailable("session_store_unavailable")
         if configured.document_a2a_url:
             client = getattr(app.state, "documental_a2a_client", None)
             if client is None:
-                return JSONResponse(
-                    status_code=503,
-                    content={"status": "unavailable", "reason": "document_a2a_not_configured"},
-                )
+                return _readiness_unavailable("document_a2a_not_configured")
             try:
                 await client.check_ready()
             except Exception:
-                return JSONResponse(
-                    status_code=503,
-                    content={"status": "unavailable", "reason": "document_a2a_unavailable"},
-                )
+                return _readiness_unavailable("document_a2a_unavailable")
         return {"status": "ok"}
 
     app.include_router(v1_router)
