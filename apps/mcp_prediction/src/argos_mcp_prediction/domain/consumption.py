@@ -21,12 +21,6 @@ class ConsumptionState(StrEnum):
     INCONSISTENT_DATA = "inconsistent_data"
 
 
-class CoverageState(StrEnum):
-    CONFIRMED = "confirmed"
-    UNKNOWN = "unknown"
-    INCOMPLETE = "incomplete"
-
-
 @dataclass(frozen=True, slots=True)
 class ConsumptionGroup:
     property_id: UUID
@@ -43,16 +37,6 @@ class MonthlyConsumptionRecord:
     quantity: Decimal
     application_events: int
     head_administrations: int
-
-
-@dataclass(frozen=True, slots=True)
-class CoverageRecord:
-    property_id: UUID
-    state: CoverageState
-    start: date | None = None
-    end: date | None = None
-    source: str | None = None
-    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

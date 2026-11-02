@@ -56,11 +56,14 @@ traces, latência, uso e custos, veja
 
 ```mermaid
 flowchart TD
-    Input[Mensagem do backend] --> Auth[Validar identidade, fazendas e sessão]
+    Input[Mensagem do usuário] --> Auth[Validar identidade, fazendas e sessão]
     Auth --> Privacy[Preservar parâmetros protegidos e minimizar dados]
     Privacy --> Guard{Guardrail aprova?}
     Guard -->|Não ou falha| Safe[Finalização segura sem ferramentas de negócio]
-    Guard -->|Sim| Route[Roteador]
+    Guard -->|Aprovada: nova mensagem| Route[Roteador]
+    Guard -->|Aprovada: resposta pendente| Resume[Retomar tarefa ou roteador]
+    Resume -->|Roteador| Route
+    Resume -->|Especialista| Specialists
     Route --> Missing{Faltam informações?}
     Missing -->|Sim| Question[Agente Formatador de perguntas]
     Question --> Wait[Aguardar resposta do usuário]
@@ -70,6 +73,7 @@ flowchart TD
     Specialists --> Secretary[Secretário]
     Specialists --> Analyst[Analista]
     Specialists --> Info[Informações]
+    Specialists -->|Precisa esclarecimento| Question
     Farm --> Data[MCP de dados]
     Secretary --> Email[MCP de e-mail]
     Analyst --> Prediction[MCP de predição]
@@ -83,8 +87,8 @@ flowchart TD
     A2A --> Merge
     Merge --> Judge[Juiz e validações]
     Judge --> Decision{Resultado}
-    Decision -->|Atendido| Answer[Resposta com fontes e limitações]
-    Decision -->|Falta esclarecimento| Question
+    Decision -->|Aprovado| OutputGuard[Guardrail de saída]
+    OutputGuard --> Answer[Resposta final]
     Decision -->|Revisar texto dentro dos limites| Merge
     Decision -->|Limite ou evidência insuficiente| Partial[Resposta parcial ou abstenção]
 ```
@@ -93,3 +97,35 @@ O contexto inclui até 12.000 caracteres, 20 mensagens recentes e leitura de at�
 200 mensagens. Os limites de chamadas, tempo e saída são definidos na
 configuração de execução; consulte `app/application/execution_limits.py` e
 `app/session_config.py`.
+
+## Avaliação de risco da entrada
+
+No modo `provider`, a entrada é validada e sanitizada deterministicamente antes
+de ser avaliada pelo Jev. O Decisions (`gpt-6-luna`) é consultado somente quando
+o Jev falha ou retorna decisão inválida. Uma decisão válida de bloqueio encerra
+a avaliação. Os critérios são tentativa de injeção de instruções e ofensa ou
+assédio dirigido; citações e relatos não são, por si, ataques. A avaliação não
+determina autorização, completude, roteamento ou uso de ferramentas.
+
+Uma entrada arriscada recebe “Não posso atender a essa entrada por motivos de
+segurança.”; se ambos os provedores falharem, recebe “A verificação de segurança
+está temporariamente indisponível. Tente novamente mais tarde.” O resultado usa
+o fluxo assíncrono existente. Respostas de esclarecimento bloqueadas mantêm a
+pergunta pendente. No modo `simulated`, apenas as validações determinísticas são
+executadas. Classificação probabilística pode produzir erros e não substitui as
+verificações de identidade e autorização.
+
+Configure `JEV_URL`, `JEV_MODEL`, `OPENROUTER_API_KEY`, `DECISIONS_URL`,
+`OPENAI_API_KEY` e `DECISIONS_MODEL`, além de `INPUT_RISK_THRESHOLD` (0 < valor
+≤ 1). JEV usa a Decisions API do OpenRouter; a chave OpenRouter também atende o
+fallback Anthropic. `DECISIONS_URL` aponta para a API oficial da OpenAI. Cada
+URL é o endpoint completo. Credenciais ou URLs ausentes provocam falha da
+tentativa respectiva; sem decisão válida a entrada é bloqueada. As tarifas
+opcionais em USD por milhão de tokens são `JEV_INPUT_COST_PER_MILLION_TOKENS`,
+`JEV_OUTPUT_COST_PER_MILLION_TOKENS`, `DECISIONS_INPUT_COST_PER_MILLION_TOKENS`
+e `DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS`. Custos desconhecidos permanecem
+desconhecidos. Cada tentativa usa a collection existente de observabilidade; seu
+trace contém somente metadados técnicos, sem entrada ou credenciais.
+
+Os timeouts de avaliação são fixos no código e não exigem configuração no
+ambiente.

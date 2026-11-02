@@ -125,6 +125,10 @@ async def test_primary_and_fallback_send_the_same_document_context():
 
     primary_messages = requests["primary"]["messages"]
     fallback_payload = requests["fallback"]
+    assert requests["primary"]["reasoning_effort"] == "low"
+    assert "temperature" not in requests["primary"]
+    assert fallback_payload["thinking"] == {"type": "adaptive"}
+    assert fallback_payload["output_config"]["effort"] == "low"
     assert "temperature" not in fallback_payload
     assert primary_messages[0]["content"] == fallback_payload["system"]
     assert json.loads(primary_messages[1]["content"]) == json.loads(

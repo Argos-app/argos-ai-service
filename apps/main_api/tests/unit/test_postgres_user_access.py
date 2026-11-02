@@ -153,7 +153,7 @@ async def test_runtime_sets_connection_limits_and_read_only_timeouts(monkeypatch
     assert arguments.kwargs["timeout"] == settings.auth_database_connect_timeout_seconds
     assert arguments.kwargs["command_timeout"] == settings.auth_database_query_timeout_seconds
     assert arguments.kwargs["server_settings"]["default_transaction_read_only"] == "on"
-    assert arguments.kwargs["server_settings"]["statement_timeout"] == "3000ms"
+    assert arguments.kwargs["server_settings"]["statement_timeout"] == "15000ms"
     await runtime.close()
     pool.close.assert_awaited_once()
 

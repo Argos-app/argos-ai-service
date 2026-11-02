@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
 _TTL_SECONDS = 24 * 60 * 60
+_DEFAULT_FIELDS = {
+    "name": "",
+    "email": "",
+    "calls": 0,
+    "tokens": 0,
+    "model_calls": 0,
+    "unknown_token_calls": 0,
+    "cost_usd": "0",
+    "known_cost_calls": 0,
+    "unknown_cost_calls": 0,
+}
 
 
 class RedisUserUsageCounter:
@@ -26,6 +38,8 @@ class RedisUserUsageCounter:
             field: value for field, value in (("name", name), ("email", email)) if value is not None
         }
         async with self._client.pipeline(transaction=True) as pipeline:
+            for field, value in _DEFAULT_FIELDS.items():
+                pipeline.hsetnx(key, field, value)
             if identity:
                 pipeline.hset(key, mapping=identity)
             pipeline.hincrby(key, "calls", 1)
@@ -38,16 +52,28 @@ class RedisUserUsageCounter:
         usage: dict[str, Any] | None,
         *,
         observation_id: str,
+        billing: dict[str, Any] | None = None,
     ) -> None:
         if user_id is None:
             return
         key = self.key_for(user_id)
         seen_key = f"{self._key_prefix}:_seen:{UUID(str(user_id))}"
         token_count, complete = _reported_token_count(usage)
+        cost = _usd_cost(billing)
         script = """
+        for i = 6, #ARGV, 2 do
+            redis.call('HSETNX', KEYS[1], ARGV[i], ARGV[i + 1])
+        end
+        redis.call('EXPIRE', KEYS[1], ARGV[4])
         if redis.call('SADD', KEYS[2], ARGV[1]) == 0 then return 0 end
         redis.call('EXPIRE', KEYS[2], ARGV[4])
         redis.call('HINCRBY', KEYS[1], 'model_calls', 1)
+        if ARGV[5] ~= 'unknown' then
+            redis.call('HINCRBYFLOAT', KEYS[1], 'cost_usd', ARGV[5])
+            redis.call('HINCRBY', KEYS[1], 'known_cost_calls', 1)
+        else
+            redis.call('HINCRBY', KEYS[1], 'unknown_cost_calls', 1)
+        end
         if ARGV[2] == 'unknown' then
             redis.call('HINCRBY', KEYS[1], 'unknown_token_calls', 1)
         else
@@ -68,6 +94,8 @@ class RedisUserUsageCounter:
             "unknown" if token_count is None else token_count,
             "true" if complete else "false",
             _TTL_SECONDS,
+            str(cost) if cost is not None else "unknown",
+            *(item for pair in _DEFAULT_FIELDS.items() for item in pair),
         )
 
     async def list_users(self) -> list[dict[str, int | str | None]]:
@@ -86,12 +114,15 @@ class RedisUserUsageCounter:
             rows.append(
                 {
                     "user_id": key.removeprefix(f"{self._key_prefix}:"),
-                    "name": values.get("name"),
-                    "email": values.get("email"),
+                    "name": values.get("name", ""),
+                    "email": values.get("email", ""),
                     "calls": int(values.get("calls", 0)),
                     "tokens": int(values.get("tokens", 0)),
                     "model_calls": int(values.get("model_calls", 0)),
                     "unknown_token_calls": int(values.get("unknown_token_calls", 0)),
+                    "cost_usd": values.get("cost_usd", "0"),
+                    "known_cost_calls": int(values.get("known_cost_calls", 0)),
+                    "unknown_cost_calls": int(values.get("unknown_cost_calls", 0)),
                 }
             )
         rows.sort(key=lambda row: (int(row["tokens"]), int(row["calls"])), reverse=True)
@@ -125,3 +156,16 @@ def _reported_token_count(usage: dict[str, Any] | None) -> tuple[int | None, boo
     if known_counts:
         return sum(known_counts), valid_input and valid_output
     return None, False
+
+
+def _usd_cost(billing: dict[str, Any] | None) -> Decimal | None:
+    if not isinstance(billing, dict) or billing.get("currency") != "USD":
+        return None
+    value = billing.get("reported_cost")
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        amount = Decimal(str(value))
+    except InvalidOperation, ValueError:
+        return None
+    return amount if amount.is_finite() and amount >= 0 else None

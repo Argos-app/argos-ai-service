@@ -219,7 +219,6 @@ def test_source_and_reader_ports_cannot_write_while_index_writer_is_separate() -
     assert not any("upsert" in name or "delete" in name for name in QdrantReader.__dict__)
     assert set(DocumentIndexWriter.__dict__) >= {
         "upsert_chunks",
-        "remove_document",
         "publish",
         "discard",
     }

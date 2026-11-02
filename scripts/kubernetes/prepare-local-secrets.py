@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 
 REQUIRED = {
+    "A2A_DOCUMENT_SOURCE_ROOT",
+    "A2A_DOCUMENT_CATALOG_NAME",
     "POSTGRES_USER",
     "POSTGRES_DB",
     "POSTGRES_PASSWORD",

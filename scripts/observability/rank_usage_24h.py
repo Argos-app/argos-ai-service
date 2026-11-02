@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from decimal import Decimal
 from typing import Any
 
 from packages.observability.redis_user_usage import RedisUserUsageCounter
@@ -13,7 +14,8 @@ from packages.observability.redis_user_usage import RedisUserUsageCounter
 def _rank_users(users: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     by_calls = sorted(users, key=lambda row: (row["calls"], row["tokens"]), reverse=True)
     by_tokens = sorted(users, key=lambda row: (row["tokens"], row["calls"]), reverse=True)
-    return {"by_calls": by_calls, "by_tokens": by_tokens}
+    by_cost = sorted(users, key=lambda row: Decimal(row.get("cost_usd") or "0"), reverse=True)
+    return {"by_calls": by_calls, "by_tokens": by_tokens, "by_cost_usd": by_cost}
 
 
 async def _main() -> None:
@@ -45,6 +47,8 @@ async def _main() -> None:
                     "Tokens ausentes do provider são contabilizados separadamente "
                     "como desconhecidos.",
                     "Tokens são somados somente uma vez por observação de modelo no Redis.",
+                    "Custos em USD são parciais quando unknown_cost_calls é maior que zero; "
+                    "incluem valores informados pelo provider e estimados por tarifa configurada.",
                 ],
                 "rankings": _rank_users(users),
             },

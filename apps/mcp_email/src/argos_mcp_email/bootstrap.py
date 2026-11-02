@@ -102,10 +102,6 @@ async def create_runtime(
         raise ValueError("MCP_EMAIL_TRUSTED_SIGNATURE_KEYS é obrigatório para iniciar o serviço")
     if not configured.internal_service_token:
         raise ValueError("MCP_EMAIL_INTERNAL_SERVICE_TOKEN é obrigatório para iniciar o serviço")
-    if not configured.mcp_auth_issuer_url:
-        raise ValueError("MCP_EMAIL_AUTH_ISSUER_URL é obrigatório para iniciar o serviço")
-    if not configured.mcp_resource_server_url:
-        raise ValueError("MCP_EMAIL_RESOURCE_SERVER_URL é obrigatório para iniciar o serviço")
 
     try:
         import asyncpg
@@ -170,6 +166,20 @@ async def run_server(
         settings=settings,
     )
     try:
-        await runtime.server.run_streamable_http_async()
+        import uvicorn
+
+        from packages.security.mcp_bearer import McpBearerMiddleware
+
+        configured = settings or Settings.from_env()
+        app = McpBearerMiddleware(
+            runtime.server.streamable_http_app(), configured.internal_service_token
+        )
+        config = uvicorn.Config(
+            app,
+            host=runtime.server.settings.host,
+            port=runtime.server.settings.port,
+            log_level=runtime.server.settings.log_level.lower(),
+        )
+        await uvicorn.Server(config).serve()
     finally:
         await runtime.close()

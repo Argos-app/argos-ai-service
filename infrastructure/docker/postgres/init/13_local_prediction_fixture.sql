@@ -55,7 +55,7 @@ INSERT INTO medicine_batch (
     source_id
 )
 SELECT m.id,
-       'LOCAL-PREDICTION-COVERAGE',
+       'LOCAL-PREDICTION-FIXTURE',
        current_date - 600,
        current_date + 365,
        current_date - 400,
@@ -94,7 +94,7 @@ JOIN LATERAL (
     LIMIT 1
 ) AS u ON TRUE
 WHERE m.brand_name = 'Vacina Teste A'
-  AND b.batch_number = 'LOCAL-PREDICTION-COVERAGE'
+  AND b.batch_number = 'LOCAL-PREDICTION-FIXTURE'
   AND NOT EXISTS (
       SELECT 1
       FROM stock_movement AS existing
@@ -141,7 +141,7 @@ test_medicine AS (
     JOIN medicine_batch AS b ON b.medicine_id = m.id
     WHERE m.brand_name = 'Vacina Teste A'
       AND m.active
-      AND b.batch_number = 'LOCAL-PREDICTION-COVERAGE'
+      AND b.batch_number = 'LOCAL-PREDICTION-FIXTURE'
     ORDER BY m.id
     LIMIT 1
 )
@@ -171,7 +171,7 @@ SELECT tp.lot_id,
        td.application_date + tm.meat_withdrawal_days,
        1,
        'Homologação de predição local',
-       'LOCAL_PREDICTION_COVERAGE_FIXTURE',
+       'LOCAL_PREDICTION_FIXTURE',
        gen_random_uuid()
 FROM test_property AS tp
 CROSS JOIN test_day AS td
@@ -187,7 +187,7 @@ WHERE tp.lot_id IS NOT NULL
         AND existing.application_date = td.application_date
   );
 
-DO $validate_fixture_coverage$
+DO $validate_fixture_history$
 BEGIN
     IF EXISTS (
         SELECT p.id
@@ -203,13 +203,10 @@ BEGIN
         HAVING count(DISTINCT a.application_date) FILTER (
             WHERE a.application_date BETWEEN current_date - 365 AND current_date - 1
         ) <> 365
-    ) OR (SELECT count(*) FROM local_prediction_coverage WHERE property_id IN (
-        '00000000-0000-4000-8000-000000000101'::UUID,
-        '00000000-0000-4000-8000-000000000102'::UUID
-    )) <> 2 THEN
-        RAISE EXCEPTION 'A cobertura sintética anual local não foi completa.';
+    ) THEN
+        RAISE EXCEPTION 'O histórico sintético anual local não foi completo.';
     END IF;
 END;
-$validate_fixture_coverage$;
+$validate_fixture_history$;
 
 COMMIT;

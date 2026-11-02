@@ -18,6 +18,7 @@ def test_readiness_is_unavailable_without_a_configured_agent_registry():
         qdrant_collection="documents",
         qdrant_vector_size=3,
         document_source_root=Path.cwd(),
+        document_catalog_name="catalog.json",
         manifest_path=Path.cwd() / "manifest.json",
         internal_service_token="service-token",
         resource_server_url="https://a2a.example/mcp",

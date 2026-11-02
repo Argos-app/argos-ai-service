@@ -7,6 +7,12 @@ persistido e mantém seu próprio checkpoint de extração.
 
 ## Limites da coleta de uso e custo
 
+As tentativas Jev e Decisions são observações de modelo com
+`operation_name="input_risk.evaluate"` e tarifas específicas de cada provider.
+Respostas válidas registram `result.code` como `allow` ou `block`; uma falha no
+principal pode produzir outra tentativa no fallback para a mesma interação.
+Valores ausentes não indicam aprovação nem custo zero.
+
 A coleta existente é de melhor esforço, com fila limitada somente em memória.
 Documentos confirmados no MongoDB permanecem armazenados, mas observações
 pendentes podem ser perdidas em reinício, queda, fila cheia ou esgotamento de

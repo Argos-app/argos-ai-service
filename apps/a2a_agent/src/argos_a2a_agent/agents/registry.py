@@ -31,12 +31,6 @@ class DocumentAgentRegistry:
         self._agents = dict(agents)
         self._mixed_agent = mixed_agent
 
-    @property
-    def skills(self) -> tuple[DocumentSkill, DocumentSkill]:
-        """Skills especialistas a publicar no protocolo; mixed é composição interna."""
-
-        return (DocumentSkill.DOCUMENTAL, DocumentSkill.LEGAL)
-
     def resolve(self, skill: DocumentSkill) -> DocumentAgent:
         if skill == DocumentSkill.MIXED:
             return self._mixed_agent

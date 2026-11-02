@@ -92,7 +92,3 @@ class EmailOperationReference:
     recorded_at: datetime
     last_known_status: DispatchStatus | None = None
     last_known_updated_at: datetime | None = None
-
-
-class EmailPreparationNotFoundError(LookupError):
-    """Preparação inexistente ou fora do escopo de usuário/sessão."""

@@ -183,6 +183,13 @@ def create_langsmith_tracing(settings: Settings) -> LangSmithTracing | None:
         class BillingAwareLangChainTracer(LangChainTracer):
             """Persiste o custo configurado ou informado pelo provider junto ao uso de tokens."""
 
+            def _on_chain_end(self, run: Any) -> None:
+                if getattr(run, "name", None) == "input_risk.evaluate":
+                    outputs = getattr(run, "outputs", None)
+                    if isinstance(outputs, dict):
+                        run.set(metadata={"input_risk": outputs})
+                super()._on_chain_end(run)
+
             def _on_llm_end(self, run: Any) -> None:
                 profile = _run_rate_profile(run)
                 billing = billing_from_usage_payload(

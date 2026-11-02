@@ -221,8 +221,8 @@ class OpenAICompatibleAnswerGenerator:
             response = await self._http.post_json(
                 {
                     "model": self._model,
-                    "reasoning_effort": "none",
-                    "temperature": 0,
+                    "reasoning_effort": "low",
+                    "service_tier": "priority",
                     "max_completion_tokens": self._max_output_tokens,
                     "response_format": _structured_response_format(),
                     "messages": [
@@ -270,7 +270,7 @@ class ProviderFallbackAnswerGenerator:
         self._endpoint = endpoint
         self._max_output_tokens = max_output_tokens
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 5)),
+            timeout=httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 10)),
             follow_redirects=False,
             trust_env=False,
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
@@ -328,8 +328,12 @@ class ProviderFallbackAnswerGenerator:
                 json={
                     "model": self._model,
                     "max_tokens": self._max_output_tokens,
+                    "thinking": {"type": "adaptive"},
                     "system": system,
-                    "output_config": {"format": {"type": "json_schema", "schema": _ANSWER_SCHEMA}},
+                    "output_config": {
+                        "effort": "low",
+                        "format": {"type": "json_schema", "schema": _ANSWER_SCHEMA},
+                    },
                     "messages": [
                         {
                             "role": "user",

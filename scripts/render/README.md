@@ -123,24 +123,27 @@ preenchidos com as URLs e credenciais dos provedores ou gateways escolhidos.
 - No `main_api`, configure `APP_ENV=development` em HM e `APP_ENV=production` em
   produção, além de `AUTH_MODE=jwt`. Configure Firebase, PostgreSQL de
   identidade, Mongo replica set, modelos e chaves próprias de acesso/delegação.
-  Os valores locais `APP_ENV=local` e `AUTH_MODE=stub` não servem para cloud.
+  Configure também os endpoints, modelos, credenciais, limiar, timeout e tarifas
+  de risco listados no `.env.example`; sem decisão válida dos provedores a
+  entrada é bloqueada. Os valores locais `APP_ENV=local` e `AUTH_MODE=stub` não
+  servem para cloud.
 - Use bancos, collections/índices, Qdrant, SMTP e credenciais adequados a cada
   ambiente. O pipeline não provisiona nem migra essas dependências.
-- Para predição, configure `MCP_PREDICTION_COVERAGE_RELATION` com uma view de
-  cobertura confiável e `MCP_PREDICTION_DATA_ORIGIN` conforme a origem real dos
-  dados; sem cobertura ou com origem desconhecida, não há estimativa numérica.
+- Para predição, configure `MCP_PREDICTION_DATA_ORIGIN=recorded` quando a fonte
+  contiver dados reais. O serviço sempre considera completo o registro de
+  aplicações da janela; com origem desconhecida, não há estimativa numérica.
 - Aponte os `MAIN_API_MCP_*_URL` para os serviços **do mesmo ambiente**, com
   `/mcp`, e o cliente A2A para `/a2a`. Configure tokens e pares de chaves
   compatíveis entre emissores/consumidores. As URLs anunciadas e audiences
   (`*_RESOURCE_SERVER_URL`, `A2A_ENDPOINT_URL`) devem coincidir com as usadas
   pelos clientes, incluindo esquema, host, porta e caminho.
 - No A2A, configure `APP_ENV` também para o ambiente correto de observabilidade.
-  O launcher usa `apps/a2a_agent/data/documents` como corpus padrão, que contém
-  documentos sintéticos de demonstração; use um corpus aprovado para operação.
-  Por padrão o manifesto fica em `/tmp/argos-a2a/manifest.json`, é efêmero e
-  pode ser reconstruído após reinícios. Para persistência, configure disco e
-  sobrescreva `A2A_MANIFEST_PATH` com caminho absoluto. Se usar corpus externo,
-  configure também `A2A_DOCUMENT_SOURCE_ROOT` com caminho absoluto.
+  Configure `A2A_DOCUMENT_SOURCE_ROOT` com o caminho absoluto de um corpus
+  aprovado disponível no serviço e `A2A_DOCUMENT_CATALOG_NAME` com o nome do
+  catálogo. O corpus do repositório contém a LGPD e os termos do Argos. Por
+  padrão o manifesto fica em `/tmp/argos-a2a/manifest.json`, é efêmero e pode
+  ser reconstruído após reinícios. Para persistência, configure disco e
+  sobrescreva `A2A_MANIFEST_PATH` com caminho absoluto.
 
 O sucesso dos cinco deploys não é uma transação: durante a atualização podem
 coexistir versões diferentes. Mudanças em contratos compartilhados devem manter

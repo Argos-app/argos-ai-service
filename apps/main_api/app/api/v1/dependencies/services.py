@@ -51,6 +51,7 @@ def _graph_provider(request: Request):
         return app_state.agent_graph
     from app.graph.workflow import build_graph
     from app.graph.workflow_nodes import synthesis_timeout_with_runtime_grace
+    from app.infrastructure.agents.input_risk_providers import create_input_risk_evaluator
     from app.infrastructure.agents.specialists import build_agent_factory
 
     models = getattr(app_state, "models", None)
@@ -92,6 +93,11 @@ def _graph_provider(request: Request):
                 ),
             ),
             checkpointer=app_state.checkpointer,
+            input_risk_evaluator=(
+                create_input_risk_evaluator(app_state.settings, observation_collector)
+                if app_state.settings.model_mode == "provider"
+                else None
+            ),
             report_artifacts=(persistence.report_artifacts if persistence is not None else None),
             email_preparations=(
                 persistence.email_preparations if persistence is not None else None

@@ -56,11 +56,14 @@ desconhecida impede uma estimativa numérica.
 
 A fonte consultada é `application` relacionada a lote, rebanho, propriedade,
 lote de medicamento e medicamento. O MCP também verifica consistência de
-detalhes individuais de aplicação. Quando configurada, uma relação de cobertura
-informa a completude temporal por propriedade; sem essa fonte, a cobertura é
-desconhecida. Meses sem eventos registrados entram como zero observado, mas não
-provam que não houve aplicações fora do banco. Produtos sem histórico não
-recebem estimativa zero.
+detalhes individuais de aplicação. O serviço considera completo o registro das
+aplicações em toda a janela histórica; meses sem eventos são tratados como meses
+sem aplicações. Produtos sem histórico não recebem estimativa zero.
+
+O schema de referência em
+`argos-data-engineering/modulos/criacao_banco_completo.sql` define
+`application.active`; a consulta considera somente aplicações ativas. Configure
+`MCP_PREDICTION_DATA_ORIGIN=recorded` em produção para declarar a origem real.
 
 ## Autenticação e acesso
 
@@ -91,21 +94,20 @@ automaticamente. Configure os valores fora do repositório:
 | Variável                                      | Uso                                                      |
 | --------------------------------------------- | -------------------------------------------------------- |
 | `MCP_PREDICTION_SQL_DSN`                      | DSN PostgreSQL com credencial somente leitura.           |
-| `MCP_PREDICTION_SQL_TIMEOUT_SECONDS`          | Timeout por operação SQL; padrão 5, faixa 1–60.          |
 | `MCP_PREDICTION_INTERNAL_SERVICE_TOKEN`       | Bearer interno compartilhado com o chamador autorizado.  |
-| `MCP_PREDICTION_AUTH_ISSUER_URL`              | Emissor configurado no provedor de autenticação MCP.     |
 | `MCP_PREDICTION_RESOURCE_SERVER_URL`          | URL pública do recurso, normalmente terminada em `/mcp`. |
 | `MCP_PREDICTION_DELEGATION_ISSUER`            | Emissor confiável da delegação do usuário.               |
 | `MCP_PREDICTION_TRUSTED_DELEGATION_KEYS`      | Objeto JSON `key_id: chave pública Ed25519 Base64`.      |
-| `MCP_PREDICTION_DELEGATION_MAX_TTL`           | TTL máximo aceito, padrão 300 segundos.                  |
 | `MCP_PREDICTION_DELEGATION_CLOCK_SKEW`        | Tolerância de relógio, padrão 30 segundos.               |
 | `MCP_PREDICTION_DATA_ORIGIN`                  | `recorded`, `synthetic` ou `unknown`; padrão `unknown`.  |
-| `MCP_PREDICTION_COVERAGE_RELATION`            | View opcional com cobertura temporal por propriedade.    |
 | `MCP_PREDICTION_HOST` / `MCP_PREDICTION_PORT` | Interface e porta HTTP; padrão `0.0.0.0:8000`.           |
 
 `unknown` é intencionalmente seguro: sem declarar a origem pelo serviço, a
 resposta não contém estimativa numérica. Não use `synthetic` para rotular dados
 reais, nem `recorded` para fixtures.
+
+Timeouts SQL e validade máxima de delegação são políticas fixas do serviço e não
+são configuradas por variável de ambiente.
 
 ## Diagnóstico e correlação
 

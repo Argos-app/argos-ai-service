@@ -3,10 +3,11 @@
 Os serviços configuram seus databases por ambiente; `argos_ai` é o padrão e o
 Compose integrado usa um database local compartilhado. O MCP de dados apenas lê
 collections de negócio. Os nomes estão descritos em
-[configuration.md](configuration.md). Datas BSON são UTC; UUIDs são persistidos
-como strings canônicas, exceto estruturas internas do checkpointer LangGraph,
-cujo formato depende da versão da biblioteca. Exemplos abaixo são esquemáticos e
-não contêm dados de produção.
+[configuration.md](configuration.md). Datas BSON são UTC; objetos serializados
+em modo JSON, como `envelope` e `prepared_report`, guardam datas como strings
+ISO 8601. UUIDs são persistidos como strings canônicas, exceto estruturas
+internas do checkpointer LangGraph, cujo formato depende da versão da
+biblioteca. Exemplos abaixo são esquemáticos e não contêm dados de produção.
 
 ## Mapa de collections
 
@@ -109,6 +110,19 @@ suficientes, `billing` fica ausente, não representa zero nem valor faturado. Os
 campos nativos de custo do LangSmith são preenchidos somente quando a moeda é
 USD.
 
+O guardrail de entrada registra cada tentativa Jev ou Decisions em
+`ai_observations` com `operation_kind="model"`,
+`operation_name="input_risk.evaluate"`, `operation_phase="validation"`,
+`observation_level="transport_attempt"` e `provider` igual a `jev` ou `openai`.
+Uma resposta válida registra `result.code` como `allow` ou `block`; erros usam
+`status` e `error`. Uma tentativa Jev com falha pode ser seguida de uma
+tentativa Decisions para a mesma interação. Não conte essas tentativas como
+interações distintas e não infira que ausência de observação significa
+aprovação. Uso e cobrança seguem a coleta best effort. As tarifas próprias são
+`JEV_INPUT_COST_PER_MILLION_TOKENS`, `JEV_OUTPUT_COST_PER_MILLION_TOKENS`,
+`DECISIONS_INPUT_COST_PER_MILLION_TOKENS` e
+`DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS`.
+
 ### Documentos de e-mail e relatório
 
 `ai_email_prepared_reports.recipients[]` contém `recipient_id`, `name` e
@@ -141,9 +155,9 @@ O BI pode reconstruir cadeias candidatas a partir de `ai_messages`: o
 `payload_json` de uma resposta do usuário contém o `interaction_id` da interação
 que fez a pergunta e o `question_id`. Vincule essa resposta à pergunta
 correspondente na mesma sessão e siga os vínculos subsequentes até a resposta
-final. Cada mensagem tem seu próprio `interaction_id`, que também relaciona a
-interação às observações. Valide a reconstrução com dados reais; não agrupe
-automaticamente toda a sessão como um único atendimento.
+final. As mensagens da mesma interação compartilham seu `interaction_id`, que
+também relaciona a interação às observações. Valide a reconstrução com dados
+reais; não agrupe automaticamente toda a sessão como um único atendimento.
 
 Some `billing.reported_cost` das observações de cobrança das interações da
 cadeia, incluindo A2A quando configurado, sem duplicar custos de spans pai e
@@ -199,9 +213,11 @@ externo e ainda precisam de confirmação para BI.
 interação pode produzir múltiplas mensagens e eventos. `interaction_id` da API é
 um UUID distinto do `correlation_id` observacional, que é por requisição HTTP.
 `report_artifact_ref` relaciona preparação de e-mail ao envelope; `report_id`
-relaciona a API à collection de relatórios preparados do MCP; `operation_id`
-liga autorização ao dispatch. Não há chave estrangeira Mongo; valide órfãos e
-expiração antes de joins.
+relaciona a API à collection de relatórios preparados do MCP. Para ligar uma
+autorização ao dispatch, consulte a referência em `ai_email_workflows` com `_id`
+igual a `operation:<authorization UUID>` e use seu `operation_id` para localizar
+o `_id` em `ai_email_dispatches`. Não há chave estrangeira Mongo; valide órfãos
+e expiração antes de joins.
 
 Exemplo sintético: `{ "_id": "<uuid>`, `"session_id": "<uuid>`,
 `"interaction_id": "<uuid>`, `"status": "completed"`,

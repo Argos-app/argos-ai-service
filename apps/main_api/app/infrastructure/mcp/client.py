@@ -48,6 +48,7 @@ MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
     "prediction": frozenset({"estimate_medicine_consumption"}),
     "email": frozenset({"prepare_report", "send_report", "get_report_status"}),
 }
+_MAX_RESPONSE_BYTES = 1_000_000
 
 
 class McpClientConfigurationError(ValueError):
@@ -67,7 +68,7 @@ class McpToolExecutionError(RuntimeError):
 
 
 class McpResponseTooLargeError(RuntimeError):
-    """A resposta MCP excedeu o limite configurado para o principal."""
+    """A resposta MCP excedeu o limite fixo do principal."""
 
 
 def _validate_endpoint(
@@ -126,7 +127,6 @@ class McpToolServerClient:
     service_token: str = field(repr=False)
     allowed_tools: frozenset[str]
     timeout_seconds: float = 10.0
-    response_max_bytes: int = 1_000_000
     allow_local_http: bool = field(default=False, repr=False, compare=False)
     observation_collector: ObservationCollector | None = field(
         default=None, repr=False, compare=False
@@ -147,8 +147,8 @@ class McpToolServerClient:
             or not self.allowed_tools <= MCP_TOOL_ALLOWLISTS[self.service_name]
         ):
             raise McpClientConfigurationError(f"allowlist inválida para o MCP {self.service_name}")
-        if self.timeout_seconds <= 0 or self.response_max_bytes < 1:
-            raise McpClientConfigurationError("timeout e limite de resposta devem ser positivos")
+        if self.timeout_seconds <= 0:
+            raise McpClientConfigurationError("timeout do MCP deve ser positivo")
 
     @asynccontextmanager
     async def _session(self, request_headers: Mapping[str, str] | None = None):
@@ -247,9 +247,9 @@ class McpToolServerClient:
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
-        if len(serialized) > self.response_max_bytes:
+        if len(serialized) > _MAX_RESPONSE_BYTES:
             raise McpResponseTooLargeError(
-                f"resposta do MCP {self.service_name} excedeu o limite configurado"
+                f"resposta do MCP {self.service_name} excedeu o limite fixo"
             )
 
     async def list_tools(self) -> tuple[Any, ...]:
@@ -377,7 +377,6 @@ def create_mcp_clients(settings: Settings) -> McpClients:
             service_token=token,
             allowed_tools=MCP_TOOL_ALLOWLISTS[service_name],
             timeout_seconds=settings.mcp_timeout_seconds,
-            response_max_bytes=settings.mcp_response_max_bytes,
             allow_local_http=settings.app_env == "local",
         )
     return McpClients(**clients)

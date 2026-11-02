@@ -59,8 +59,6 @@ class McpHarness:
                 }
             ),
             MCP_EMAIL_INTERNAL_SERVICE_TOKEN=self.token,
-            MCP_EMAIL_AUTH_ISSUER_URL=f"http://127.0.0.1:{self.port}/test-issuer",
-            MCP_EMAIL_RESOURCE_SERVER_URL=self.url,
             MCP_EMAIL_HOST="127.0.0.1",
             MCP_EMAIL_PORT=str(self.port),
             MCP_EMAIL_NO_REPLY_ADDRESS="no-reply@argos.example.test",

@@ -149,7 +149,7 @@ class LocalManifestRepository:
                     revision_hash=item["revision_hash"],
                     size_bytes=item["size_bytes"],
                     source_etag=item["source_etag"],
-                    source_modified_at=LocalManifestRepository._datetime(
+                    source_modified_at=LocalManifestRepository._optional_datetime(
                         item["source_modified_at"]
                     ),
                     jurisdiction=item["jurisdiction"],
@@ -189,3 +189,9 @@ class LocalManifestRepository:
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError("timestamp deve incluir timezone")
         return parsed
+
+    @staticmethod
+    def _optional_datetime(value: str | None) -> datetime | None:
+        if value is None:
+            return None
+        return LocalManifestRepository._datetime(value)

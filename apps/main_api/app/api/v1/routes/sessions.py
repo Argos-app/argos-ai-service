@@ -13,12 +13,9 @@ from app.api.v1.mappers import (
     session_to_http,
     sessions_to_http,
 )
-from app.api.v1.models.messages import (
-    DEFAULT_MESSAGES_PAGE_SIZE,
-    MAX_MESSAGES_PAGE_SIZE,
-    SessionMessagesPage,
-)
+from app.api.v1.models.messages import SessionMessagesPage
 from app.api.v1.models.sessions import Session
+from app.session_config import DEFAULT_MESSAGES_PAGE_SIZE, MAX_MESSAGES_PAGE_SIZE
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 

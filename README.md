@@ -53,7 +53,11 @@ O gerador não sobrescreve um `.env` existente sem `--force`. O modo padrão é
 `simulated`; para usar provedores reais, configure `ARGOS_MODEL_MODE=provider`,
 URLs, modelos e credenciais no `.env`. A API integrada expõe `localhost:8080`;
 `/docs` apresenta o Swagger. O modo local de autenticação usa o token stub
-`local-dev` conforme o [guia Docker](infrastructure/docker/README.md).
+`local-dev` conforme o [guia Docker](infrastructure/docker/README.md). No modo
+`provider`, configure também o Jev e o fallback Decisions para a avaliação de
+risco da entrada; sem decisão válida, a entrada é bloqueada. Os nomes das
+variáveis e as regras estão no
+[fluxo dos agentes](apps/main_api/docs/agent-workflow.md).
 
 Para executar os testes unitários:
 

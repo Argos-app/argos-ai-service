@@ -36,6 +36,7 @@ def test_graph_provider_injects_report_source_signature_verifier(monkeypatch):
     )
     app_state = SimpleNamespace(
         agent_graph=None,
+        settings=SimpleNamespace(model_mode="simulated"),
         observability_collector=None,
         models={},
         persistence=persistence,

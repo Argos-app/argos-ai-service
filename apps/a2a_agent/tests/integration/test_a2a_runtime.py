@@ -57,7 +57,7 @@ pytestmark = [
 
 ROOT = Path(__file__).resolve().parents[4]
 APP_SRC = ROOT / "apps/a2a_agent/src"
-FIXTURES = ROOT / "apps/a2a_agent/data/documents"
+FIXTURES = ROOT / "apps/a2a_agent/tests/integration/fixtures/documents"
 SERVER_SCRIPT = ROOT / "apps/a2a_agent/tests/integration/a2a_runtime_server.py"
 QDRANT_URL = os.getenv("A2A_TEST_QDRANT_URL", "http://127.0.0.1:6338")
 WRITE_KEY = os.getenv("A2A_TEST_QDRANT_WRITE_KEY", "a2a-integration-write-key")
@@ -205,6 +205,7 @@ def _spawn_server(harness: A2AHarness, tmp_path: Path) -> subprocess.Popen:
             "A2A_QDRANT_VECTOR_SIZE": "3",
             "A2A_QDRANT_DISTANCE": "Cosine",
             "A2A_DOCUMENT_SOURCE_ROOT": str(harness.source_root),
+            "A2A_DOCUMENT_CATALOG_NAME": "catalog.json",
             "A2A_MANIFEST_PATH": str(harness.manifest_path),
             "A2A_INTERNAL_SERVICE_TOKEN": SERVICE_TOKEN,
             "A2A_RESOURCE_SERVER_URL": harness.endpoint,

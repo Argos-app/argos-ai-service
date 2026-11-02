@@ -5,8 +5,8 @@ Guia vigente da interface A2A JSON-RPC 1.0.0. Contratos tipados em
 
 Serviço isolado que expõe as skills Documental e Legal por A2A e consulta o
 corpus global de leis e termos/condições. O artefato contém somente
-`apps/a2a_agent` e os contratos e primitivas de segurança compartilhados; não
-instala nem importa o `main_api` ou outros MCPs.
+`apps/a2a_agent` e os pacotes compartilhados de contratos, segurança e
+observabilidade; não instala nem importa o `main_api` ou outros MCPs.
 
 O runtime usa Python 3.14.3, o SDK A2A, Starlette/Uvicorn, Pydantic, HTTPX,
 Qdrant e PostgreSQL. MongoDB, Redis e LangSmith são opcionais para
@@ -27,31 +27,32 @@ da raiz. Para executar o container separadamente, configure as dependências e
 variáveis de ambiente necessárias; o Qdrant exige credenciais de leitura e
 escrita.
 
-O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
-metadados sintéticos para demonstração e homologação; eles não são leis nem
-contratos reais e não devem embasar orientação jurídica.
-`A2A_DOCUMENT_SOURCE_ROOT` pode apontar para outro diretório aprovado disponível
-ao processo, sempre com `catalog.json` e arquivos PDF allowlisted. A origem
-cloud permanece fora desta entrega até a definição do provedor e de sua
-configuração de acesso.
+O corpus local padrão em [`data/documents`](data/documents) contém a edição do
+Senado da LGPD, atualizada até julho de 2026, e os termos de uso e privacidade
+do Argos, informados como vigentes a partir de 01/11/2026. A edição da lei deve
+ser conferida quanto a alterações posteriores. Configure
+`A2A_DOCUMENT_SOURCE_ROOT` com o diretório absoluto disponível ao processo e
+`A2A_DOCUMENT_CATALOG_NAME` com o nome do catálogo nesse diretório, junto aos
+arquivos PDF allowlisted. A origem cloud permanece fora desta entrega até a
+definição do provedor e de sua configuração de acesso.
 
 ## Integrações do runtime
 
 O serviço implementa clientes HTTP OpenAI-compatible para `/embeddings` e
 `/chat/completions`, e um adapter HTTP para os embeddings Voyage. Configure as
-URLs base `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL`, os endpoints completos
-`OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL`, além das chaves, nomes dos
-modelos e dimensões dos dois espaços. O código não presume URLs de provedores:
-informe endpoints compatíveis com o protocolo esperado, incluindo gateways como
-OpenRouter quando oferecerem a API adequada. Para respostas, o fallback
-Anthropic usa o endpoint `/v1/messages` relativo à base configurada. A
-sincronização indexa os documentos em vetores Qdrant nomeados (`openai` e
-`voyage`); a consulta usa o índice correspondente ao provedor que conseguiu
-gerar o vetor. A revisão dos modelos e dimensões participa do fingerprint de
-indexação; alterá-la força o sincronizador a criar uma nova geração compatível
-com Qdrant. Cada chamada de resposta também recebe o teto
-`A2A_MODEL_MAX_OUTPUT_TOKENS` (padrão 4096); o deadline delegado e os timeouts
-existentes limitam a duração da tarefa.
+`OPENAI_BASE_URL` aponta para a API oficial da OpenAI e `OPENAI_EMBEDDINGS_URL`
+para seu endpoint de embeddings. `ANTHROPIC_BASE_URL` aponta para
+`https://openrouter.ai/api`; o fallback usa `/v1/messages` nessa base.
+`VOYAGE_EMBEDDINGS_URL` aponta para o endpoint OpenRouter `/api/v1/embeddings`,
+com o modelo `voyageai/voyage-4-large`. Use a mesma `OPENROUTER_API_KEY` para os
+fallbacks Claude e Voyage. Configure também os nomes dos modelos e as dimensões
+dos dois espaços. A sincronização indexa os documentos em vetores Qdrant
+nomeados (`openai` e `voyage`); a consulta usa o índice correspondente ao
+provedor que conseguiu gerar o vetor. A revisão dos modelos e dimensões
+participa do fingerprint de indexação; alterá-la força o sincronizador a criar
+uma nova geração compatível com Qdrant. Cada chamada de resposta tem limite fixo
+de 4096 tokens de saída. Os timeouts de provider e Qdrant e a validade das
+delegações também são políticas fixas do serviço, não variáveis de ambiente.
 
 O adapter PostgreSQL consulta `app_user` e `permission` em cada operação. Todos
 os códigos de papel recebem o mesmo acesso documental: a consulta verifica que o

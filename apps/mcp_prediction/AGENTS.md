@@ -12,9 +12,9 @@ tool.
 
 - Preserve validação e reconsulta de acesso por propriedade, SQL parametrizado e
   transações de leitura. A entrada do modelo não amplia o escopo autorizado.
-- Cobertura ausente ou dados inconsistentes devem continuar explícitos no
-  resultado. Respeite as unidades, janelas, limites e a indicação de origem;
-  dados sintéticos são identificados como simulação.
+- O serviço sempre considera completo o registro de aplicações na janela. Dados
+  inconsistentes continuam explícitos. Respeite unidades, janelas, limites e
+  origem; dados sintéticos são identificados como simulação.
 - Não apresente a estimativa determinística como modelo treinado ou prescrição.
   Os schemas compartilhados são usados pela Main API e devem evoluir com seus
   consumidores.

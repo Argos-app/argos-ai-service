@@ -1,24 +1,17 @@
 """Caso de uso autorizado para estimar consumo de medicamentos."""
 
 from collections import defaultdict
-from uuid import UUID
 
 from argos_mcp_prediction.domain import (
     ConsumptionGroup,
     ConsumptionState,
     ConsumptionUnit,
-    CoverageRecord,
-    CoverageState,
     MonthlyConsumptionRecord,
     PredictionWindows,
 )
 from argos_mcp_prediction.domain.errors import InvalidConsumptionDataError
-from argos_mcp_prediction.domain.rules import (
-    build_prediction_windows,
-    calculate_consumption,
-    coverage_failure_reason,
-)
-from argos_mcp_prediction.ports import ConsumptionReadRepository, CoverageReadRepository
+from argos_mcp_prediction.domain.rules import build_prediction_windows, calculate_consumption
+from argos_mcp_prediction.ports import ConsumptionReadRepository
 from packages.contracts import (
     CoverageStatus,
     DataOrigin,
@@ -36,10 +29,11 @@ from packages.security.access_policy import AccessPolicy
 from packages.security.errors import AccessDeniedError
 
 _OPERATION = "prediction.read"
+_COVERAGE_SOURCE = "registro completo das aplicações"
 _LIMITATIONS = (
     "A estimativa repete o padrão mensal observado em um único ano e não prevê mudanças de manejo.",
-    "Sem cobertura histórica confirmada, meses sem registros não são tratados como zero.",
-    "A estimativa não é apresentada quando a cobertura não está confirmada.",
+    "Sem histórico de aplicações, não é possível afirmar consumo zero.",
+    "Meses sem registros são tratados como meses sem aplicações.",
     "Cabeças-administrações representam aplicações acumuladas, não animais únicos tratados.",
     "Medicamentos e unidades permanecem separados, sem conversão ou recomendação clínica.",
 )
@@ -53,14 +47,12 @@ class EstimateMedicineConsumption:
         *,
         access_policy: AccessPolicy,
         consumption_repository: ConsumptionReadRepository,
-        coverage_repository: CoverageReadRepository,
         data_origin: DataOrigin = DataOrigin.UNKNOWN,
     ) -> None:
         if not isinstance(data_origin, DataOrigin):
             raise ValueError("origem dos dados deve ser configurada pelo serviço")
         self._access_policy = access_policy
         self._consumption_repository = consumption_repository
-        self._coverage_repository = coverage_repository
         self._data_origin = data_origin
 
     async def execute(
@@ -84,16 +76,8 @@ class EstimateMedicineConsumption:
         )
         windows = build_prediction_windows(request.as_of, request.horizon_days)
 
-        coverage_records = await self._coverage_repository.get_coverage(
-            scope, start=windows.history_start, end=windows.history_end
-        )
-        coverage_by_property = self._index_coverage(scope, coverage_records)
-        coverage_response = self._coverage_response(scope, coverage_by_property, windows)
-        reasons = [
-            item.reason or "cobertura histórica não confirmada"
-            for item in coverage_response
-            if item.status != CoverageStatus.CONFIRMED
-        ]
+        coverage_response = self._coverage_response(scope, windows)
+        reasons = []
 
         try:
             records = await self._consumption_repository.aggregate_monthly(
@@ -156,7 +140,6 @@ class EstimateMedicineConsumption:
                 calculation = calculate_consumption(
                     group,
                     tuple(monthly_records),
-                    coverage=coverage_by_property[group.property_id],
                     windows=windows,
                 )
             except InvalidConsumptionDataError:
@@ -232,59 +215,19 @@ class EstimateMedicineConsumption:
         return any(cls._matches_name(group, name) for name in names)
 
     @staticmethod
-    def _index_coverage(
-        scope: AuthorizedScope,
-        records: tuple[CoverageRecord, ...],
-    ) -> dict[UUID, CoverageRecord]:
-        if not isinstance(records, tuple):
-            raise InvalidConsumptionDataError("resposta de cobertura inválida")
-        indexed: dict[UUID, CoverageRecord] = {}
-        for record in records:
-            if (
-                not isinstance(record, CoverageRecord)
-                or record.property_id not in scope.property_ids
-            ):
-                raise InvalidConsumptionDataError("cobertura externa ao escopo autorizado")
-            if record.property_id in indexed:
-                raise InvalidConsumptionDataError("cobertura duplicada para a propriedade")
-            indexed[record.property_id] = record
-        if set(indexed) != set(scope.property_ids):
-            raise InvalidConsumptionDataError("cobertura ausente para propriedade autorizada")
-        return indexed
-
-    @staticmethod
     def _coverage_response(
         scope: AuthorizedScope,
-        coverage_by_property: dict[UUID, CoverageRecord],
         windows: PredictionWindows,
     ) -> tuple[PropertyCoverage, ...]:
-        response = []
-        for property_id in scope.property_ids:
-            coverage = coverage_by_property[property_id]
-            reason = coverage_failure_reason(coverage, property_id=property_id, windows=windows)
-            if reason is not None:
-                status = (
-                    CoverageStatus.UNKNOWN
-                    if coverage.state == CoverageState.UNKNOWN
-                    else CoverageStatus.INCOMPLETE
-                )
-                response.append(
-                    PropertyCoverage(
-                        property_id=property_id,
-                        status=status,
-                        reason=EstimateMedicineConsumption._reason([reason]),
-                    )
-                )
-                continue
-            response.append(
-                PropertyCoverage(
-                    property_id=property_id,
-                    status=CoverageStatus.CONFIRMED,
-                    window=PredictionWindow(start=coverage.start, end=coverage.end),
-                    source=coverage.source,
-                )
+        return tuple(
+            PropertyCoverage(
+                property_id=property_id,
+                status=CoverageStatus.CONFIRMED,
+                window=PredictionWindow(start=windows.history_start, end=windows.history_end),
+                source=_COVERAGE_SOURCE,
             )
-        return tuple(response)
+            for property_id in scope.property_ids
+        )
 
     @staticmethod
     def _reason(reasons: list[str]) -> str:

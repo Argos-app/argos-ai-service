@@ -9,7 +9,6 @@ import httpx
 import pytest
 from argos_mcp_prediction.adapters.delegation import authorize_mcp_call
 from argos_mcp_prediction.server import (
-    StaticServiceTokenVerifier,
     create_http_app,
     create_mcp_server,
 )
@@ -20,24 +19,6 @@ from packages.security.access_policy import AccessPolicy
 from packages.security.delegation import DelegationTokenVerifier
 
 pytestmark = pytest.mark.asyncio
-
-
-@pytest.mark.parametrize("token", ["", "wrong-token", "prediction-test-token ", "tóken"])
-async def test_verifier_rejects_incorrect_tokens(configured_settings, token):
-    verifier = StaticServiceTokenVerifier(
-        configured_settings.internal_service_token, configured_settings.mcp_resource_server_url
-    )
-    assert await verifier.verify_token(token) is None
-
-
-async def test_verifier_binds_accepted_token_to_service_scope_and_resource(configured_settings):
-    verifier = StaticServiceTokenVerifier(
-        configured_settings.internal_service_token, configured_settings.mcp_resource_server_url
-    )
-    token = await verifier.verify_token(configured_settings.internal_service_token)
-    assert token.client_id == "argos-main-service"
-    assert token.scopes == ["prediction:read"]
-    assert token.resource == configured_settings.mcp_resource_server_url
 
 
 def result_json(response):

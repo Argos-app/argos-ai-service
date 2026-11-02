@@ -13,6 +13,7 @@ def _runtime_settings() -> Settings:
         qdrant_collection="documents",
         qdrant_vector_size=3,
         document_source_root=Path.cwd(),
+        document_catalog_name="catalog.json",
         manifest_path=Path.cwd() / "manifest.json",
         internal_service_token="service-token",
         resource_server_url="http://127.0.0.1:8000/a2a",
@@ -21,6 +22,18 @@ def _runtime_settings() -> Settings:
         a2a_endpoint_url="http://127.0.0.1:8000/a2a",
         model_mode="simulated",
     )
+
+
+def test_document_source_requires_explicit_environment(monkeypatch):
+    monkeypatch.delenv("A2A_DOCUMENT_SOURCE_ROOT", raising=False)
+    monkeypatch.delenv("A2A_DOCUMENT_CATALOG_NAME", raising=False)
+    settings = Settings.from_env()
+    assert settings.document_source_root is None
+    assert settings.document_catalog_name == ""
+    with pytest.raises(ValueError, match="A2A_DOCUMENT_CATALOG_NAME"):
+        replace(_runtime_settings(), document_catalog_name="").validate_runtime(
+            require_providers=False, require_permission_sql=False
+        )
 
 
 def test_observability_collection_name_is_fixed(monkeypatch):
@@ -73,15 +86,16 @@ def test_fallback_models_have_no_built_in_names(monkeypatch):
 
 
 def test_voyage_embedding_settings_are_loaded_from_environment(monkeypatch):
-    monkeypatch.setenv("VOYAGE_API_KEY", "voyage-test-key")
-    monkeypatch.setenv("VOYAGE_EMBEDDINGS_MODEL", "voyage-4-large")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-test-key")
+    monkeypatch.setenv("VOYAGE_EMBEDDINGS_MODEL", "voyageai/voyage-4-large")
     monkeypatch.setenv("A2A_QDRANT_VOYAGE_VECTOR_SIZE", "1024")
     monkeypatch.setenv("VOYAGE_EMBEDDINGS_URL", "https://voyage-gateway.example/embed/")
 
     settings = Settings.from_env()
 
-    assert settings.voyage_api_key == "voyage-test-key"
-    assert settings.voyage_embeddings_model == "voyage-4-large"
+    assert settings.voyage_api_key == "openrouter-test-key"
+    assert settings.anthropic_api_key == "openrouter-test-key"
+    assert settings.voyage_embeddings_model == "voyageai/voyage-4-large"
     assert settings.qdrant_voyage_vector_size == 1024
     assert settings.voyage_embeddings_url == "https://voyage-gateway.example/embed"
 
@@ -99,18 +113,18 @@ def test_provider_mode_requires_voyage_credentials_for_embedding_fallback():
         permission_sql_dsn="postgresql://reader:test@localhost/argos",
     )
 
-    with pytest.raises(ValueError, match="VOYAGE_API_KEY"):
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
         settings.validate_runtime(require_permission_sql=False)
 
 
 def test_anthropic_fallback_is_loaded_from_environment(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-test-key")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-test-key")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://anthropic-gateway.example/")
     monkeypatch.setenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK", "sonnet-test")
 
     settings = Settings.from_env()
 
-    assert settings.anthropic_api_key == "anthropic-test-key"
+    assert settings.anthropic_api_key == "openrouter-test-key"
     assert settings.anthropic_base_url == "https://anthropic-gateway.example"
     assert settings.anthropic_model_specialist_fallback == "sonnet-test"
 
@@ -150,15 +164,16 @@ def test_production_runtime_still_requires_permission_sql_dsn():
         _runtime_settings().validate_runtime(require_providers=False)
 
 
-def test_a2a_model_timeout_allows_longer_provider_responses():
-    settings = _runtime_settings()
+def test_a2a_model_timeout_uses_fixed_policy(monkeypatch):
+    monkeypatch.setenv("A2A_MODEL_TIMEOUT_SECONDS", "44")
+    settings = Settings.from_env()
 
-    assert settings.model_timeout_seconds == 40
-    settings.validate_runtime(require_providers=False, require_permission_sql=False)
+    assert settings.model_timeout_seconds == 120
+    _runtime_settings().validate_runtime(require_providers=False, require_permission_sql=False)
 
 
 def test_a2a_model_timeout_remains_bounded():
-    settings = replace(_runtime_settings(), model_timeout_seconds=46)
+    settings = replace(_runtime_settings(), model_timeout_seconds=181)
 
-    with pytest.raises(ValueError, match="A2A_MODEL_TIMEOUT_SECONDS"):
+    with pytest.raises(ValueError, match="timeout fixo do modelo"):
         settings.validate_runtime(require_providers=False, require_permission_sql=False)

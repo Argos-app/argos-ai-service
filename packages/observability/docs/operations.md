@@ -6,10 +6,11 @@ Compose integrado, `ai_observations` e `ai_a2a_observations` são ativadas por
 padrão. Em execução individual, configure `MAIN_API_MONGO_URI` no `main_api`;
 para observações do A2A, configure `A2A_OBSERVABILITY_MONGO_URI` e, se
 necessário, `A2A_OBSERVABILITY_MONGO_DATABASE`. Os nomes das collections são
-fixos no código. Os demais limites da fila podem ser ajustados pelas variáveis
-`MAIN_API_OBSERVABILITY_*` e `A2A_OBSERVABILITY_*` mostradas nos respectivos
-`.env.example`. Não é necessário configurar `LANGSMITH_API_KEY` para usar Mongo
-ou o ranking local.
+fixos no código. Tamanho da fila e atraso entre retentativas podem ser ajustados
+pelos exemplos de configuração de cada serviço. O lote do writer é fixo em 100
+observações. Timeouts, quantidade de tentativas e prazo de encerramento também
+são políticas fixas, sem variáveis de ambiente. Não é necessário configurar
+`LANGSMITH_API_KEY` para usar Mongo ou o ranking local.
 
 ## Privacidade e tracing
 
@@ -116,11 +117,14 @@ do provider ou gateway configurado: `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
 `MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS`. Chat exige tokens de
 entrada e saída e ambas as tarifas do perfil; embedding usa somente entrada. O
 custo explícito do provider tem precedência. Sem contagens ou tarifas
-necessárias, o custo fica ausente. A estimativa não reconcilia faturas e não
-considera preços diferenciados de tokens cacheados. Providers podem retornar
-tokens sem preço por chamada. Algumas bibliotecas fazem retries internos
-invisíveis: consulte `attempt_visibility` e `attempt_reason` e não interprete
-contagem de spans como contagem exata de chamadas faturadas.
+necessárias, o custo fica ausente. As tentativas Jev e Decisions usam tarifas
+próprias `JEV_INPUT_COST_PER_MILLION_TOKENS`,
+`JEV_OUTPUT_COST_PER_MILLION_TOKENS`, `DECISIONS_INPUT_COST_PER_MILLION_TOKENS`
+e `DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS`. A estimativa não reconcilia
+faturas e não considera preços diferenciados de tokens cacheados. Providers
+podem retornar tokens sem preço por chamada. Algumas bibliotecas fazem retries
+internos invisíveis: consulte `attempt_visibility` e `attempt_reason` e não
+interprete contagem de spans como contagem exata de chamadas faturadas.
 
 As filas são limitadas e mantidas somente em memória. Observações podem se
 perder quando a fila enche, o processo encerra antes do flush, Mongo fica
@@ -130,21 +134,27 @@ operação não ocorreu. Mongo não aplica TTL à collection de observabilidade;
 retenção e exclusão são decisão operacional.
 
 O Redis mantém um hash por `user_id`, compartilhado pelo `main_api` e pelo A2A.
-O hash também armazena `name` e `email`, atualizados pelo `main_api` a partir do
-cadastro PostgreSQL carregado em cada requisição autenticada. Esses campos
-acompanham o TTL do hash; atualizações de tokens pelo A2A preservam a
-identidade. Hashes antigos ou criados somente por observações podem não ter
-esses campos: o ranking retorna `null` até a próxima chamada autenticada do
-usuário. Cada requisição com identidade válida incrementa `calls`; cada
-observação terminal de modelo/embedding incrementa `model_calls` e soma os
-tokens conhecidos. Quando o provider não retorna tokens completos, o sistema
-soma o que conhece e incrementa `unknown_token_calls`. Os tokens são
-deduplicados pelo ID da observação. O hash expira 24 horas depois do último
-incremento; cada atualização renova o TTL. Isso mede uso acumulado durante a
-atividade recente do usuário, e não uma janela móvel exata de 24 horas. Os
-contadores são independentes do registro Mongo, mas são best effort: falhas
-Redis, encerramentos antes do flush da fila ou reinício do Redis podem perder
-incrementos. O Redis do Compose local não persiste em disco.
+O campo `cost_usd` soma custos conhecidos em dólares, informados pelo provider
+ou estimados pelas tarifas configuradas. `known_cost_calls` e
+`unknown_cost_calls` indicam a cobertura dessa soma. O ranking inclui
+`by_cost_usd` e o total é parcial quando existem custos desconhecidos. O Redis
+usa ponto flutuante e os valores servem à observação de uso, não à cobrança
+financeira. O hash também armazena `name` e `email`, atualizados pelo `main_api`
+a partir do cadastro PostgreSQL carregado em cada requisição autenticada. Esses
+campos acompanham o TTL do hash; atualizações de tokens pelo A2A preservam a
+identidade. Cada atualização inicializa os campos ausentes do hash com texto
+vazio ou zero, sem sobrescrever os valores existentes. Um custo zero só deve ser
+interpretado junto dos contadores de custos conhecidos e desconhecidos. Cada
+requisição com identidade válida incrementa `calls`; cada observação terminal de
+modelo/embedding incrementa `model_calls` e soma os tokens conhecidos. Quando o
+provider não retorna tokens completos, o sistema soma o que conhece e incrementa
+`unknown_token_calls`. Os tokens são deduplicados pelo ID da observação. O hash
+expira 24 horas depois do último incremento; cada atualização renova o TTL. Isso
+mede uso acumulado durante a atividade recente do usuário, e não uma janela
+móvel exata de 24 horas. Os contadores são independentes do registro Mongo, mas
+são best effort: falhas Redis, encerramentos antes do flush da fila ou reinício
+do Redis podem perder incrementos. O Redis do Compose local não persiste em
+disco.
 
 Para execução individual, configure `MAIN_API_OBSERVABILITY_REDIS_URL` e/ou
 `A2A_OBSERVABILITY_REDIS_URL` para o mesmo Redis e o mesmo
@@ -162,9 +172,9 @@ $env:USER_USAGE_REDIS_KEY_PREFIX = "argos:usage:users:v1"
 python scripts/observability/rank_usage_24h.py
 ```
 
-O relatório inclui nome e e-mail e fornece ordenações por chamadas e por tokens,
-além de chamadas de modelo com contagem de tokens incompleta. Ele inclui somente
-usuários cujas chaves ainda não expiraram e marca
+O relatório inclui nome e e-mail e fornece ordenações por chamadas, tokens e
+custo USD conhecido, além de contadores de tokens e custos incompletos. Ele
+inclui somente usuários cujas chaves ainda não expiraram e marca
 `completeness=best_effort_incomplete`; não é um ledger de faturamento nem um
 histórico durável.
 

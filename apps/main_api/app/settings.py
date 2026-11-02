@@ -5,6 +5,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field, fields
+from decimal import Decimal
 from urllib.parse import urlsplit
 
 from app.session_config import SESSION_SUMMARY_INPUT_MAX_TOKENS
@@ -41,6 +42,11 @@ def _environment_bool(name: str, default: bool = False) -> bool:
         extra={"setting": name},
     )
     return default
+
+
+def _optional_rate(name: str) -> Decimal | None:
+    value = os.getenv(name)
+    return Decimal(value) if value and value.strip() else None
 
 
 _MONGO_COLLECTION_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
@@ -81,18 +87,17 @@ class Settings:
     mongo_uri: str | None = None
     auth_database_url: str | None = field(default=None, repr=False)
     auth_database_pool_min_size: int = 1
-    auth_database_pool_max_size: int = 5
-    auth_database_connect_timeout_seconds: float = 3.0
-    auth_database_query_timeout_seconds: float = 3.0
+    auth_database_pool_max_size: int = 10
+    auth_database_connect_timeout_seconds: float = 10.0
+    auth_database_query_timeout_seconds: float = 15.0
     mongo_database: str = "argos_ai"
     mongo_collections: MongoCollectionSettings = field(default_factory=MongoCollectionSettings)
-    mongo_server_selection_timeout_ms: int = 5_000
-    mongo_write_timeout_ms: int = 5_000
+    mongo_server_selection_timeout_ms: int = 15_000
+    mongo_write_timeout_ms: int = 15_000
     observability_collection: str = "ai_observations"
     observability_queue_max_items: int = 2_048
     observability_queue_max_bytes: int = 8 * 1024 * 1024
     observability_document_max_bytes: int = 16 * 1024
-    observability_batch_size: int = 100
     observability_batch_interval_ms: int = 250
     observability_max_attempts: int = 3
     observability_retry_base_delay_ms: int = 50
@@ -113,16 +118,25 @@ class Settings:
     mcp_prediction_token: str | None = field(default=None, repr=False)
     mcp_email_url: str | None = None
     mcp_email_token: str | None = field(default=None, repr=False)
-    mcp_timeout_seconds: float = 10.0
-    mcp_response_max_bytes: int = 1_000_000
+    mcp_timeout_seconds: float = 60.0
     mcp_delegation_issuer: str = "argos-main-service"
     mcp_delegation_key_id: str | None = None
     mcp_delegation_private_key: str | None = field(default=None, repr=False)
     mcp_delegation_ttl_seconds: int = 240
     document_a2a_url: str | None = None
     document_a2a_service_token: str | None = field(default=None, repr=False)
-    document_a2a_timeout_seconds: float = 45.0
-    document_a2a_response_max_bytes: int = 1_000_000
+    document_a2a_timeout_seconds: float = 270.0
+    jev_url: str | None = None
+    jev_api_key: str | None = field(default=None, repr=False)
+    jev_model: str = ""
+    decisions_url: str | None = None
+    decisions_model: str = ""
+    jev_input_rate: Decimal | None = None
+    jev_output_rate: Decimal | None = None
+    decisions_input_rate: Decimal | None = None
+    decisions_output_rate: Decimal | None = None
+    input_risk_threshold: float = 0.8
+    input_risk_timeout_seconds: float = 30.0
     model_mode: str = "provider"
     openai_api_key: str | None = field(default=None, repr=False)
     openai_base_url: str | None = None
@@ -132,7 +146,7 @@ class Settings:
     model_specialist_name: str | None = None
     model_fast_fallback_name: str | None = None
     model_specialist_fallback_name: str | None = None
-    model_timeout_seconds: float = 60.0
+    model_timeout_seconds: float = 120.0
     model_max_retries: int = 2
     model_max_output_tokens: int = 4096
     execution_max_model_calls: int = 12
@@ -164,20 +178,8 @@ class Settings:
             app_env=os.getenv("APP_ENV", "production").strip().casefold(),
             mongo_uri=os.getenv("MAIN_API_MONGO_URI") or None,
             auth_database_url=os.getenv("MAIN_API_AUTH_DATABASE_URL") or None,
-            auth_database_pool_min_size=int(os.getenv("MAIN_API_AUTH_DATABASE_POOL_MIN_SIZE", "1")),
-            auth_database_pool_max_size=int(os.getenv("MAIN_API_AUTH_DATABASE_POOL_MAX_SIZE", "5")),
-            auth_database_connect_timeout_seconds=float(
-                os.getenv("MAIN_API_AUTH_DATABASE_CONNECT_TIMEOUT_SECONDS", "3")
-            ),
-            auth_database_query_timeout_seconds=float(
-                os.getenv("MAIN_API_AUTH_DATABASE_QUERY_TIMEOUT_SECONDS", "3")
-            ),
             mongo_database=os.getenv("MAIN_API_MONGO_DATABASE", "argos_ai"),
             mongo_collections=MongoCollectionSettings(),
-            mongo_server_selection_timeout_ms=int(
-                os.getenv("MAIN_API_MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000")
-            ),
-            mongo_write_timeout_ms=int(os.getenv("MAIN_API_MONGO_WRITE_TIMEOUT_MS", "5000")),
             observability_queue_max_items=_observability_int(
                 "MAIN_API_OBSERVABILITY_QUEUE_MAX_ITEMS", 2048
             ),
@@ -187,16 +189,11 @@ class Settings:
             observability_document_max_bytes=_observability_int(
                 "MAIN_API_OBSERVABILITY_DOCUMENT_MAX_BYTES", 16 * 1024
             ),
-            observability_batch_size=_observability_int("MAIN_API_OBSERVABILITY_BATCH_SIZE", 100),
             observability_batch_interval_ms=_observability_int(
                 "MAIN_API_OBSERVABILITY_BATCH_INTERVAL_MS", 250
             ),
-            observability_max_attempts=_observability_int("MAIN_API_OBSERVABILITY_MAX_ATTEMPTS", 3),
             observability_retry_base_delay_ms=_observability_int(
                 "MAIN_API_OBSERVABILITY_RETRY_BASE_DELAY_MS", 50
-            ),
-            observability_shutdown_timeout_ms=_observability_int(
-                "MAIN_API_OBSERVABILITY_SHUTDOWN_TIMEOUT_MS", 2000
             ),
             session_summary_input_max_tokens=int(
                 os.getenv(
@@ -213,7 +210,6 @@ class Settings:
             ),
             access_token_key_id=os.getenv("MAIN_API_ACCESS_TOKEN_KEY_ID") or None,
             access_token_private_key=os.getenv("MAIN_API_ACCESS_TOKEN_PRIVATE_KEY") or None,
-            access_token_ttl_seconds=int(os.getenv("MAIN_API_ACCESS_TOKEN_TTL_SECONDS", "300")),
             mcp_data_url=os.getenv("MAIN_API_MCP_DATA_URL") or None,
             mcp_data_token=os.getenv("MAIN_API_MCP_DATA_TOKEN") or None,
             mcp_data_report_trusted_signature_keys=tuple(report_keys.items()),
@@ -221,35 +217,30 @@ class Settings:
             mcp_prediction_token=os.getenv("MAIN_API_MCP_PREDICTION_TOKEN") or None,
             mcp_email_url=os.getenv("MAIN_API_MCP_EMAIL_URL") or None,
             mcp_email_token=os.getenv("MAIN_API_MCP_EMAIL_TOKEN") or None,
-            mcp_timeout_seconds=float(os.getenv("MAIN_API_MCP_TIMEOUT_SECONDS", "10")),
-            mcp_response_max_bytes=int(os.getenv("MAIN_API_MCP_RESPONSE_MAX_BYTES", "1000000")),
             mcp_delegation_issuer=os.getenv("MAIN_API_MCP_DELEGATION_ISSUER", "argos-main-service"),
             mcp_delegation_key_id=os.getenv("MAIN_API_MCP_DELEGATION_KEY_ID") or None,
             mcp_delegation_private_key=os.getenv("MAIN_API_MCP_DELEGATION_PRIVATE_KEY") or None,
-            mcp_delegation_ttl_seconds=int(os.getenv("MAIN_API_MCP_DELEGATION_TTL_SECONDS", "240")),
             document_a2a_url=os.getenv("MAIN_API_DOCUMENT_A2A_URL") or None,
             document_a2a_service_token=os.getenv("MAIN_API_DOCUMENT_A2A_SERVICE_TOKEN") or None,
-            document_a2a_timeout_seconds=float(
-                os.getenv("MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS", "45")
-            ),
-            document_a2a_response_max_bytes=int(
-                os.getenv("MAIN_API_DOCUMENT_A2A_RESPONSE_MAX_BYTES", "1000000")
-            ),
+            jev_url=os.getenv("JEV_URL", "").strip() or None,
+            jev_api_key=os.getenv("OPENROUTER_API_KEY") or None,
+            jev_model=os.getenv("JEV_MODEL", ""),
+            decisions_url=os.getenv("DECISIONS_URL", "").strip() or None,
+            decisions_model=os.getenv("DECISIONS_MODEL", ""),
+            jev_input_rate=_optional_rate("JEV_INPUT_COST_PER_MILLION_TOKENS"),
+            jev_output_rate=_optional_rate("JEV_OUTPUT_COST_PER_MILLION_TOKENS"),
+            decisions_input_rate=_optional_rate("DECISIONS_INPUT_COST_PER_MILLION_TOKENS"),
+            decisions_output_rate=_optional_rate("DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS"),
+            input_risk_threshold=float(os.getenv("INPUT_RISK_THRESHOLD", "0.8")),
             model_mode=os.getenv("MAIN_API_MODEL_MODE", "provider").strip().casefold(),
             openai_api_key=os.getenv("OPENAI_API_KEY") or None,
             openai_base_url=_env_endpoint("OPENAI_BASE_URL"),
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+            anthropic_api_key=os.getenv("OPENROUTER_API_KEY") or None,
             anthropic_base_url=_env_endpoint("ANTHROPIC_BASE_URL"),
             model_fast_name=os.getenv("OPENAI_MODEL_FAST") or None,
             model_specialist_name=os.getenv("OPENAI_MODEL_SPECIALIST") or None,
             model_fast_fallback_name=os.getenv("ANTHROPIC_MODEL_FAST_FALLBACK") or None,
             model_specialist_fallback_name=os.getenv("ANTHROPIC_MODEL_SPECIALIST_FALLBACK") or None,
-            model_timeout_seconds=float(os.getenv("MAIN_API_MODEL_TIMEOUT_SECONDS", "60")),
-            model_max_retries=int(os.getenv("MAIN_API_MODEL_MAX_RETRIES", "2")),
-            model_max_output_tokens=int(os.getenv("MAIN_API_MODEL_MAX_OUTPUT_TOKENS", "4096")),
-            execution_max_model_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_MODEL_CALLS", "12")),
-            execution_max_tool_calls=int(os.getenv("MAIN_API_EXECUTION_MAX_TOOL_CALLS", "12")),
-            execution_timeout_seconds=float(os.getenv("MAIN_API_EXECUTION_TIMEOUT_SECONDS", "300")),
             langsmith_api_key=os.getenv("MAIN_API_LANGSMITH_API_KEY") or None,
             langsmith_agent_id=os.getenv("MAIN_API_LANGSMITH_AGENT_ID", "argos-ai-service"),
             langsmith_agent_environment=resolve_langsmith_agent_environment(
@@ -263,6 +254,8 @@ class Settings:
 
     def __post_init__(self) -> None:
         for name, value in (
+            ("JEV_URL", self.jev_url),
+            ("DECISIONS_URL", self.decisions_url),
             ("OPENAI_BASE_URL", self.openai_base_url),
             ("ANTHROPIC_BASE_URL", self.anthropic_base_url),
         ):
@@ -325,14 +318,12 @@ class Settings:
             or self.mongo_write_timeout_ms < 1
             or self.session_summary_input_max_tokens < 1
             or self.mcp_timeout_seconds <= 0
-            or self.mcp_response_max_bytes < 1
             or not self.access_token_issuer.strip()
             or not self.access_token_audience.strip()
             or not 60 <= self.access_token_ttl_seconds <= 300
             or not self.mcp_delegation_issuer.strip()
             or not 1 <= self.mcp_delegation_ttl_seconds <= 300
-            or not 0 < self.document_a2a_timeout_seconds <= 60
-            or self.document_a2a_response_max_bytes < 1
+            or not 0 < self.document_a2a_timeout_seconds <= 300
             or not 0 < self.model_timeout_seconds <= 120
             or not 0 <= self.model_max_retries <= 2
             or not 1 <= self.model_max_output_tokens <= 8192
@@ -341,6 +332,16 @@ class Settings:
             or not 1 <= self.execution_timeout_seconds <= 300
         ):
             raise ValueError("limites e timeouts devem ser positivos")
+        if not 0 < self.input_risk_threshold <= 1 or not 0 < self.input_risk_timeout_seconds <= 120:
+            raise ValueError("configuração de avaliação de risco inválida")
+        for rate in (
+            self.jev_input_rate,
+            self.jev_output_rate,
+            self.decisions_input_rate,
+            self.decisions_output_rate,
+        ):
+            if rate is not None and (not rate.is_finite() or rate < 0):
+                raise ValueError("tarifa de avaliação de risco inválida")
         if self.model_mode not in {"provider", "simulated"}:
             raise ValueError("MAIN_API_MODEL_MODE deve ser provider ou simulated")
         if self.auth_mode not in {"jwt", "stub"}:

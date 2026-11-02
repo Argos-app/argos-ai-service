@@ -40,7 +40,6 @@ def command(service: str, env: dict[str, str]) -> list[str]:
     env[f"{prefix}_HOST"] = "0.0.0.0"
     env[f"{prefix}_PORT"] = str(port)
     if service == "a2a_agent":
-        env.setdefault("A2A_DOCUMENT_SOURCE_ROOT", str(app_path / "data" / "documents"))
         env.setdefault("A2A_MANIFEST_PATH", "/tmp/argos-a2a/manifest.json")
     return [sys.executable, "-m", MODULES[service]]
 

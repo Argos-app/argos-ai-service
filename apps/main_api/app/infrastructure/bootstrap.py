@@ -124,7 +124,6 @@ async def _create_observability_runtime(
             max_items=settings.observability_queue_max_items,
             max_bytes=settings.observability_queue_max_bytes,
             max_document_bytes=settings.observability_document_max_bytes,
-            batch_size=settings.observability_batch_size,
             batch_interval_ms=settings.observability_batch_interval_ms,
             max_attempts=settings.observability_max_attempts,
             retry_base_delay_ms=settings.observability_retry_base_delay_ms,

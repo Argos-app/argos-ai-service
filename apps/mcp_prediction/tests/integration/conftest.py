@@ -140,7 +140,6 @@ class PredictionHarness:
             PYTHONUNBUFFERED="1",
             MCP_PREDICTION_SQL_DSN=self.reader_dsn,
             MCP_PREDICTION_INTERNAL_SERVICE_TOKEN=self.service_token,
-            MCP_PREDICTION_AUTH_ISSUER_URL=f"http://127.0.0.1:{self.port}/test-issuer",
             MCP_PREDICTION_RESOURCE_SERVER_URL=self.url,
             MCP_PREDICTION_DELEGATION_ISSUER="argos-main-service-test",
             MCP_PREDICTION_TRUSTED_DELEGATION_KEYS=json.dumps(

@@ -7,8 +7,6 @@ from argos_mcp_prediction.application import EstimateMedicineConsumption
 from argos_mcp_prediction.infrastructure import (
     AsyncpgSqlReader,
     PostgresConsumptionRepository,
-    PostgresCoverageRepository,
-    UnknownCoverageRepository,
 )
 from argos_mcp_prediction.server import (
     McpPredictionServer,
@@ -66,11 +64,6 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
         estimate_consumption = EstimateMedicineConsumption(
             access_policy=access_policy,
             consumption_repository=PostgresConsumptionRepository(sql_reader),
-            coverage_repository=(
-                PostgresCoverageRepository(sql_reader, configured.coverage_relation)
-                if configured.coverage_relation
-                else UnknownCoverageRepository()
-            ),
             data_origin=configured.data_origin,
         )
         server = create_mcp_server(

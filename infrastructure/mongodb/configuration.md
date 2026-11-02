@@ -23,6 +23,19 @@ acessível e, para o replica set de teste que anuncia DNS interno,
 
 ## Collections e retenção
 
+As collections próprias dos serviços são criadas pelo MongoDB quando o código
+cria um índice ou grava o primeiro documento. A Main API prepara seus índices na
+inicialização; o checkpointer prepara os seus pelo pacote LangGraph. O MCP de
+e-mail prepara o índice de despachos na inicialização e grava relatórios quando
+necessário. A observabilidade prepara índices em segundo plano. Portanto, nem
+todas as collections precisam aparecer antes do primeiro uso. As credenciais de
+escrita precisam permitir também a criação das collections e dos índices.
+
+`cattle_documents` e `medicine_documents` são fontes de negócio externas: o MCP
+de dados só as consulta e não as cria nem popula. O produtor deve fornecer os
+documentos no database configurado. O `mongo_seed` do Compose integrado gera
+dados sintéticos locais; ele não abastece os ambientes de deploy.
+
 Os nomes da Main API, inclusive `ai_email_workflows`, `ai_langgraph_checkpoints`
 e `ai_langgraph_checkpoint_writes`, são definidos em `app/settings.py`. A
 observabilidade usa `ai_observations`. O MCP de e-mail usa

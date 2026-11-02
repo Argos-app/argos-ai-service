@@ -14,7 +14,6 @@ from packages.contracts import DataOrigin
         ("delegation_issuer", "MCP_PREDICTION_DELEGATION_ISSUER"),
         ("sql_dsn", "MCP_PREDICTION_SQL_DSN"),
         ("internal_service_token", "MCP_PREDICTION_INTERNAL_SERVICE_TOKEN"),
-        ("mcp_auth_issuer_url", "MCP_PREDICTION_AUTH_ISSUER_URL"),
         ("mcp_resource_server_url", "MCP_PREDICTION_RESOURCE_SERVER_URL"),
     ],
 )
@@ -42,14 +41,6 @@ def test_invalid_configuration_is_rejected(configured_settings, overrides):
         replace(configured_settings, **overrides).validate_runtime()
 
 
-@pytest.mark.parametrize(
-    "relation", ["", "public.coverage; drop table", "too many.parts.here", "view name"]
-)
-def test_coverage_relation_identifier_must_be_qualified_identifier(configured_settings, relation):
-    with pytest.raises(ValueError, match="MCP_PREDICTION_COVERAGE_RELATION"):
-        replace(configured_settings, coverage_relation=relation).validate_runtime()
-
-
 def test_secrets_are_not_in_settings_representation(configured_settings):
     assert configured_settings.sql_dsn not in repr(configured_settings)
     assert configured_settings.internal_service_token not in repr(configured_settings)
@@ -58,12 +49,10 @@ def test_secrets_are_not_in_settings_representation(configured_settings):
 def test_configuration_reads_only_prediction_environment(monkeypatch):
     monkeypatch.setenv("MCP_PREDICTION_SQL_DSN", "postgresql://readonly@localhost/test")
     monkeypatch.setenv("MCP_PREDICTION_INTERNAL_SERVICE_TOKEN", "own-token")
-    monkeypatch.setenv("MCP_PREDICTION_AUTH_ISSUER_URL", "https://issuer.example.test")
     monkeypatch.setenv("MCP_PREDICTION_RESOURCE_SERVER_URL", "https://prediction.example.test/mcp")
     monkeypatch.setenv("MCP_PREDICTION_PORT", "8102")
     monkeypatch.setenv("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", "7")
     monkeypatch.setenv("MCP_PREDICTION_DATA_ORIGIN", "synthetic")
-    monkeypatch.setenv("MCP_PREDICTION_COVERAGE_RELATION", "ops.property_data_coverage")
     monkeypatch.setenv("MCP_EMAIL_INTERNAL_SERVICE_TOKEN", "other-token")
     monkeypatch.setenv("MCP_PREDICTION_DELEGATION_ISSUER", "argos-main-service")
     monkeypatch.setenv("MCP_PREDICTION_TRUSTED_DELEGATION_KEYS", '{"test-key": "public-key"}')
@@ -71,9 +60,8 @@ def test_configuration_reads_only_prediction_environment(monkeypatch):
     settings.validate_runtime()
     assert settings.internal_service_token == "own-token"
     assert settings.mcp_port == 8102
-    assert settings.sql_timeout_seconds == 7
+    assert settings.sql_timeout_seconds == 15
     assert settings.data_origin == DataOrigin.SYNTHETIC
-    assert settings.coverage_relation == "ops.property_data_coverage"
 
 
 def test_invalid_environment_integer_is_rejected(monkeypatch):

@@ -10,8 +10,10 @@ monta o runtime e `server.py` expõe o transporte.
 
 ## Regras a preservar
 
-- As skills documental e legal usam fontes e páginas do corpus; os PDFs de
-  demonstração são sintéticos, não evidência jurídica real.
+- As skills documental e legal usam fontes e páginas do corpus. A LGPD é uma
+  edição do Senado atualizada até julho de 2026; os termos do Argos estão
+  identificados no catálogo como vigentes a partir de 01/11/2026. Os fixtures de
+  integração permanecem sintéticos.
 - A sincronização usa manifesto, revisão e alias no Qdrant. Embeddings principal
   e fallback ocupam vetores nomeados próprios, com dimensões compatíveis; não
   consulte um espaço com o vetor do outro nem sirva revisão antiga após falha.

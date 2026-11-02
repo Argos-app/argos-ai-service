@@ -11,29 +11,30 @@ assinada de relatórios e catálogo/detalhes de medicamentos para Doutor.
 
 O processo encerra com erro se qualquer variável obrigatória estiver ausente:
 
-| Variável                               | Finalidade                                                                   |
-| -------------------------------------- | ---------------------------------------------------------------------------- |
-| `MCP_DATA_SQL_DSN`                     | DSN PostgreSQL de uma conta provisionada para leitura.                       |
-| `MCP_DATA_MONGO_URI`                   | URI MongoDB de uma conta provisionada com papel `read` no banco configurado. |
-| `MCP_DATA_MONGO_DATABASE`              | Banco MongoDB.                                                               |
-| `MCP_DATA_MONGO_RELATIONAL_ID_FORMAT`  | Representação do UUID relacional no Mongo: `string` ou `uuid_standard`.      |
-| `MCP_DATA_MONGO_MEDICINE_ID_FORMAT`    | Representação de `relational_medicine_id`: `string` ou `uuid_standard`.      |
-| `MCP_DATA_INTERNAL_SERVICE_TOKEN`      | Token interno de serviço aceito pelo verificador MCP.                        |
-| `MCP_DATA_AUTH_ISSUER_URL`             | Emissor OAuth configurado no transporte MCP.                                 |
-| `MCP_DATA_RESOURCE_SERVER_URL`         | URL deste resource server, incluindo `/mcp`.                                 |
-| `MCP_DATA_DELEGATION_ISSUER`           | Valor `iss` esperado nos tokens de delegação do serviço principal.           |
-| `MCP_DATA_TRUSTED_DELEGATION_KEYS`     | JSON `kid` → chave pública Ed25519 em Base64 do serviço principal.           |
-| `MCP_DATA_DELEGATION_MAX_TTL`          | Validade máxima do token de delegação, em segundos; padrão `300`.            |
-| `MCP_DATA_DELEGATION_CLOCK_SKEW`       | Tolerância de relógio para validar tokens, em segundos; padrão `30`.         |
-| `MCP_DATA_REPORT_SIGNING_KEY_ID`       | Identificador da chave Ed25519 usada para assinar o envelope de relatório.   |
-| `MCP_DATA_REPORT_SIGNING_PRIVATE_KEY`  | Chave privada Ed25519 PKCS#8 DER em Base64; deve permanecer em secret store. |
-| `MCP_DATA_REPORT_ENVELOPE_TTL_SECONDS` | Validade do envelope assinado; padrão `300`, máximo `300`.                   |
-| `MCP_DATA_HOST`                        | Host de escuta; padrão `0.0.0.0`.                                            |
-| `MCP_DATA_PORT`                        | Porta de escuta; padrão `8000`.                                              |
+| Variável                              | Finalidade                                                                   |
+| ------------------------------------- | ---------------------------------------------------------------------------- |
+| `MCP_DATA_SQL_DSN`                    | DSN PostgreSQL de uma conta provisionada para leitura.                       |
+| `MCP_DATA_MONGO_URI`                  | URI MongoDB de uma conta provisionada com papel `read` no banco configurado. |
+| `MCP_DATA_MONGO_DATABASE`             | Banco MongoDB.                                                               |
+| `MCP_DATA_MONGO_RELATIONAL_ID_FORMAT` | Representação do UUID relacional no Mongo: `string` ou `uuid_standard`.      |
+| `MCP_DATA_MONGO_MEDICINE_ID_FORMAT`   | Representação de `relational_medicine_id`: `string` ou `uuid_standard`.      |
+| `MCP_DATA_INTERNAL_SERVICE_TOKEN`     | Token interno de serviço aceito pelo verificador MCP.                        |
+| `MCP_DATA_RESOURCE_SERVER_URL`        | URL deste resource server, incluindo `/mcp`.                                 |
+| `MCP_DATA_DELEGATION_ISSUER`          | Valor `iss` esperado nos tokens de delegação do serviço principal.           |
+| `MCP_DATA_TRUSTED_DELEGATION_KEYS`    | JSON `kid` → chave pública Ed25519 em Base64 do serviço principal.           |
+| `MCP_DATA_DELEGATION_CLOCK_SKEW`      | Tolerância de relógio para validar tokens, em segundos; padrão `30`.         |
+| `MCP_DATA_REPORT_SIGNING_KEY_ID`      | Identificador da chave Ed25519 usada para assinar o envelope de relatório.   |
+| `MCP_DATA_REPORT_SIGNING_PRIVATE_KEY` | Chave privada Ed25519 PKCS#8 DER em Base64; deve permanecer em secret store. |
+| `MCP_DATA_HOST`                       | Host de escuta; padrão `0.0.0.0`.                                            |
+| `MCP_DATA_PORT`                       | Porta de escuta; padrão `8000`.                                              |
 
 Os nomes das collections Mongo são fixos: `cattle_documents` para os documentos
 bovinos e `medicine_documents` para detalhes de medicamentos. Os ambientes são
 separados pelo database configurado, que deve disponibilizar essas collections.
+
+A validade máxima das delegações e dos envelopes assinados é uma política fixa
+de segurança do serviço; esses valores não são configurados por variável de
+ambiente.
 
 O pool PostgreSQL define `default_transaction_read_only=on`, valida esse estado
 na inicialização e cada leitura abre transação explicitamente `READ ONLY`. O

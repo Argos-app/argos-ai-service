@@ -82,6 +82,37 @@ As integrações de cada serviço ficam em `apps/<serviço>/tests/integration`.
 Consulte o README dessa pasta para subir as dependências descartáveis e ativar
 os testes de integração.
 
+Para reproduzir os grupos da CI, siga esta ordem a partir da raiz:
+
+1. Execute as verificações de qualidade e a suíte unitária acima. A CI instala o
+   lock da raiz em Linux/Python 3.14.3 e também audita separadamente os cinco
+   locks `apps/<serviço>/pylock.toml`; a auditoria de locks Linux deve ser
+   executada em Linux, pois algumas dependências não são instaláveis no Windows.
+2. Valide e construa as cinco imagens, suba a pilha e execute os health checks e
+   a interação em [Docker local](infrastructure/docker/README.md). Use um
+   projeto e portas separados se já houver uma pilha ativa. O modo simulado é o
+   usado pela CI; providers reais são uma validação adicional.
+3. Execute as integrações descartáveis pelos guias da
+   [Main API](apps/main_api/tests/integration/README.md),
+   [e-mail](apps/mcp_email/tests/integration/README.md),
+   [A2A](apps/a2a_agent/tests/integration/README.md),
+   [dados](apps/mcp_data/tests/integration/README.md) e
+   [predição](apps/mcp_prediction/tests/integration/README.md). Ative as
+   variáveis de cada guia: sem elas, partes das suítes são ignoradas.
+4. Remova somente a infraestrutura descartável criada para cada teste. A opção
+   `down --volumes` remove os volumes do projeto Compose indicado.
+
+Para executar a auditoria dos locks como no job Linux da CI:
+
+```bash
+audit_file=$(mktemp)
+for lock in apps/{main_api,mcp_data,mcp_email,mcp_prediction,a2a_agent}/pylock.toml; do
+  python -c 'import sys,tomllib; p=tomllib.load(open(sys.argv[1],"rb"))["packages"]; print("\n".join("{}=={}".format(x["name"], x["version"]) for x in p))' "$lock" > "$audit_file"
+  pip-audit --no-deps -r "$audit_file" || { rm -f "$audit_file"; exit 1; }
+done
+rm -f "$audit_file"
+```
+
 Para corrigir formatação Python:
 
 ```bash

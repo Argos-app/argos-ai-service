@@ -16,31 +16,6 @@ class ServiceAuthenticationError(Exception):
     """Credencial ausente ou inválida para uma chamada entre serviços."""
 
 
-class StaticServiceTokenVerifier:
-    """Autentica somente o serviço chamador; delegação do usuário é validada pelo middleware."""
-
-    def __init__(self, expected_token: str, resource_server_url: str) -> None:
-        if not expected_token:
-            raise ValueError("token interno de serviço é obrigatório")
-        self._expected_token = expected_token
-        self._resource_server_url = resource_server_url
-
-    def is_expected_token(self, token: str) -> bool:
-        return hmac.compare_digest(token.encode("utf-8"), self._expected_token.encode("utf-8"))
-
-    async def verify_token(self, token: str) -> Any | None:
-        if not self.is_expected_token(token):
-            return None
-        from mcp.server.auth.provider import AccessToken
-
-        return AccessToken(
-            token=token,
-            client_id="argos-main-service",
-            scopes=["prediction:read"],
-            resource=self._resource_server_url,
-        )
-
-
 class McpPredictionServer:
     """Facade da ferramenta de predição, autenticada como serviço chamador."""
 
@@ -72,14 +47,14 @@ class McpPredictionServer:
 
 
 def _authorization_from_context(context: Any) -> str | None:
-    """Obtém somente o token que o middleware MCP já validou no transporte.
-
-    O SDK injeta o escopo da chamada em Context; a autenticação fica no contextvar."""
+    """Lê o cabeçalho já validado pelo middleware de transporte."""
     del context
-    from mcp.server.auth.middleware.auth_context import get_access_token
+    from mcp.server.lowlevel.server import request_ctx
 
-    access_token = get_access_token()
-    return f"Bearer {access_token.token}" if access_token is not None else None
+    request = request_ctx.get().request
+    authorization = request.headers.get("authorization") if request is not None else None
+    parts = authorization.split(None, 1) if authorization else []
+    return f"Bearer {parts[1]}" if len(parts) == 2 else None
 
 
 def create_mcp_server(settings: Settings, service: McpPredictionServer) -> Any:
@@ -87,7 +62,6 @@ def create_mcp_server(settings: Settings, service: McpPredictionServer) -> Any:
 
     settings.validate_runtime()
     try:
-        from mcp.server.auth.settings import AuthSettings
         from mcp.server.fastmcp import Context, FastMCP
     except ImportError as exc:
         raise RuntimeError("instale a dependência 'mcp' para iniciar o serviço") from exc
@@ -96,16 +70,6 @@ def create_mcp_server(settings: Settings, service: McpPredictionServer) -> Any:
         "argos-mcp-prediction",
         host=settings.mcp_host,
         port=settings.mcp_port,
-        auth=AuthSettings(
-            issuer_url=settings.mcp_auth_issuer_url,
-            resource_server_url=settings.mcp_resource_server_url,
-            validate_token_resource=True,
-            required_scopes=["prediction:read"],
-        ),
-        token_verifier=StaticServiceTokenVerifier(
-            settings.internal_service_token,
-            settings.mcp_resource_server_url,
-        ),
     )
 
     @server.tool()
@@ -122,9 +86,15 @@ def create_mcp_server(settings: Settings, service: McpPredictionServer) -> Any:
             access_context=get_access_context(),
         )
 
+    server._argos_service_token = settings.internal_service_token
     return server
 
 
 def create_http_app(server: Any, delegation_verifier: DelegationTokenVerifier) -> Any:
     """Combina o app MCP com a delegação por requisição, como no MCP de dados."""
-    return DelegationContextMiddleware(server.streamable_http_app(), delegation_verifier)
+    from packages.security.mcp_bearer import McpBearerMiddleware
+
+    return McpBearerMiddleware(
+        DelegationContextMiddleware(server.streamable_http_app(), delegation_verifier),
+        server._argos_service_token,
+    )

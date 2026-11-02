@@ -171,6 +171,13 @@ def test_native_entrypoints_resolve_shared_and_application_code(service):
         assert env[f"{prefix}_HOST"] == "0.0.0.0"
 
 
+def test_a2a_launcher_does_not_select_a_document_source():
+    env = {"PORT": "12345"}
+    start.command("a2a_agent", env)
+    assert "A2A_DOCUMENT_SOURCE_ROOT" not in env
+    assert "A2A_DOCUMENT_CATALOG_NAME" not in env
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

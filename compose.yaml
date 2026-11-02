@@ -97,8 +97,16 @@ services:
             MAIN_API_ACCESS_TOKEN_AUDIENCE: ${MAIN_API_ACCESS_TOKEN_AUDIENCE:-argos-ai-service-api}
             MAIN_API_ACCESS_TOKEN_KEY_ID: ${MAIN_API_ACCESS_TOKEN_KEY_ID:-}
             MAIN_API_ACCESS_TOKEN_PRIVATE_KEY: ${MAIN_API_ACCESS_TOKEN_PRIVATE_KEY:-}
-            MAIN_API_ACCESS_TOKEN_TTL_SECONDS: ${MAIN_API_ACCESS_TOKEN_TTL_SECONDS:-300}
             MAIN_API_MODEL_MODE: ${ARGOS_MODEL_MODE:-simulated}
+            JEV_URL: ${JEV_URL:-}
+            JEV_MODEL: ${JEV_MODEL:-}
+            DECISIONS_URL: ${DECISIONS_URL:-}
+            DECISIONS_MODEL: ${DECISIONS_MODEL:-}
+            INPUT_RISK_THRESHOLD: ${INPUT_RISK_THRESHOLD:-0.8}
+            JEV_INPUT_COST_PER_MILLION_TOKENS: ${JEV_INPUT_COST_PER_MILLION_TOKENS:-}
+            JEV_OUTPUT_COST_PER_MILLION_TOKENS: ${JEV_OUTPUT_COST_PER_MILLION_TOKENS:-}
+            DECISIONS_INPUT_COST_PER_MILLION_TOKENS: ${DECISIONS_INPUT_COST_PER_MILLION_TOKENS:-}
+            DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS: ${DECISIONS_OUTPUT_COST_PER_MILLION_TOKENS:-}
             MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS:-}
             MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS: ${MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS:-}
             MODEL_FAST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_FAST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS:-}
@@ -108,17 +116,13 @@ services:
             MODEL_SPECIALIST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS: ${MODEL_SPECIALIST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS:-}
             MODEL_SPECIALIST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS: ${MODEL_SPECIALIST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS:-}
             OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+            OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
             OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
             OPENAI_MODEL_FAST: ${OPENAI_MODEL_FAST:-}
             OPENAI_MODEL_SPECIALIST: ${OPENAI_MODEL_SPECIALIST:-}
-            ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
             ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
             ANTHROPIC_MODEL_FAST_FALLBACK: ${ANTHROPIC_MODEL_FAST_FALLBACK:-}
             ANTHROPIC_MODEL_SPECIALIST_FALLBACK: ${ANTHROPIC_MODEL_SPECIALIST_FALLBACK:-}
-            MAIN_API_MODEL_TIMEOUT_SECONDS: ${MAIN_API_MODEL_TIMEOUT_SECONDS:-60}
-            MAIN_API_MODEL_MAX_RETRIES: ${MAIN_API_MODEL_MAX_RETRIES:-2}
-            MAIN_API_MODEL_MAX_OUTPUT_TOKENS: ${MAIN_API_MODEL_MAX_OUTPUT_TOKENS:-4096}
-            MAIN_API_EXECUTION_TIMEOUT_SECONDS: ${MAIN_API_EXECUTION_TIMEOUT_SECONDS:-300}
             MAIN_API_LANGSMITH_API_KEY: ${MAIN_API_LANGSMITH_API_KEY:-}
             MAIN_API_LANGSMITH_AGENT_ID: ${MAIN_API_LANGSMITH_AGENT_ID:-argos-ai-service}
             MAIN_API_LANGSMITH_AGENT_ENVIRONMENT: ${MAIN_API_LANGSMITH_AGENT_ENVIRONMENT:-}
@@ -137,7 +141,6 @@ services:
             MAIN_API_MCP_PREDICTION_URL: http://mcp_prediction:8000/mcp
             MAIN_API_MCP_EMAIL_URL: http://mcp_email:8000/mcp
             MAIN_API_DOCUMENT_A2A_URL: http://a2a_agent:8000/a2a
-            MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS: ${MAIN_API_DOCUMENT_A2A_TIMEOUT_SECONDS:-45}
         depends_on:
             mongo:
                 condition: service_healthy
@@ -190,7 +193,6 @@ services:
             MCP_DATA_REPORT_SIGNING_KEY_ID: ${REPORT_SIGNING_KEY_ID:-local-report-key}
             MCP_DATA_REPORT_SIGNING_PRIVATE_KEY: ${REPORT_SIGNING_PRIVATE_KEY:?run scripts/docker/create-local-env.py first}
             MCP_DATA_RESOURCE_SERVER_URL: http://mcp_data:8000/mcp
-            MCP_DATA_AUTH_ISSUER_URL: http://main_api:8000
             MCP_DATA_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
         depends_on:
             mongo_seed:
@@ -237,10 +239,8 @@ services:
             MCP_PREDICTION_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
             MCP_PREDICTION_INTERNAL_SERVICE_TOKEN: ${MCP_PREDICTION_INTERNAL_SERVICE_TOKEN:?run scripts/docker/create-local-env.py first}
             MCP_PREDICTION_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
-            MCP_PREDICTION_COVERAGE_RELATION: local_prediction_coverage
             MCP_PREDICTION_DATA_ORIGIN: synthetic
             MCP_PREDICTION_RESOURCE_SERVER_URL: http://mcp_prediction:8000/mcp
-            MCP_PREDICTION_AUTH_ISSUER_URL: http://main_api:8000
             MCP_PREDICTION_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
         depends_on:
             postgres:
@@ -271,8 +271,6 @@ services:
             MCP_EMAIL_SMTP_PASSWORD: ${MCP_EMAIL_SMTP_PASSWORD:-}
             MCP_EMAIL_SMTP_USE_TLS: "${MCP_EMAIL_SMTP_USE_TLS:-false}"
             MCP_EMAIL_NO_REPLY_ADDRESS: ${MCP_EMAIL_NO_REPLY_ADDRESS:-no-reply@argos.local}
-            MCP_EMAIL_RESOURCE_SERVER_URL: http://mcp_email:8000/mcp
-            MCP_EMAIL_AUTH_ISSUER_URL: http://main_api:8000
         depends_on:
             mongo:
                 condition: service_healthy
@@ -317,16 +315,13 @@ services:
             OPENAI_API_KEY: ${OPENAI_API_KEY:-}
             OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
             OPENAI_EMBEDDINGS_URL: ${OPENAI_EMBEDDINGS_URL:-}
-            VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+            OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
             VOYAGE_EMBEDDINGS_URL: ${VOYAGE_EMBEDDINGS_URL:-}
             VOYAGE_EMBEDDINGS_MODEL: ${VOYAGE_EMBEDDINGS_MODEL:-}
             OPENAI_MODEL_SPECIALIST: ${OPENAI_MODEL_SPECIALIST:-}
-            ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
             ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
             ANTHROPIC_MODEL_SPECIALIST_FALLBACK: ${ANTHROPIC_MODEL_SPECIALIST_FALLBACK:-}
             OPENAI_EMBEDDINGS_MODEL: ${OPENAI_EMBEDDINGS_MODEL:-}
-            A2A_MODEL_TIMEOUT_SECONDS: ${A2A_MODEL_TIMEOUT_SECONDS:-40}
-            A2A_MODEL_MAX_OUTPUT_TOKENS: ${A2A_MODEL_MAX_OUTPUT_TOKENS:-4096}
             A2A_LANGSMITH_API_KEY: ${A2A_LANGSMITH_API_KEY:-}
             A2A_LANGSMITH_AGENT_ID: ${A2A_LANGSMITH_AGENT_ID:-argos-ai-service}
             A2A_LANGSMITH_AGENT_ENVIRONMENT: ${A2A_LANGSMITH_AGENT_ENVIRONMENT:-}
@@ -338,7 +333,8 @@ services:
             A2A_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
             A2A_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
             A2A_PERMISSION_SQL_DSN: postgresql://argos_reader:${POSTGRES_READER_PASSWORD:-argos_reader_local_only}@postgres:5432/${POSTGRES_DB:-argos}
-            A2A_DOCUMENT_SOURCE_ROOT: /var/lib/argos/a2a/documents
+            A2A_DOCUMENT_SOURCE_ROOT: ${A2A_DOCUMENT_SOURCE_ROOT:?configure A2A_DOCUMENT_SOURCE_ROOT}
+            A2A_DOCUMENT_CATALOG_NAME: ${A2A_DOCUMENT_CATALOG_NAME:?configure A2A_DOCUMENT_CATALOG_NAME}
             A2A_MANIFEST_PATH: /var/lib/argos/a2a/state/manifest.json
         depends_on:
             postgres:
@@ -350,7 +346,7 @@ services:
         ports:
             - "127.0.0.1:${A2A_PUBLISHED_PORT:-8001}:8000"
         volumes:
-            - ./apps/a2a_agent/data/documents:/var/lib/argos/a2a/documents:ro
+            - ./apps/a2a_agent/data/documents:${A2A_DOCUMENT_SOURCE_ROOT:?configure A2A_DOCUMENT_SOURCE_ROOT}:ro
             - a2a-state:/var/lib/argos/a2a/state
         read_only: true
         tmpfs: ["/tmp:mode=1777,size=16m"]

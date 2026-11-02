@@ -179,18 +179,21 @@ def create_configured_models(
         "timeout": settings.model_timeout_seconds,
         "max_retries": settings.model_max_retries,
         "max_tokens": settings.model_max_output_tokens,
-        "reasoning_effort": "none",
+        "service_tier": "priority",
     }
     try:
-        model_instances: dict[str, Any] = {}
+        model_instances: dict[tuple[str, str], Any] = {}
         models = {}
         for policy, model_name in model_names.items():
-            if model_name not in model_instances:
-                model_instances[model_name] = chat_model_factory(
+            effort = "none" if policy == ModelPolicyId.FAST else "low"
+            key = (model_name, effort)
+            if key not in model_instances:
+                model_instances[key] = chat_model_factory(
                     model=model_name,
+                    reasoning_effort=effort,
                     **shared_options,
                 )
-            models[policy] = model_instances[model_name]
+            models[policy] = model_instances[key]
     except Exception as exc:
         raise ModelRuntimeConfigurationError(
             "não foi possível inicializar os modelos configurados"
@@ -224,20 +227,25 @@ def _attach_anthropic_fallbacks(
     shared_options: dict[str, Any] = {
         "api_key": settings.anthropic_api_key,
         "base_url": settings.anthropic_base_url,
+        "default_headers": {"Authorization": f"Bearer {settings.anthropic_api_key}"},
         "timeout": settings.model_timeout_seconds,
         "max_retries": settings.model_max_retries,
         "max_tokens": settings.model_max_output_tokens,
     }
-    model_instances: dict[str, Any] = {}
+    model_instances: dict[tuple[str, str], Any] = {}
     fallback_models: dict[ModelPolicyId, Any] = {}
     try:
         for policy, model_name in names.items():
-            if model_name not in model_instances:
-                model_instances[model_name] = ChatAnthropic(
+            thinking_type = "disabled" if policy == ModelPolicyId.FAST else "adaptive"
+            key = (model_name, thinking_type)
+            if key not in model_instances:
+                model_instances[key] = ChatAnthropic(
                     model=model_name,
+                    thinking={"type": thinking_type},
+                    output_config={"effort": "low"},
                     **shared_options,
                 )
-            fallback_models[policy] = model_instances[model_name]
+            fallback_models[policy] = model_instances[key]
     except Exception as exc:
         raise ModelRuntimeConfigurationError(
             "não foi possível inicializar os modelos Anthropic de fallback"

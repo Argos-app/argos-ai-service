@@ -2,21 +2,28 @@
 
 ### Modelos e prazo de execução
 
-No modo `provider`, informe em `.env` as URLs dos providers ou gateways
-escolhidos: `OPENAI_BASE_URL` e `ANTHROPIC_BASE_URL` definem as bases dos
-modelos de chat; `OPENAI_EMBEDDINGS_URL` e `VOYAGE_EMBEDDINGS_URL` definem os
-endpoints completos de embeddings. Não há fallback de URL no código; com
-providers reais, a aplicação exige as URLs adequadas ao protocolo de cada
-integração. Os nomes de modelos também devem ser preenchidos no ambiente; não há
-nomes padrão no runtime. A Main API usa `OPENAI_MODEL_FAST` para roteador,
-orquestrador, juiz e formatador, e `OPENAI_MODEL_SPECIALIST` para especialistas.
-O A2A usa `OPENAI_MODEL_SPECIALIST` para respostas documentais e
-`OPENAI_EMBEDDINGS_MODEL` para o índice principal do RAG. O fallback usa
-`VOYAGE_EMBEDDINGS_MODEL` e `VOYAGE_API_KEY`. O Qdrant mantém os vetores OpenAI
-e Voyage como vetores nomeados separados na mesma coleção. Saídas estruturadas
-são solicitadas por JSON Schema nativo.
+No modo `provider`, `.env` usa a API oficial da OpenAI em `OPENAI_BASE_URL` e
+`OPENAI_EMBEDDINGS_URL`; Anthropic, Voyage e Jev usam OpenRouter por meio da
+mesma `OPENROUTER_API_KEY`. `ANTHROPIC_BASE_URL` e `VOYAGE_EMBEDDINGS_URL`
+apontam para os endpoints Anthropic Messages e OpenRouter Embeddings. Os nomes
+dos modelos e os endpoints ficam configuráveis. A Main API usa
+`OPENAI_MODEL_FAST` para roteador, orquestrador, juiz e formatador, e
+`OPENAI_MODEL_SPECIALIST` para especialistas. O A2A usa
+`OPENAI_MODEL_SPECIALIST` para respostas documentais e `OPENAI_EMBEDDINGS_MODEL`
+para o índice principal do RAG. O fallback usa `VOYAGE_EMBEDDINGS_MODEL`. O
+Qdrant mantém os vetores OpenAI e Voyage como vetores nomeados separados na
+mesma coleção. Saídas estruturadas são solicitadas por JSON Schema nativo.
 
-Opcionalmente, `ANTHROPIC_API_KEY` habilita fallback de respostas: configure
+No modo `provider`, a Main API também avalia a entrada pelo Jev via OpenRouter,
+com Decisions da OpenAI como fallback. Configure `JEV_URL`, `JEV_MODEL`,
+`DECISIONS_URL` e `OPENAI_API_KEY` no `.env` da raiz; as URLs são endpoints
+completos e a chave `OPENROUTER_API_KEY` autentica JEV. Se ambos falharem ou
+estiverem sem configuração, a entrada é bloqueada por indisponibilidade. O modo
+`simulated` usa apenas o guardrail determinístico. Limiares, timeout e tarifas
+estão descritos no
+[fluxo de agentes](../../apps/main_api/docs/agent-workflow.md).
+
+Opcionalmente, `OPENROUTER_API_KEY` habilita fallback de respostas: configure
 `ANTHROPIC_MODEL_FAST_FALLBACK` para o papel rápido e
 `ANTHROPIC_MODEL_SPECIALIST_FALLBACK` para especialistas da Main API e respostas
 do A2A. O fallback ocorre em falhas transitórias da OpenAI; a Anthropic recebe a
@@ -30,23 +37,11 @@ negócio, portanto o endpoint escolhido deve suportar JSON Schema e a combinaç�
 com tools quando necessário. O bootstrap verifica as interfaces localmente, sem
 fazer uma chamada ao provider; valide a compatibilidade real em homologação.
 
-No Principal, o roteador, os especialistas e o formatador de perguntas pedem
-saída estruturada pela estratégia de chamada de ferramenta do LangGraph. O
-endpoint deve aceitar chamadas de ferramenta; para agentes que também têm
-ferramentas MCP/A2A, deve aceitar as duas classes de ferramentas na mesma
-chamada. O formatador não expõe ferramentas de negócio. O bootstrap verifica se
-o LangChain consegue vincular ferramentas localmente, mas não faz uma chamada ao
-provider; valide a compatibilidade real em homologação. Não passe o schema
-diretamente como `response_format` nesse endpoint sem verificar o perfil e o
-suporte à saída JSON Schema: a seleção nativa automática não troca para chamada
-de ferramenta quando uma requisição nativa falha.
-
-`MAIN_API_EXECUTION_TIMEOUT_SECONDS=300` define o prazo total de uma interação.
-O timeout de cada chamada, o orçamento de chamadas e a validade das preparações
-continuam sendo limites independentes. Aumentar o prazo não transforma uma falha
-em sucesso: o retorno permanece degradado quando a interpretação falha, mas
-preserva resultados externos verificados. Nenhuma ação de e-mail é repetida para
-reparar a saída do modelo.
+Os timeouts de execução e de dependências, o orçamento de chamadas e a validade
+das preparações são políticas fixas do código, não exigem variáveis no `.env`. O
+retorno permanece degradado quando a interpretação falha, mas preserva
+resultados externos verificados. Nenhuma ação de e-mail é repetida para reparar
+a saída do modelo.
 
 O Compose da raiz reúne MongoDB, PostgreSQL, Qdrant, Mailpit e os cinco serviços
 Argos. O perfil `apps` ativa os processos de aplicação. O setup usa dados
@@ -68,9 +63,14 @@ ignorado pelo Git. Ele contém senhas aleatórias para PostgreSQL e chaves Ed255
 para delegações MCP e assinatura de relatórios, além das opções centralizadas
 para modelos, SMTP e LangSmith. Configure todo o Compose integrado nesse único
 arquivo. As variáveis são encaminhadas apenas aos containers que as utilizam.
-Para recriá-lo, especifique `--force`; isso invalida as credenciais de uma pilha
-já iniciada. O arquivo `.env.example` da raiz serve como referência; prefira o
-script para gerar o `.env` com as credenciais internas.
+`A2A_DOCUMENT_SOURCE_ROOT` define o caminho absoluto da pasta de documentos no
+container e `A2A_DOCUMENT_CATALOG_NAME` define o catálogo. O Compose monta os
+documentos do repositório nesse caminho; eles incluem os termos do Argos e uma
+edição da LGPD com data de atualização. Para outra fonte, ajuste a origem da
+montagem em `compose.yaml`. Para recriá-lo, especifique `--force`; isso invalida
+as credenciais de uma pilha já iniciada. O arquivo `.env.example` da raiz serve
+como referência; prefira o script para gerar o `.env` com as credenciais
+internas.
 
 Para estimar custos quando o provider não retorna preço, configure tarifas em
 USD por milhão de tokens para os perfis `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,
@@ -116,19 +116,17 @@ executa.
 ## Banco PostgreSQL e dados sintéticos
 
 Em um volume PostgreSQL novo, a imagem executa, em ordem, os módulos
-`01_configuration.sql` até `09_data_mart.sql`, o `10_dataload_completo.sql` e o
-`11_prediction_coverage.sql`, `12_local_stub_access.sql`,
-`13_local_prediction_coverage_fixture.sql` e
+`01_configuration.sql` até `09_data_mart.sql`, o `10_dataload_completo.sql`,
+`12_local_stub_access.sql`, `13_local_prediction_fixture.sql` e
 `14_local_email_recipient_fixtures.sql` localizados em
 `infrastructure/docker/postgres/init/`. Os nove primeiros módulos vêm dos SQL
 separados de `argos-data-engineering`; o arquivo monolítico histórico
 `criacao_banco_completo.sql` não é usado. O módulo 10 carrega registros
-fictícios em todas as tabelas do schema. O módulo 11 expõe uma view de cobertura
-para testar a predição com essa base sintética. O módulo 13 preenche o histórico
-sintético exigido por essa cobertura; o módulo 14 cria os cinco contatos de
-teste do fluxo de e-mail, sem criar credenciais ou vínculos de acesso. O script
-99 cria o usuário `argos_reader` somente depois de schema, carga e view,
-concedendo leitura aos serviços.
+fictícios em todas as tabelas do schema. O módulo 13 completa o histórico
+sintético usado pela predição local; o módulo 14 cria os cinco contatos de teste
+do fluxo de e-mail, sem criar credenciais ou vínculos de acesso. O script 99
+cria o usuário `argos_reader` depois de schema e carga, concedendo leitura aos
+serviços.
 
 A carga destina-se a volume vazio. Ela não é executada de novo em um volume
 existente. Para apagar a base local e recriá-la do zero, pare a pilha e remova
@@ -187,6 +185,7 @@ Verifique o estado e os health checks:
 docker compose --profile apps ps
 Invoke-WebRequest http://localhost:8080/health/live
 Invoke-WebRequest http://localhost:8080/health/ready
+docker compose exec -T a2a_agent python -c 'import os,urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/health/ready",headers={"Authorization":"Bearer "+os.environ["A2A_INTERNAL_SERVICE_TOKEN"]}); print(urllib.request.urlopen(r,timeout=10).status)'
 ```
 
 `live` confirma que o processo da API está ativo. `ready` exige persistência,
@@ -247,6 +246,79 @@ substitui o workspace.
 Os `.env.example` dentro de cada aplicação continuam disponíveis somente como
 referência para execução individual fora do Compose. O Compose da raiz não lê
 esses arquivos.
+
+## Exercitar uma interação pela API
+
+Com a pilha pronta, `APP_ENV=local` e `AUTH_MODE=stub`, execute no PowerShell. O
+mesmo roteiro serve ao Kubernetes após o port-forward descrito no respectivo
+guia. Use uma mensagem nova por execução; preserve o mesmo `client_message_id`
+se precisar repetir um POST cuja resposta se perdeu.
+
+```powershell
+$api = "http://127.0.0.1:8080"
+$headers = @{ Authorization = "Bearer local-dev" }
+$session = Invoke-RestMethod -Method Post -Uri "$api/v1/sessions" -Headers $headers
+$sessionId = $session.session_id
+$body = @{
+    kind = "message"
+    client_message_id = [guid]::NewGuid().ToString()
+    message = "Quais fazendas tenho disponíveis?"
+} | ConvertTo-Json
+$accepted = Invoke-RestMethod -Method Post -Uri "$api/v1/sessions/$sessionId/interactions/async" -Headers $headers -ContentType "application/json" -Body $body
+$operationId = $accepted.operation_id
+$attempts = 0
+do {
+    Start-Sleep -Milliseconds ([Math]::Max(1000, [int]$accepted.poll_after_ms))
+    $operation = Invoke-RestMethod -Uri "$api/v1/sessions/$sessionId/interactions/$operationId" -Headers $headers
+    $operation.status
+    $attempts++
+} while ($operation.status -in @("accepted", "running") -and $attempts -lt 120)
+$operation | ConvertTo-Json -Depth 20
+Invoke-RestMethod -Uri "$api/v1/sessions/$sessionId/messages" -Headers $headers | ConvertTo-Json -Depth 20
+```
+
+`completed` ou `degraded` inclui `result.response`, que pode ser uma resposta ou
+uma pergunta estruturada; `failed` e `interrupted` não são resultados aprovados.
+Para responder a uma pergunta, use os IDs e o formato do
+[contrato HTTP](../../apps/main_api/docs/api-contract.md). Uma pergunta que
+depende de documentos ou dados deve usar fixtures adequadas ao ambiente.
+
+## Validar providers e fallbacks
+
+No `.env` da raiz, selecione `ARGOS_MODEL_MODE=provider`, preencha as chaves,
+URLs e modelos da OpenAI e do OpenRouter e configure as dimensões dos dois
+espaços vetoriais. Confira também `JEV_URL`, `JEV_MODEL`, `DECISIONS_URL` e
+`DECISIONS_MODEL`. A configuração de embeddings Voyage e a chave OpenRouter são
+exigidas pelo A2A em `provider`. Recrie os serviços e execute a interação acima.
+A prontidão não verifica uma chamada real aos modelos. A sincronização do corpus
+pode realizar chamadas de embedding e gerar custos mesmo antes da pergunta.
+
+Para confirmar as chamadas, consulte `ai_observations` e `ai_a2a_observations`
+por `interaction_id` ou `session_id`, incluindo operação, estado, provider e
+modelo; consulte o
+[guia de observabilidade](../../packages/observability/docs/operations.md). No
+Compose, por exemplo, consulte as chamadas recentes com:
+
+```powershell
+docker compose exec -T mongo mongosh argos_ai --quiet --eval 'db.ai_observations.find({provider:{$exists:true}},{session_id:1,interaction_id:1,operation_name:1,provider:1,model_requested:1,status:1}).sort({started_at:-1}).limit(10).forEach(printjson)'
+docker compose exec -T mongo mongosh argos_ai --quiet --eval 'db.ai_a2a_observations.find({provider:{$exists:true}},{session_id:1,interaction_id:1,operation_name:1,provider:1,model_requested:1,status:1}).sort({started_at:-1}).limit(10).forEach(printjson)'
+```
+
+Substitua `argos_ai` pelo valor de `MONGO_DATABASE` se tiver sido alterado. Com
+LangSmith configurado, examine também os traces do Agent e ambiente
+correspondentes. Ausência de observações não prova ausência de chamada: a
+gravação é de melhor esforço. Uma resposta concluída sem rastros verificáveis
+não confirma qual provider foi usado.
+
+Para testar fallback, use somente credenciais e endpoints de teste. Induza uma
+falha transitória controlada no provider primário da chamada que deseja avaliar,
+repita a interação e confira nos rastros a tentativa primária e a do fallback.
+Uma chave inválida pode gerar erro de autenticação e não necessariamente acionar
+fallback. Para JEV, verifique separadamente a tentativa Decisions; se ambos
+falharem, espere a mensagem de indisponibilidade. Testar embeddings também exige
+corpus indexado nos dois espaços; indisponibilizar o primário durante a
+indexação inicial pode impedir a preparação. Restaure a configuração e recrie os
+serviços ao terminar.
 
 ## Execução individual
 

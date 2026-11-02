@@ -150,9 +150,6 @@ class FakeIndexWriter:
         for item in chunks:
             generation[item.metadata.document_id] = item.metadata
 
-    async def remove_document(self, corpus_revision, document_id):
-        self.generations.setdefault(corpus_revision, {}).pop(document_id, None)
-
     async def copy_documents(self, source_revision, target_revision, documents):
         self.copied.append((source_revision, target_revision, dict(documents)))
         source = self.generations.get(source_revision, {})
