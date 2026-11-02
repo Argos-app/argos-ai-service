@@ -140,7 +140,7 @@ preenchidos com as URLs e credenciais dos provedores ou gateways escolhidos.
 - No A2A, configure `APP_ENV` também para o ambiente correto de observabilidade.
   Configure `A2A_DOCUMENT_SOURCE_ROOT` com o caminho absoluto de um corpus
   aprovado disponível no serviço e `A2A_DOCUMENT_CATALOG_NAME` com o nome do
-  catálogo. Os arquivos do repositório são sintéticos de demonstração. Por
+  catálogo. O corpus do repositório contém a LGPD e os termos do Argos. Por
   padrão o manifesto fica em `/tmp/argos-a2a/manifest.json`, é efêmero e pode
   ser reconstruído após reinícios. Para persistência, configure disco e
   sobrescreva `A2A_MANIFEST_PATH` com caminho absoluto.
