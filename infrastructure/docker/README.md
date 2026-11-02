@@ -65,11 +65,12 @@ para modelos, SMTP e LangSmith. Configure todo o Compose integrado nesse único
 arquivo. As variáveis são encaminhadas apenas aos containers que as utilizam.
 `A2A_DOCUMENT_SOURCE_ROOT` define o caminho absoluto da pasta de documentos no
 container e `A2A_DOCUMENT_CATALOG_NAME` define o catálogo. O Compose monta os
-documentos sintéticos do repositório nesse caminho; para outra fonte, ajuste a
-origem da montagem em `compose.yaml`. Para recriá-lo, especifique `--force`;
-isso invalida as credenciais de uma pilha já iniciada. O arquivo `.env.example`
-da raiz serve como referência; prefira o script para gerar o `.env` com as
-credenciais internas.
+documentos do repositório nesse caminho; eles incluem os termos do Argos e uma
+edição da LGPD com data de atualização. Para outra fonte, ajuste a origem da
+montagem em `compose.yaml`. Para recriá-lo, especifique `--force`; isso invalida
+as credenciais de uma pilha já iniciada. O arquivo `.env.example` da raiz serve
+como referência; prefira o script para gerar o `.env` com as credenciais
+internas.
 
 Para estimar custos quando o provider não retorna preço, configure tarifas em
 USD por milhão de tokens para os perfis `MODEL_FAST_*`, `MODEL_FAST_FALLBACK_*`,

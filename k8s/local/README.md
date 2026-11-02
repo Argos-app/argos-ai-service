@@ -81,8 +81,9 @@ O gerador cria chaves de delegação/assinatura e tokens internos aleatórios; o
 script de preparação valida as chaves requeridas e adapta a sintaxe das chaves
 JSON ao formato de env file do Kustomize. As variáveis
 `A2A_DOCUMENT_SOURCE_ROOT` e `A2A_DOCUMENT_CATALOG_NAME` também são copiadas
-para o Secret. O caminho padrão aponta para os PDFs sintéticos incluídos na
-imagem; outro caminho precisa estar disponível no container.
+para o Secret. O caminho padrão aponta para os PDFs incluídos na imagem: uma
+edição da LGPD e os termos do Argos. Outro caminho precisa estar disponível no
+container.
 
 O `.env` também é usado pelo Docker Compose e pode conter credenciais de
 providers reais; para Kubernetes local, mantenha `ARGOS_MODEL_MODE=simulated` e
@@ -275,10 +276,10 @@ arquivo de credenciais.
     kubectl -n argos-local rollout status deployment/a2a-agent --timeout=5m
     ```
 
-3. A imagem contém PDFs sintéticos. Para outro corpus, disponibilize os PDFs e o
-   catálogo no container e configure `A2A_DOCUMENT_SOURCE_ROOT` e
-   `A2A_DOCUMENT_CATALOG_NAME`; o manifesto usa o volume `a2a-state`. Execute o
-   roteiro HTTP e a
+3. A imagem contém uma edição da LGPD e os termos do Argos. Para outro corpus,
+   disponibilize os PDFs e o catálogo no container e configure
+   `A2A_DOCUMENT_SOURCE_ROOT` e `A2A_DOCUMENT_CATALOG_NAME`; o manifesto usa o
+   volume `a2a-state`. Execute o roteiro HTTP e a
    [validação de providers e fallbacks](../../infrastructure/docker/README.md#validar-providers-e-fallbacks).
    Sem decisão válida do JEV ou do Decisions, a entrada é bloqueada por
    indisponibilidade. A sincronização pode consumir embeddings.
