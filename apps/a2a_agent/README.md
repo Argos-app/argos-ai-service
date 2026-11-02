@@ -27,9 +27,10 @@ da raiz. Para executar o container separadamente, configure as dependências e
 variáveis de ambiente necessárias; o Qdrant exige credenciais de leitura e
 escrita.
 
-O corpus local padrão está em [`data/documents`](data/documents) e contém PDFs e
-metadados sintéticos para demonstração e homologação; eles não são leis nem
-contratos reais e não devem embasar orientação jurídica. Configure
+O corpus local padrão em [`data/documents`](data/documents) contém a edição do
+Senado da LGPD, atualizada até julho de 2026, e os termos de uso e privacidade
+do Argos, informados como vigentes a partir de 01/11/2026. A edição da lei deve
+ser conferida quanto a alterações posteriores. Configure
 `A2A_DOCUMENT_SOURCE_ROOT` com o diretório absoluto disponível ao processo e
 `A2A_DOCUMENT_CATALOG_NAME` com o nome do catálogo nesse diretório, junto aos
 arquivos PDF allowlisted. A origem cloud permanece fora desta entrega até a
