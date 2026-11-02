@@ -221,8 +221,8 @@ class OpenAICompatibleAnswerGenerator:
             response = await self._http.post_json(
                 {
                     "model": self._model,
-                    "reasoning_effort": "none",
-                    "temperature": 0,
+                    "reasoning_effort": "low",
+                    "service_tier": "priority",
                     "max_completion_tokens": self._max_output_tokens,
                     "response_format": _structured_response_format(),
                     "messages": [
@@ -328,8 +328,12 @@ class ProviderFallbackAnswerGenerator:
                 json={
                     "model": self._model,
                     "max_tokens": self._max_output_tokens,
+                    "thinking": {"type": "adaptive"},
                     "system": system,
-                    "output_config": {"format": {"type": "json_schema", "schema": _ANSWER_SCHEMA}},
+                    "output_config": {
+                        "effort": "low",
+                        "format": {"type": "json_schema", "schema": _ANSWER_SCHEMA},
+                    },
                     "messages": [
                         {
                             "role": "user",

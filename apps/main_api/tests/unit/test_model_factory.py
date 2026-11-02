@@ -591,7 +591,10 @@ def test_factory_builds_fast_and_specialist_models_only():
     assert calls[0]["api_key"] == "test-secret"
     assert all(call["max_retries"] == 2 for call in calls)
     assert all(call["max_tokens"] == 4096 for call in calls)
-    assert all(call["reasoning_effort"] == "none" for call in calls)
+    assert {call["model"]: call["reasoning_effort"] for call in calls} == {
+        "fast-test": "none",
+        "specialist-test": "low",
+    }
     assert all(call["base_url"] == "https://openai.example/v1" for call in calls)
     assert all("extra_body" not in call for call in calls)
 
@@ -661,7 +664,7 @@ def test_provider_base_urls_are_validated():
         Settings(anthropic_base_url="https://user:password@provider.example")
 
 
-def test_factory_reuses_instance_when_both_roles_share_a_model_name():
+def test_factory_separates_profiles_when_both_roles_share_a_model_name():
     calls = []
 
     def factory(**options):
@@ -680,8 +683,8 @@ def test_factory_reuses_instance_when_both_roles_share_a_model_name():
 
     assert reason is None
     assert models is not None
-    assert models[ModelPolicyId.FAST] is models[ModelPolicyId.SPECIALIST]
-    assert len(calls) == 1
+    assert models[ModelPolicyId.FAST] is not models[ModelPolicyId.SPECIALIST]
+    assert len(calls) == 2
 
 
 def test_fast_and_specialist_model_names_are_loaded_from_environment(monkeypatch):
