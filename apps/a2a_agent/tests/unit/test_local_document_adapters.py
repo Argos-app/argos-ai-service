@@ -48,7 +48,7 @@ def test_local_source_lists_and_reads_only_global_laws_and_terms() -> None:
     assert len(listing.documents) == 2
     by_type = {item.document_type: item for item in listing.documents}
     assert set(by_type) == {DocumentType.LAW, DocumentType.TERMS_CONDITIONS}
-    assert by_type[DocumentType.LAW].document_date == date(2025, 1, 15)
+    assert by_type[DocumentType.LAW].document_date == date(2018, 8, 14)
     assert by_type[DocumentType.LAW].jurisdiction == "BR"
     assert by_type[DocumentType.TERMS_CONDITIONS].jurisdiction is None
     for item in listing.documents:
@@ -60,7 +60,7 @@ def test_local_source_lists_and_reads_only_global_laws_and_terms() -> None:
 def test_local_source_reads_pdf_and_does_not_mutate_fixture_files() -> None:
     before = {path.name: path.read_bytes() for path in FIXTURES.iterdir() if path.is_file()}
     source = LocalDocumentSource(FIXTURES)
-    document_id = UUID("11111111-1111-4111-8111-111111111111")
+    document_id = UUID("f532385b-559f-43cb-b4b6-35ce62a8a46c")
 
     source_document = run_immediate(source.read_pdf(document_id))
 
@@ -71,7 +71,7 @@ def test_local_source_reads_pdf_and_does_not_mutate_fixture_files() -> None:
     assert run_immediate(source.read_pdf(uuid4())) is None
 
 
-def test_bundled_demo_pdfs_are_extractable_and_disclaim_real_legal_authority() -> None:
+def test_bundled_law_and_terms_pdfs_are_extractable() -> None:
     source = LocalDocumentSource(FIXTURES)
     parser = PyPdfParser()
     documents = run_immediate(source.list_documents()).documents
@@ -84,9 +84,8 @@ def test_bundled_demo_pdfs_are_extractable_and_disclaim_real_legal_authority() -
     normalized_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     normalized_text = normalized_text.upper()
 
-    assert "SINTETICO" in normalized_text
-    assert "NAO E LEGISLACAO REAL" in normalized_text
-    assert "NAO E CONTRATO REAL" in normalized_text
+    assert "LEI GERAL DE PROTECAO DE DADOS PESSOAIS" in normalized_text
+    assert "TERMOS DE USO E PRIVACIDADE DO ARGOS" in normalized_text
 
 
 @pytest.mark.parametrize(
