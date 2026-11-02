@@ -31,7 +31,7 @@ pytestmark = [
 ]
 
 ROOT = Path(__file__).resolve().parents[4]
-FIXTURES = ROOT / "apps/a2a_agent/data/documents"
+FIXTURES = ROOT / "apps/a2a_agent/tests/integration/fixtures/documents"
 QDRANT_URL = os.getenv("A2A_TEST_QDRANT_URL", "http://127.0.0.1:6338")
 WRITE_KEY = os.getenv("A2A_TEST_QDRANT_WRITE_KEY", "a2a-integration-write-key")
 READ_KEY = os.getenv("A2A_TEST_QDRANT_READ_KEY", "a2a-integration-read-key")
@@ -216,10 +216,12 @@ async def test_metadata_revision_reuses_vectors_and_alias_hides_previous_revisio
     assert updated.corpus_revision != first.corpus_revision
     assert len(harness.embeddings.calls) == embedding_call_count
     assert await harness.reader.count(query_filter=previous_filter) == 0
-    current = await harness.reader.query_points(
-        (1.0, 0.2, 0.1), query_filter=_revision_filter(updated.corpus_revision), limit=20
+    assert await harness.reader.count(query_filter=_revision_filter(updated.corpus_revision)) == (
+        previous_count
     )
-    assert len(current) == previous_count
+    current = await harness.reader.query_points(
+        (1.0, 0.2, 0.1), query_filter=_revision_filter(updated.corpus_revision, "law"), limit=20
+    )
     assert any(
         point["payload"]["title"] == "Título atualizado apenas para homologação"
         for point in current
