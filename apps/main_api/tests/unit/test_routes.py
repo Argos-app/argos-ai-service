@@ -43,9 +43,12 @@ def _fake_models():
     return {policy: _FakeChatModel() for policy in ModelPolicyId}
 
 
-def test_health_and_readiness() -> None:
+def test_health_and_readiness(caplog) -> None:
     assert client.get("/health/live").json() == {"status": "ok"}
-    assert client.get("/health/ready").status_code == 503
+    response = client.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json()["reason"] == "session_store_not_configured"
+    assert "Main API não está pronta: session_store_not_configured" in caplog.text
 
 
 def test_application_errors_keep_the_public_http_error_shape() -> None:
