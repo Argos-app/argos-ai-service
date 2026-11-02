@@ -11,7 +11,6 @@ from packages.contracts import DataOrigin
 class Settings:
     sql_dsn: str | None = field(default=None, repr=False)
     internal_service_token: str | None = field(default=None, repr=False)
-    mcp_auth_issuer_url: str | None = None
     mcp_resource_server_url: str | None = None
     delegation_issuer: str | None = None
     trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
@@ -51,7 +50,6 @@ class Settings:
         return cls(
             sql_dsn=os.getenv("MCP_PREDICTION_SQL_DSN"),
             internal_service_token=os.getenv("MCP_PREDICTION_INTERNAL_SERVICE_TOKEN"),
-            mcp_auth_issuer_url=os.getenv("MCP_PREDICTION_AUTH_ISSUER_URL"),
             mcp_resource_server_url=os.getenv("MCP_PREDICTION_RESOURCE_SERVER_URL"),
             delegation_issuer=os.getenv("MCP_PREDICTION_DELEGATION_ISSUER"),
             trusted_delegation_keys=tuple(delegation_keys.items()),
@@ -66,7 +64,6 @@ class Settings:
             "MCP_PREDICTION_DELEGATION_ISSUER": self.delegation_issuer,
             "MCP_PREDICTION_SQL_DSN": self.sql_dsn,
             "MCP_PREDICTION_INTERNAL_SERVICE_TOKEN": self.internal_service_token,
-            "MCP_PREDICTION_AUTH_ISSUER_URL": self.mcp_auth_issuer_url,
             "MCP_PREDICTION_RESOURCE_SERVER_URL": self.mcp_resource_server_url,
         }
         missing = [name for name, value in required.items() if not value or not value.strip()]

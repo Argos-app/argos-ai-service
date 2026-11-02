@@ -193,7 +193,6 @@ services:
             MCP_DATA_REPORT_SIGNING_KEY_ID: ${REPORT_SIGNING_KEY_ID:-local-report-key}
             MCP_DATA_REPORT_SIGNING_PRIVATE_KEY: ${REPORT_SIGNING_PRIVATE_KEY:?run scripts/docker/create-local-env.py first}
             MCP_DATA_RESOURCE_SERVER_URL: http://mcp_data:8000/mcp
-            MCP_DATA_AUTH_ISSUER_URL: http://main_api:8000
             MCP_DATA_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
         depends_on:
             mongo_seed:
@@ -242,7 +241,6 @@ services:
             MCP_PREDICTION_TRUSTED_DELEGATION_KEYS: ${MCP_DELEGATION_PUBLIC_KEYS:?run scripts/docker/create-local-env.py first}
             MCP_PREDICTION_DATA_ORIGIN: synthetic
             MCP_PREDICTION_RESOURCE_SERVER_URL: http://mcp_prediction:8000/mcp
-            MCP_PREDICTION_AUTH_ISSUER_URL: http://main_api:8000
             MCP_PREDICTION_DELEGATION_ISSUER: ${MCP_DELEGATION_ISSUER:-argos-main-service}
         depends_on:
             postgres:
@@ -273,8 +271,6 @@ services:
             MCP_EMAIL_SMTP_PASSWORD: ${MCP_EMAIL_SMTP_PASSWORD:-}
             MCP_EMAIL_SMTP_USE_TLS: "${MCP_EMAIL_SMTP_USE_TLS:-false}"
             MCP_EMAIL_NO_REPLY_ADDRESS: ${MCP_EMAIL_NO_REPLY_ADDRESS:-no-reply@argos.local}
-            MCP_EMAIL_RESOURCE_SERVER_URL: http://mcp_email:8000/mcp
-            MCP_EMAIL_AUTH_ISSUER_URL: http://main_api:8000
         depends_on:
             mongo:
                 condition: service_healthy

@@ -21,7 +21,6 @@ def configured_settings(delegation_key):
     return Settings(
         sql_dsn="postgresql://readonly@localhost/prediction_test",
         internal_service_token="prediction-test-token",
-        mcp_auth_issuer_url="http://127.0.0.1:8000",
         mcp_resource_server_url="http://127.0.0.1:8000/mcp",
         delegation_issuer="argos-main-service",
         trusted_delegation_keys=(

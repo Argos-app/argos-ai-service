@@ -19,7 +19,6 @@ O processo encerra com erro se qualquer variável obrigatória estiver ausente:
 | `MCP_DATA_MONGO_RELATIONAL_ID_FORMAT` | Representação do UUID relacional no Mongo: `string` ou `uuid_standard`.      |
 | `MCP_DATA_MONGO_MEDICINE_ID_FORMAT`   | Representação de `relational_medicine_id`: `string` ou `uuid_standard`.      |
 | `MCP_DATA_INTERNAL_SERVICE_TOKEN`     | Token interno de serviço aceito pelo verificador MCP.                        |
-| `MCP_DATA_AUTH_ISSUER_URL`            | Emissor OAuth configurado no transporte MCP.                                 |
 | `MCP_DATA_RESOURCE_SERVER_URL`        | URL deste resource server, incluindo `/mcp`.                                 |
 | `MCP_DATA_DELEGATION_ISSUER`          | Valor `iss` esperado nos tokens de delegação do serviço principal.           |
 | `MCP_DATA_TRUSTED_DELEGATION_KEYS`    | JSON `kid` → chave pública Ed25519 em Base64 do serviço principal.           |

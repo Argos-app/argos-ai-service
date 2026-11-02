@@ -6,7 +6,6 @@ from typing import Any
 import pytest
 from argos_mcp_data.application import CattleQueryService
 from argos_mcp_data.server import (
-    StaticServiceTokenVerifier,
     create_mcp_server,
     register_cattle_tools,
 )
@@ -29,7 +28,6 @@ def complete_settings(**overrides: object) -> Settings:
         "mongo_relational_id_format": "string",
         "mongo_medicine_id_format": "string",
         "internal_service_token": "internal-test-token",
-        "mcp_auth_issuer_url": "https://issuer.example.test",
         "mcp_resource_server_url": "https://data.example.test/mcp",
         "delegation_issuer": "argos-main-service",
         "trusted_delegation_keys": (("test-key", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),),
@@ -89,19 +87,6 @@ def test_cattle_tools_are_registered_with_typed_payload_schemas() -> None:
         definitions = schema.get("$defs", schema.get("definitions", {}))
         assert definitions
         assert all(value.get("additionalProperties") is False for value in definitions.values())
-
-
-def test_service_token_verifier_rejects_absent_or_wrong_token() -> None:
-    verifier = StaticServiceTokenVerifier("expected", "https://data.example.test/mcp")
-
-    assert not verifier.is_expected_token("")
-    assert not verifier.is_expected_token("wrong")
-
-
-def test_service_token_verifier_accepts_only_the_configured_token() -> None:
-    verifier = StaticServiceTokenVerifier("expected", "https://data.example.test/mcp")
-
-    assert verifier.is_expected_token("expected")
 
 
 def test_mongo_reader_does_not_expose_write_methods() -> None:

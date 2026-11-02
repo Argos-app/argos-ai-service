@@ -18,7 +18,6 @@ class Settings:
     mongo_medicine_collection: str = "medicine_documents"
     mongo_medicine_id_format: str | None = None
     internal_service_token: str | None = None
-    mcp_auth_issuer_url: str | None = None
     mcp_resource_server_url: str | None = None
     delegation_issuer: str | None = None
     trusted_delegation_keys: tuple[tuple[str, str], ...] = ()
@@ -60,7 +59,6 @@ class Settings:
             mongo_relational_id_format=os.getenv("MCP_DATA_MONGO_RELATIONAL_ID_FORMAT"),
             mongo_medicine_id_format=os.getenv("MCP_DATA_MONGO_MEDICINE_ID_FORMAT"),
             internal_service_token=os.getenv("MCP_DATA_INTERNAL_SERVICE_TOKEN"),
-            mcp_auth_issuer_url=os.getenv("MCP_DATA_AUTH_ISSUER_URL"),
             mcp_resource_server_url=os.getenv("MCP_DATA_RESOURCE_SERVER_URL"),
             delegation_issuer=os.getenv("MCP_DATA_DELEGATION_ISSUER"),
             trusted_delegation_keys=tuple(delegation_keys.items()),
@@ -79,7 +77,6 @@ class Settings:
             "MCP_DATA_MONGO_RELATIONAL_ID_FORMAT": self.mongo_relational_id_format,
             "MCP_DATA_MONGO_MEDICINE_ID_FORMAT": self.mongo_medicine_id_format,
             "MCP_DATA_INTERNAL_SERVICE_TOKEN": self.internal_service_token,
-            "MCP_DATA_AUTH_ISSUER_URL": self.mcp_auth_issuer_url,
             "MCP_DATA_RESOURCE_SERVER_URL": self.mcp_resource_server_url,
             "MCP_DATA_DELEGATION_ISSUER": self.delegation_issuer,
         }

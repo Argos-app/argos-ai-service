@@ -14,7 +14,6 @@ from packages.contracts import DataOrigin
         ("delegation_issuer", "MCP_PREDICTION_DELEGATION_ISSUER"),
         ("sql_dsn", "MCP_PREDICTION_SQL_DSN"),
         ("internal_service_token", "MCP_PREDICTION_INTERNAL_SERVICE_TOKEN"),
-        ("mcp_auth_issuer_url", "MCP_PREDICTION_AUTH_ISSUER_URL"),
         ("mcp_resource_server_url", "MCP_PREDICTION_RESOURCE_SERVER_URL"),
     ],
 )
@@ -50,7 +49,6 @@ def test_secrets_are_not_in_settings_representation(configured_settings):
 def test_configuration_reads_only_prediction_environment(monkeypatch):
     monkeypatch.setenv("MCP_PREDICTION_SQL_DSN", "postgresql://readonly@localhost/test")
     monkeypatch.setenv("MCP_PREDICTION_INTERNAL_SERVICE_TOKEN", "own-token")
-    monkeypatch.setenv("MCP_PREDICTION_AUTH_ISSUER_URL", "https://issuer.example.test")
     monkeypatch.setenv("MCP_PREDICTION_RESOURCE_SERVER_URL", "https://prediction.example.test/mcp")
     monkeypatch.setenv("MCP_PREDICTION_PORT", "8102")
     monkeypatch.setenv("MCP_PREDICTION_SQL_TIMEOUT_SECONDS", "7")

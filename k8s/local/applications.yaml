@@ -378,7 +378,6 @@ spec:
                                 },
                         }
                       - { name: MCP_DATA_RESOURCE_SERVER_URL, value: "http://mcp-data:8000/mcp" }
-                      - { name: MCP_DATA_AUTH_ISSUER_URL, value: "http://main-api:8000" }
                       - {
                             name: MCP_DATA_DELEGATION_ISSUER,
                             valueFrom:
@@ -489,7 +488,6 @@ spec:
                             name: MCP_PREDICTION_RESOURCE_SERVER_URL,
                             value: "http://mcp-prediction:8000/mcp",
                         }
-                      - { name: MCP_PREDICTION_AUTH_ISSUER_URL, value: "http://main-api:8000" }
                       - {
                             name: MCP_PREDICTION_DELEGATION_ISSUER,
                             valueFrom:
@@ -614,8 +612,6 @@ spec:
                       - { name: MCP_EMAIL_SMTP_HOST, value: mailpit }
                       - { name: MCP_EMAIL_SMTP_PORT, value: "1025" }
                       - { name: MCP_EMAIL_SMTP_USE_TLS, value: "false" }
-                      - { name: MCP_EMAIL_RESOURCE_SERVER_URL, value: "http://mcp-email:8000/mcp" }
-                      - { name: MCP_EMAIL_AUTH_ISSUER_URL, value: "http://main-api:8000" }
                   startupProbe:
                       tcpSocket: { port: http }
                       periodSeconds: 5

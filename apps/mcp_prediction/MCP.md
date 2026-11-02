@@ -95,7 +95,6 @@ automaticamente. Configure os valores fora do repositório:
 | --------------------------------------------- | -------------------------------------------------------- |
 | `MCP_PREDICTION_SQL_DSN`                      | DSN PostgreSQL com credencial somente leitura.           |
 | `MCP_PREDICTION_INTERNAL_SERVICE_TOKEN`       | Bearer interno compartilhado com o chamador autorizado.  |
-| `MCP_PREDICTION_AUTH_ISSUER_URL`              | Emissor configurado no provedor de autenticação MCP.     |
 | `MCP_PREDICTION_RESOURCE_SERVER_URL`          | URL pública do recurso, normalmente terminada em `/mcp`. |
 | `MCP_PREDICTION_DELEGATION_ISSUER`            | Emissor confiável da delegação do usuário.               |
 | `MCP_PREDICTION_TRUSTED_DELEGATION_KEYS`      | Objeto JSON `key_id: chave pública Ed25519 Base64`.      |

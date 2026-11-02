@@ -18,8 +18,6 @@ class Settings:
     sql_dsn: str | None = None
     trusted_signature_keys: tuple[tuple[str, str], ...] = ()
     internal_service_token: str | None = None
-    mcp_auth_issuer_url: str | None = None
-    mcp_resource_server_url: str | None = None
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
     no_reply_address: str = "no-reply@argos.local"
@@ -59,8 +57,6 @@ class Settings:
             sql_dsn=os.getenv("MCP_EMAIL_SQL_DSN"),
             trusted_signature_keys=tuple(trusted_keys.items()),
             internal_service_token=os.getenv("MCP_EMAIL_INTERNAL_SERVICE_TOKEN"),
-            mcp_auth_issuer_url=os.getenv("MCP_EMAIL_AUTH_ISSUER_URL"),
-            mcp_resource_server_url=os.getenv("MCP_EMAIL_RESOURCE_SERVER_URL"),
             mcp_host=os.getenv("MCP_EMAIL_HOST", "0.0.0.0"),
             mcp_port=int(os.getenv("MCP_EMAIL_PORT", "8000")),
             no_reply_address=os.getenv("MCP_EMAIL_NO_REPLY_ADDRESS", "no-reply@argos.local"),
