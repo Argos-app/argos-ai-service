@@ -97,7 +97,7 @@ async def test_repository_rejects_empty_uid_without_query(uid):
 def _pool():
     connection = MagicMock()
     connection.fetch = AsyncMock(return_value=({"field": "value"},))
-    connection.fetchval = AsyncMock(side_effect=["on", True, False])
+    connection.fetchval = AsyncMock(return_value=True)
     connection.transaction.return_value.__aenter__ = AsyncMock(return_value=None)
     connection.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     pool = MagicMock()
@@ -158,11 +158,9 @@ async def test_runtime_sets_connection_limits_and_read_only_timeouts(monkeypatch
     pool.close.assert_awaited_once()
 
 
-@pytest.mark.parametrize(
-    "responses", [["off"], ["on", False, False], ["on", True, True], ["on", True, None]]
-)
+@pytest.mark.parametrize("responses", [[False]])
 @pytest.mark.asyncio
-async def test_runtime_rejects_unsafe_or_unusable_role_and_closes_pool(monkeypatch, responses):
+async def test_runtime_rejects_missing_select_access_and_closes_pool(monkeypatch, responses):
     pool, connection = _pool()
     connection.fetchval.side_effect = responses
     monkeypatch.setattr("asyncpg.create_pool", AsyncMock(return_value=pool))

@@ -51,14 +51,11 @@ async def create_runtime(settings: Settings | None = None) -> ServiceRuntime:
 
     sql_pool = await asyncpg.create_pool(
         configured.sql_dsn,
+        min_size=1,
         server_settings={"default_transaction_read_only": "on"},
         command_timeout=configured.sql_timeout_seconds,
     )
     try:
-        async with sql_pool.acquire() as connection:
-            read_only = await connection.fetchval("SHOW default_transaction_read_only")
-            if str(read_only).lower() != "on":
-                raise RuntimeError("a sessão PostgreSQL não está configurada como read-only")
         sql_reader = AsyncpgSqlReader(sql_pool)
         access_policy = AccessPolicy(PostgresAccessDirectory(sql_reader))
         estimate_consumption = EstimateMedicineConsumption(

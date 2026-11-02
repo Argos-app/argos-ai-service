@@ -59,8 +59,8 @@ os códigos de papel recebem o mesmo acesso documental: a consulta verifica que 
 usuário e seu registro de permissão estão ativos e que não há bloqueio vigente,
 sem filtrar pelo código — inclusive para `SISTEMA`. A operação ainda exige
 delegação assinada, válida e autorizada para `documents.read`. A conexão usa
-transações read-only; configure um usuário de banco com privilégio somente de
-leitura. A credencial de banco não é compartilhada com os clientes Qdrant.
+transações read-only; recomenda-se usar uma credencial de banco com privilégio
+somente de leitura. A credencial não é compartilhada com os clientes Qdrant.
 
 Embeddings recebem texto extraído dos PDFs; o gerador recebe a pergunta e os
 trechos recuperados. Use endpoints aprovados para esses dados e injete chaves,
