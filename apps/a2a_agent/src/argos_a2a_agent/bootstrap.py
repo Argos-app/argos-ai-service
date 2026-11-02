@@ -151,7 +151,13 @@ async def _close_resources(resources: list[Any]) -> None:
         if id(resource) in seen:
             continue
         seen.add(id(resource))
-        close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
+        close = None
+        for name in ("aclose", "close"):
+            if inspect.getattr_static(resource, name, None) is not None:
+                candidate = getattr(resource, name)
+                if callable(candidate):
+                    close = candidate
+                    break
         if not callable(close):
             continue
         try:
@@ -185,11 +191,6 @@ async def create_runtime_dependencies(
     )
     provider_resources: list[Any] = []
     try:
-        async with pool.acquire() as connection:
-            read_only = await connection.fetchval("SHOW default_transaction_read_only")
-        if str(read_only).lower() != "on":
-            raise RuntimeError("a conexão de autorização PostgreSQL não está somente leitura")
-
         permission_directory = PostgresDocumentPermissionDirectory(
             pool,
             observation_collector=observation_collector,

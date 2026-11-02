@@ -30,10 +30,11 @@ async def test_runtime_opens_read_only_pool_and_registers_prediction_tool(
 
     create_pool.assert_awaited_once_with(
         configured_settings.sql_dsn,
+        min_size=1,
         server_settings={"default_transaction_read_only": "on"},
         command_timeout=configured_settings.sql_timeout_seconds,
     )
-    connection.fetchval.assert_awaited_once_with("SHOW default_transaction_read_only")
+    connection.fetchval.assert_not_awaited()
     tools = await runtime.server.list_tools()
     assert [tool.name for tool in tools] == ["estimate_medicine_consumption"]
     pool.close.assert_not_awaited()
@@ -46,20 +47,9 @@ async def test_initialization_failure_closes_pool(
     monkeypatch, configured_settings, sql_pool, failure
 ):
     pool, connection = sql_pool
-    connection.fetchval.side_effect = failure
+    monkeypatch.setattr(bootstrap, "create_mcp_server", MagicMock(side_effect=failure))
     monkeypatch.setattr(asyncpg, "create_pool", AsyncMock(return_value=pool))
     with pytest.raises(type(failure)):
-        await bootstrap.create_runtime(configured_settings)
-    pool.close.assert_awaited_once()
-
-
-async def test_runtime_rejects_writable_session_and_closes_pool(
-    monkeypatch, configured_settings, sql_pool
-):
-    pool, connection = sql_pool
-    connection.fetchval.return_value = "off"
-    monkeypatch.setattr(asyncpg, "create_pool", AsyncMock(return_value=pool))
-    with pytest.raises(RuntimeError, match="read-only"):
         await bootstrap.create_runtime(configured_settings)
     pool.close.assert_awaited_once()
 

@@ -2,9 +2,31 @@
 
 from pathlib import Path
 
+import pytest
+from argos_a2a_agent.bootstrap import _close_resources
 from argos_a2a_agent.server import create_a2a_server
 from argos_a2a_agent.settings import Settings
 from starlette.testclient import TestClient
+
+
+@pytest.mark.asyncio
+async def test_cleanup_closes_resources_with_dynamic_attributes():
+    class DynamicResource:
+        closed = False
+
+        def __getattr__(self, name):
+            class NoTruthValue:
+                def __bool__(self):
+                    raise NotImplementedError
+
+            return NoTruthValue()
+
+        def close(self):
+            self.closed = True
+
+    resource = DynamicResource()
+    await _close_resources([resource])
+    assert resource.closed
 
 
 def test_readiness_is_unavailable_without_a_configured_agent_registry():

@@ -113,7 +113,7 @@ async def create_runtime(
 
     mongo_client = AsyncIOMotorClient(configured.mongo_uri, tz_aware=True)
     try:
-        sql_pool = await asyncpg.create_pool(configured.sql_dsn)
+        sql_pool = await asyncpg.create_pool(configured.sql_dsn, min_size=1)
     except Exception:
         mongo_client.close()
         raise

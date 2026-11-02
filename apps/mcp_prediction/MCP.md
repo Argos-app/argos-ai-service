@@ -93,7 +93,7 @@ automaticamente. Configure os valores fora do repositório:
 
 | Variável                                      | Uso                                                      |
 | --------------------------------------------- | -------------------------------------------------------- |
-| `MCP_PREDICTION_SQL_DSN`                      | DSN PostgreSQL com credencial somente leitura.           |
+| `MCP_PREDICTION_SQL_DSN`                      | DSN PostgreSQL com acesso de leitura às tabelas usadas.  |
 | `MCP_PREDICTION_INTERNAL_SERVICE_TOKEN`       | Bearer interno compartilhado com o chamador autorizado.  |
 | `MCP_PREDICTION_RESOURCE_SERVER_URL`          | URL pública do recurso, normalmente terminada em `/mcp`. |
 | `MCP_PREDICTION_DELEGATION_ISSUER`            | Emissor confiável da delegação do usuário.               |

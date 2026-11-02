@@ -40,9 +40,9 @@ Token ausente ou inválido retorna 401; cadastro sem autorização retorna 403;
 falha da verificação Firebase ou do PostgreSQL retorna 503. Não aceite usuário,
 permissões ou fazendas fornecidos pela mensagem como autoridade.
 
-O PostgreSQL é consultado por uma credencial read-only configurada por
-`MAIN_API_AUTH_DATABASE_URL`. O Firebase usa `MAIN_API_FIREBASE_PROJECT_ID` e
-Application Default Credentials ou `MAIN_API_FIREBASE_CREDENTIALS_FILE`. O JWT
+O PostgreSQL é consultado em transações de leitura com a credencial configurada
+por `MAIN_API_AUTH_DATABASE_URL`. O Firebase usa `MAIN_API_FIREBASE_PROJECT_ID`
+e Application Default Credentials ou `MAIN_API_FIREBASE_CREDENTIALS_FILE`. O JWT
 próprio requer chave privada Ed25519 e ID de chave do serviço; suas variáveis
 estão no [.env.example](../.env.example). `AUTH_MODE=stub` só é permitido com
 `APP_ENV=local`.
