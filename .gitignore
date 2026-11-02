@@ -81,6 +81,8 @@ Thumbs.db
 *.swo
 *.bak
 *.tmp
+tmp/
+scripts/render/deployment-setup.md
 
 # ─────────────────────────────────────────────
 # Misc
