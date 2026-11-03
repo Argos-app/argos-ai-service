@@ -13,4 +13,5 @@ nos custos exigem revisão dos dois consumidores, consultas e documentação.
 Execute testes do pacote e dos serviços afetados; veja [README.md](README.md). O
 [guia de operação](docs/operations.md) descreve correlação, custos e uso Redis;
 o [guia de extração](docs/mongodb-extraction.md) documenta a leitura incremental
-das observações Mongo.
+das observações Mongo e o [guia Redis](docs/redis.md) descreve as chaves e o
+ranking de uso.

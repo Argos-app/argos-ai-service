@@ -54,11 +54,6 @@ def validate_service(service: dict, branch: str) -> None:
         )
     if service.get("rootDir", "") not in {"", "."}:
         raise ValueError("O diretório raiz do Render deve estar vazio para incluir packages/.")
-    if service.get("autoDeployTrigger", "off") != "off" or service.get("autoDeploy", "no") != "no":
-        raise ValueError(
-            "Desative a implantação automática do Render; "
-            "o GitHub Actions controla as implantações."
-        )
 
 
 def deploy(service_id: str, token: str, sha: str, branch: str, timeout: int = 1200) -> str:

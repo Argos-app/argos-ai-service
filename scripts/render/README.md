@@ -65,8 +65,9 @@ Em todos os serviços:
 - **Runtime:** Python.
 - **Root Directory:** vazio (raiz do repositório). Configurar `apps/<serviço>`
   impede que o Render disponibilize `packages/` no build e no runtime.
-- **Auto-Deploy:** Off. O Actions controla os deploys após a CI; habilitar
-  também o deploy nativo do Render duplicaria execuções e ignoraria esse gate.
+- **Auto-Deploy:** configurável no Render. Se estiver habilitado, o Render pode
+  iniciar deploys independentemente do Actions; com `On Commit`, isso pode
+  ocorrer antes da CI e gerar deploys adicionais.
 - **Python:** `3.14.3`, fixado em `.python-version`. Remova um `PYTHON_VERSION`
   divergente no painel, pois ele tem precedência sobre o arquivo.
 - **Build/Start:** use os comandos da tabela abaixo, a partir da raiz.
@@ -107,7 +108,8 @@ mesmos nomes, com valores próprios:
 Os dez IDs devem ser distintos. Restrinja `hm` a `develop` e `prod` a `main`.
 Para atualização inteiramente automática, não configure revisores obrigatórios
 nesses GitHub Environments. O script verifica a branch configurada no serviço, o
-runtime Python, a raiz e Auto-Deploy desabilitado antes de disparar o build.
+runtime Python e a raiz antes de disparar o build. A configuração de Auto-Deploy
+é controlada no Render.
 
 ## Configuração das aplicações
 
