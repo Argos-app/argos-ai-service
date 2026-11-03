@@ -1,0 +1,44 @@
+name: argos-main-api-integration
+
+services:
+    auth-postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: auth_test
+            POSTGRES_PASSWORD: auth_test
+            POSTGRES_DB: auth_test
+        ports:
+            - "127.0.0.1:54329:5432"
+        tmpfs:
+            - /var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U auth_test -d auth_test"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    mongo:
+        image: mongo:7.0
+        command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+        ports:
+            - "127.0.0.1:27030:27017"
+        tmpfs:
+            - /data/db
+        healthcheck:
+            test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ping:1})"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    mongo-init:
+        image: mongo:7.0
+        depends_on:
+            mongo:
+                condition: service_healthy
+        entrypoint:
+            - /bin/bash
+            - -ec
+            - >-
+                mongosh mongodb://mongo:27017/admin --quiet --eval
+                'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}) }'
+        restart: "no"

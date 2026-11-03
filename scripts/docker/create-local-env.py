@@ -1,0 +1,140 @@
+"""Gera credenciais descartáveis para a pilha Docker de desenvolvimento."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import secrets
+from pathlib import Path
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+
+def _key_pair() -> tuple[str, str]:
+    private_key = Ed25519PrivateKey.generate()
+    private_bytes = private_key.private_bytes(
+        serialization.Encoding.DER,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    public_bytes = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    return (
+        base64.b64encode(private_bytes).decode("ascii"),
+        base64.b64encode(public_bytes).decode("ascii"),
+    )
+
+
+def _dotenv(name: str, value: str) -> str:
+    if value.startswith("{"):
+        return f"{name}='{value}'"
+    return f"{name}={value}"
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".env"),
+        help="arquivo dotenv oficial do ambiente local (padrão: .env)",
+    )
+    parser.add_argument("--force", action="store_true", help="substitui o arquivo de destino")
+    args = parser.parse_args()
+    output = args.output.resolve()
+    if output.exists() and not args.force:
+        parser.error(f"{output} já existe; use --force para substituí-lo")
+
+    delegation_private, delegation_public = _key_pair()
+    report_private, report_public = _key_pair()
+    values = {
+        "POSTGRES_USER": "argos_admin",
+        "POSTGRES_DB": "argos",
+        "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
+        "POSTGRES_READER_PASSWORD": secrets.token_urlsafe(32),
+        "MONGO_DATABASE": "argos_ai",
+        "ARGOS_MODEL_MODE": "simulated",
+        "A2A_DOCUMENT_SOURCE_ROOT": "/var/lib/argos/a2a/documents",
+        "A2A_DOCUMENT_CATALOG_NAME": "catalog.json",
+        "MODEL_FAST_INPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_FAST_OUTPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_FAST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_FAST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_SPECIALIST_INPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_SPECIALIST_OUTPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_SPECIALIST_FALLBACK_INPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_SPECIALIST_FALLBACK_OUTPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_EMBEDDING_INPUT_COST_PER_MILLION_TOKENS": "",
+        "MODEL_EMBEDDING_FALLBACK_INPUT_COST_PER_MILLION_TOKENS": "",
+        "A2A_QDRANT_VECTOR_SIZE": "64",
+        "A2A_QDRANT_VOYAGE_VECTOR_SIZE": "64",
+        "OPENAI_API_KEY": "",
+        "OPENAI_BASE_URL": "https://api.openai.com/v1",
+        "OPENAI_EMBEDDINGS_URL": "https://api.openai.com/v1/embeddings",
+        "OPENROUTER_API_KEY": "",
+        "VOYAGE_EMBEDDINGS_URL": "https://openrouter.ai/api/v1/embeddings",
+        "VOYAGE_EMBEDDINGS_MODEL": "voyageai/voyage-4-large",
+        "OPENAI_MODEL_FAST": "gpt-6-luna",
+        "OPENAI_MODEL_SPECIALIST": "gpt-6.1-terra",
+        "ANTHROPIC_BASE_URL": "https://openrouter.ai/api",
+        "ANTHROPIC_MODEL_FAST_FALLBACK": "anthropic/claude-haiku-5.5",
+        "ANTHROPIC_MODEL_SPECIALIST_FALLBACK": "anthropic/claude-sonnet-5.5",
+        "OPENAI_EMBEDDINGS_MODEL": "text-embedding-3-small",
+        "JEV_URL": "https://openrouter.ai/api/alpha/decisions",
+        "JEV_MODEL": "typesafe/jev-1.13",
+        "DECISIONS_URL": "https://api.openai.com/v1/decisions",
+        "DECISIONS_MODEL": "gpt-6-luna",
+        "MCP_EMAIL_SMTP_HOST": "",
+        "MCP_EMAIL_SMTP_PORT": "1025",
+        "MCP_EMAIL_SMTP_USERNAME": "",
+        "MCP_EMAIL_SMTP_PASSWORD": "",
+        "MCP_EMAIL_SMTP_USE_TLS": "false",
+        "MCP_EMAIL_NO_REPLY_ADDRESS": "no-reply@argos.local",
+        "MAIN_API_LANGSMITH_API_KEY": "",
+        "MAIN_API_LANGSMITH_AGENT_ID": "argos-ai-service",
+        "MAIN_API_LANGSMITH_AGENT_ENVIRONMENT": "local",
+        "MAIN_API_LANGSMITH_ENDPOINT": "",
+        "MAIN_API_LANGSMITH_WORKSPACE_ID": "",
+        "MAIN_API_LANGSMITH_CAPTURE_CONTENT": "false",
+        "A2A_LANGSMITH_API_KEY": "",
+        "A2A_LANGSMITH_AGENT_ID": "argos-ai-service",
+        "A2A_LANGSMITH_AGENT_ENVIRONMENT": "local",
+        "A2A_LANGSMITH_ENDPOINT": "",
+        "A2A_LANGSMITH_WORKSPACE_ID": "",
+        "A2A_LANGSMITH_CAPTURE_CONTENT": "false",
+        "MCP_DELEGATION_ISSUER": "argos-main-service",
+        "MCP_DELEGATION_KEY_ID": "local-dev-key",
+        "MCP_DELEGATION_PRIVATE_KEY": delegation_private,
+        "MCP_DELEGATION_PUBLIC_KEYS": json.dumps(
+            {"local-dev-key": delegation_public}, separators=(",", ":")
+        ),
+        "REPORT_SIGNING_KEY_ID": "local-report-key",
+        "REPORT_SIGNING_PRIVATE_KEY": report_private,
+        "REPORT_SIGNING_PUBLIC_KEYS": json.dumps(
+            {"local-report-key": report_public}, separators=(",", ":")
+        ),
+        "MCP_DATA_INTERNAL_SERVICE_TOKEN": secrets.token_urlsafe(32),
+        "MCP_PREDICTION_INTERNAL_SERVICE_TOKEN": secrets.token_urlsafe(32),
+        "MCP_EMAIL_INTERNAL_SERVICE_TOKEN": secrets.token_urlsafe(32),
+        "A2A_INTERNAL_SERVICE_TOKEN": secrets.token_urlsafe(32),
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        "# Segredos aleatórios descartáveis. Somente para Docker local.\n"
+        + "\n".join(_dotenv(name, value) for name, value in values.items())
+        + "\n",
+        encoding="utf-8",
+    )
+    try:
+        output.chmod(0o600)
+    except OSError:
+        pass
+    print(f"Arquivo local criado: {output}")
+
+
+if __name__ == "__main__":
+    main()

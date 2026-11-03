@@ -1,0 +1,13 @@
+name: argos-a2a-integration
+
+services:
+    qdrant:
+        image: qdrant/qdrant:v1.15.4
+        environment:
+            QDRANT__SERVICE__API_KEY: a2a-integration-write-key
+            QDRANT__SERVICE__READ_ONLY_API_KEY: a2a-integration-read-key
+        ports:
+            - "127.0.0.1:6338:6333"
+            - "127.0.0.1:6339:6334"
+        tmpfs:
+            - /qdrant/storage

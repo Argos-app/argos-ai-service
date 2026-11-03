@@ -1,0 +1,30 @@
+{
+  "documents": [
+    {
+      "document_id": "f532385b-559f-43cb-b4b6-35ce62a8a46c",
+      "file_name": "lgpd-lei-13709-edicao-senado-2026.pdf",
+      "title": "Lei Geral de Proteção de Dados Pessoais - Lei nº 13.709/2018 - Senado Federal, 2ª edição, atualizada até julho de 2026",
+      "document_type": "law",
+      "origin": "https://www2.senado.leg.br/jspui/bitstream/id/962304/1/Lei_geral_protecao_dados_pessoais_2ed_2026.pdf",
+      "jurisdiction": "BR",
+      "document_date": "2018-08-14",
+      "source_modified_at": null,
+      "uploaded_at": "2026-11-02T11:51:21+00:00",
+      "updated_at": "2026-11-02T11:51:21+00:00",
+      "legal_validity": "unknown"
+    },
+    {
+      "document_id": "a8afdd4c-fddc-48a2-9f1e-53f5731b06da",
+      "file_name": "termos-uso-privacidade-argos.pdf",
+      "title": "Termos de uso e privacidade do Argos - vigência a partir de 01/11/2026",
+      "document_type": "terms_conditions",
+      "origin": "local://argos/termos-uso-privacidade-argos.pdf",
+      "jurisdiction": null,
+      "document_date": "2026-11-01",
+      "source_modified_at": "2026-11-02T12:06:59+00:00",
+      "uploaded_at": "2026-11-02T11:51:21+00:00",
+      "updated_at": "2026-11-02T12:06:59+00:00",
+      "legal_validity": "in_force"
+    }
+  ]
+}

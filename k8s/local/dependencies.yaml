@@ -1,0 +1,194 @@
+apiVersion: v1
+kind: Service
+metadata:
+    name: mongo
+spec:
+    clusterIP: None
+    publishNotReadyAddresses: true
+    selector: { app: mongo }
+    ports: [{ name: mongo, port: 27017, targetPort: 27017 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+    name: mongo
+spec:
+    serviceName: mongo
+    replicas: 1
+    selector:
+        matchLabels: { app: mongo }
+    template:
+        metadata:
+            labels: { app: mongo }
+        spec:
+            securityContext:
+                fsGroup: 999
+                fsGroupChangePolicy: OnRootMismatch
+            containers:
+                - name: mongo
+                  image: mongo:7.0
+                  imagePullPolicy: IfNotPresent
+                  command: [mongod, --replSet, rs0, --bind_ip_all, --wiredTigerCacheSizeGB, "0.25"]
+                  ports: [{ name: mongo, containerPort: 27017 }]
+                  startupProbe:
+                      tcpSocket: { port: mongo }
+                      periodSeconds: 5
+                      failureThreshold: 60
+                      timeoutSeconds: 3
+                  livenessProbe:
+                      tcpSocket: { port: mongo }
+                      periodSeconds: 10
+                      failureThreshold: 6
+                      timeoutSeconds: 3
+                  readinessProbe:
+                      exec:
+                          command:
+                              - mongosh
+                              - --quiet
+                              - --eval
+                              - 'try { rs.status().ok } catch (_) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}).ok }'
+                      periodSeconds: 15
+                      timeoutSeconds: 15
+                  resources:
+                      requests: { cpu: 100m, memory: 256Mi }
+                      limits: { cpu: 1, memory: 2Gi }
+                  volumeMounts:
+                      - { name: data, mountPath: /data/db }
+            volumes:
+                - name: data
+                  persistentVolumeClaim: { claimName: mongo-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: redis
+spec:
+    selector: { app: redis }
+    ports: [{ name: redis, port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: redis
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector:
+        matchLabels: { app: redis }
+    template:
+        metadata:
+            labels: { app: redis }
+        spec:
+            containers:
+                - name: redis
+                  image: redis:7.4-alpine
+                  imagePullPolicy: IfNotPresent
+                  command: [redis-server, --save, "", --appendonly, "no"]
+                  ports: [{ name: redis, containerPort: 6379 }]
+                  startupProbe: &redisProbe
+                      exec: { command: [redis-cli, ping] }
+                      periodSeconds: 5
+                      failureThreshold: 20
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      <<: *redisProbe
+                      periodSeconds: 10
+                  readinessProbe:
+                      <<: *redisProbe
+                      periodSeconds: 5
+                  resources:
+                      requests: { cpu: 50m, memory: 64Mi }
+                      limits: { cpu: 250m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: qdrant
+spec:
+    selector: { app: qdrant }
+    ports: [{ name: http, port: 6333, targetPort: 6333 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: qdrant
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector:
+        matchLabels: { app: qdrant }
+    template:
+        metadata:
+            labels: { app: qdrant }
+        spec:
+            securityContext:
+                fsGroup: 1000
+                fsGroupChangePolicy: OnRootMismatch
+            containers:
+                - name: qdrant
+                  image: qdrant/qdrant:v1.15.4
+                  imagePullPolicy: IfNotPresent
+                  ports: [{ name: http, containerPort: 6333 }]
+                  startupProbe:
+                      httpGet: { path: /readyz, port: http }
+                      periodSeconds: 5
+                      failureThreshold: 30
+                  livenessProbe:
+                      httpGet: { path: /readyz, port: http }
+                      periodSeconds: 10
+                  readinessProbe:
+                      httpGet: { path: /readyz, port: http }
+                      periodSeconds: 5
+                  resources:
+                      requests: { cpu: 100m, memory: 256Mi }
+                      limits: { cpu: 1, memory: 1Gi }
+                  volumeMounts:
+                      - { name: storage, mountPath: /qdrant/storage }
+            volumes:
+                - name: storage
+                  persistentVolumeClaim: { claimName: qdrant-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: mailpit
+spec:
+    selector: { app: mailpit }
+    ports:
+        - { name: smtp, port: 1025, targetPort: 1025 }
+        - { name: ui, port: 8025, targetPort: 8025 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: mailpit
+spec:
+    replicas: 1
+    strategy: { type: RollingUpdate, rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }
+    selector:
+        matchLabels: { app: mailpit }
+    template:
+        metadata:
+            labels: { app: mailpit }
+        spec:
+            containers:
+                - name: mailpit
+                  image: axllent/mailpit:v1.27.0
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                      - { name: smtp, containerPort: 1025 }
+                      - { name: ui, containerPort: 8025 }
+                  startupProbe: &mailpitProbe
+                      exec: { command: [/mailpit, readyz] }
+                      periodSeconds: 5
+                      failureThreshold: 20
+                      timeoutSeconds: 10
+                  livenessProbe:
+                      <<: *mailpitProbe
+                      periodSeconds: 10
+                  readinessProbe:
+                      <<: *mailpitProbe
+                      periodSeconds: 5
+                  resources:
+                      requests: { cpu: 50m, memory: 64Mi }
+                      limits: { cpu: 250m, memory: 256Mi }

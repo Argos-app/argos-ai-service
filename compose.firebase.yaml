@@ -1,0 +1,10 @@
+services:
+    main_api:
+        environment:
+            MAIN_API_FIREBASE_CREDENTIALS_FILE: /run/secrets/firebase-service-account.json
+            GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
+        volumes:
+            - type: bind
+              source: ${MAIN_API_FIREBASE_CREDENTIALS_HOST_PATH:?Defina MAIN_API_FIREBASE_CREDENTIALS_HOST_PATH no .env}
+              target: /run/secrets/firebase-service-account.json
+              read_only: true

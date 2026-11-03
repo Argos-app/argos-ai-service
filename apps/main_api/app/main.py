@@ -1,0 +1,423 @@
+"""Ponto de entrada HTTP do serviço principal."""
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+from uuid import uuid4
+
+from fastapi import FastAPI, Request
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from app.api.v1.router import router as v1_router
+from app.application.errors import ApplicationError, ApplicationErrorCode
+from app.application.operation_observation import OperationRecorder, active_collector
+from app.infrastructure.a2a import DocumentA2AClient
+from app.infrastructure.access_tokens import MainApiAccessTokenCodec
+from app.infrastructure.agents.model_factory import (
+    ModelRuntimeConfigurationError,
+    create_configured_models,
+)
+from app.infrastructure.bootstrap import ServiceRuntime, create_runtime
+from app.infrastructure.firebase_auth import (
+    FirebaseIdentityAuthenticator,
+    create_firebase_id_token_verifier,
+)
+from app.infrastructure.mcp import (
+    McpDelegationTokenIssuer,
+    bind_observation_collector,
+    create_mcp_clients,
+)
+from app.infrastructure.observability.langsmith import (
+    LangSmithTracing,
+    create_langsmith_tracing,
+)
+from app.infrastructure.postgres import (
+    PostgresUserAccessRuntime,
+    create_postgres_user_access_runtime,
+)
+from app.settings import Settings
+from packages.observability import (
+    DisabledObservationCollector,
+    ErrorOrigin,
+    HttpMetadata,
+    ObservationStatus,
+    OperationKind,
+    OperationPhase,
+    bind_correlation,
+    observation_scope,
+)
+from packages.security.signatures import TrustedEd25519SignatureVerifier
+
+
+def _readiness_unavailable(reason: str) -> JSONResponse:
+    logging.getLogger("uvicorn.error").warning("Main API não está pronta: %s", reason)
+    return JSONResponse(status_code=503, content={"status": "unavailable", "reason": reason})
+
+
+class BodySizeLimitMiddleware:
+    """Rejeita corpos grandes após ler no máximo o limite configurado."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in {"POST", "PUT", "PATCH"}:
+            await self.app(scope, receive, send)
+            return
+
+        raw_content_length = next(
+            (value for name, value in scope.get("headers", ()) if name == b"content-length"),
+            None,
+        )
+        if raw_content_length is not None:
+            try:
+                if int(raw_content_length) > self.max_bytes:
+                    await JSONResponse(
+                        status_code=413,
+                        content={"detail": "Corpo excede 32 KiB"},
+                    )(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > self.max_bytes:
+                await JSONResponse(
+                    status_code=413,
+                    content={"detail": "Corpo excede 32 KiB"},
+                )(scope, receive, send)
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    agent_graph: Any = None,
+    models: dict[Any, Any] | None = None,
+    checkpointer: Any = None,
+    session_summary_generator: Any = None,
+    user_memory_extractor: Any = None,
+) -> FastAPI:
+    """Monta o serviço; `models` é injeção explícita destinada a testes."""
+    configured = settings or Settings.from_env()
+    model_initialization_error: str | None = None
+    if models is None:
+        try:
+            models, model_initialization_error = create_configured_models(configured)
+        except ModelRuntimeConfigurationError:
+            model_initialization_error = "model_runtime_invalid_configuration"
+
+    else:
+        try:
+            from app.infrastructure.agents.model_factory import validate_model_capabilities
+
+            validate_model_capabilities(models)
+        except ModelRuntimeConfigurationError:
+            model_initialization_error = "model_runtime_invalid_configuration"
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        runtime: ServiceRuntime | None = None
+        postgres_runtime: PostgresUserAccessRuntime | None = None
+        langsmith_tracing = create_langsmith_tracing(configured)
+        app.state.langsmith_tracing = langsmith_tracing
+        try:
+            postgres_runtime = await create_postgres_user_access_runtime(configured)
+            app.state.user_access_repository = (
+                postgres_runtime.user_access_repository if postgres_runtime else None
+            )
+            if configured.firebase_project_id is not None:
+                if postgres_runtime is None:
+                    raise RuntimeError(
+                        "MAIN_API_AUTH_DATABASE_URL é obrigatório para autenticação Firebase"
+                    )
+                verifier = create_firebase_id_token_verifier(configured)
+                app.state.firebase_identity_authenticator = FirebaseIdentityAuthenticator(
+                    verifier,
+                    postgres_runtime.user_access_repository,
+                )
+            if configured.mongo_uri:
+                runtime = await create_runtime(configured)
+            app.state.persistence = runtime.persistence if runtime else None
+            app.state.mongo_database = runtime.database if runtime else None
+            app.state.user_usage_counter = runtime.user_usage_counter if runtime else None
+            app.state.observability_collector = (
+                getattr(runtime, "observation_collector", DisabledObservationCollector())
+                if runtime
+                else DisabledObservationCollector()
+            )
+            app.state.mcp_clients = bind_observation_collector(
+                app.state.mcp_clients, app.state.observability_collector
+            )
+            if app.state.documental_a2a_client is not None:
+                app.state.documental_a2a_client.bind_observation_collector(
+                    app.state.observability_collector
+                )
+            app.state.checkpointer = (
+                checkpointer
+                if checkpointer is not None
+                else (runtime.checkpointer if runtime else None)
+            )
+            yield
+        finally:
+            try:
+                pending = tuple(getattr(app.state, "background_tasks", ()))
+                if pending:
+                    shutdown_timeout = max(2.0, configured.execution_timeout_seconds + 5.0)
+                    _, unfinished = await asyncio.wait(pending, timeout=shutdown_timeout)
+                    for task in unfinished:
+                        task.cancel()
+                    if unfinished:
+                        await asyncio.gather(*unfinished, return_exceptions=True)
+                if runtime:
+                    await runtime.close()
+            finally:
+                try:
+                    if postgres_runtime is not None:
+                        await postgres_runtime.close()
+                finally:
+                    try:
+                        if app.state.documental_a2a_client is not None:
+                            await app.state.documental_a2a_client.aclose()
+                    finally:
+                        if isinstance(langsmith_tracing, LangSmithTracing):
+                            langsmith_tracing.close()
+
+    app = FastAPI(
+        title="Argos AI Service",
+        summary="API multiagente do Argos",
+        description=(
+            "Gerencia sessões autenticadas e interações com os agentes do Argos. "
+            "Cada resposta inclui o cabeçalho X-Argos-Correlation-ID para diagnóstico."
+        ),
+        version="0.1.0",
+        lifespan=lifespan,
+        openapi_tags=[
+            {
+                "name": "health",
+                "description": "Verificação de disponibilidade e prontidão do serviço.",
+            },
+            {
+                "name": "auth",
+                "description": "Autenticação e emissão de tokens de acesso do serviço.",
+            },
+            {"name": "sessions", "description": "Criação e consulta das sessões do usuário."},
+            {
+                "name": "interactions",
+                "description": "Envio, retomada e consulta de interações em uma sessão.",
+            },
+        ],
+    )
+
+    @app.exception_handler(ApplicationError)
+    async def handle_application_error(request: Request, error: ApplicationError) -> JSONResponse:
+        del request
+        status_code = {
+            ApplicationErrorCode.BAD_REQUEST: 400,
+            ApplicationErrorCode.FORBIDDEN: 403,
+            ApplicationErrorCode.NOT_FOUND: 404,
+            ApplicationErrorCode.CONFLICT: 409,
+            ApplicationErrorCode.INVALID_INPUT: 422,
+            ApplicationErrorCode.UNAVAILABLE: 503,
+        }[error.code]
+        return JSONResponse(status_code=status_code, content={"detail": error.detail})
+
+    app.state.agent_graph = agent_graph
+    app.state.background_tasks = set()
+    app.state.models = models
+    app.state.model_initialization_error = model_initialization_error
+    app.state.checkpointer = checkpointer
+    app.state.session_summary_generator = session_summary_generator
+    app.state.user_memory_extractor = user_memory_extractor
+    app.state.settings = configured
+    app.state.access_token_codec = (
+        MainApiAccessTokenCodec(configured)
+        if configured.access_token_key_id and configured.access_token_private_key
+        else None
+    )
+    app.state.report_source_signature_verifier = (
+        TrustedEd25519SignatureVerifier(dict(configured.mcp_data_report_trusted_signature_keys))
+        if configured.mcp_data_report_trusted_signature_keys
+        else None
+    )
+    app.state.observability_collector = DisabledObservationCollector()
+    app.state.user_usage_counter = None
+    app.state.user_access_repository = None
+    app.state.firebase_identity_authenticator = None
+    app.state.langsmith_tracing = None
+    app.state.mcp_clients = create_mcp_clients(configured)
+    app.state.documental_a2a_client = (
+        DocumentA2AClient(configured) if configured.document_a2a_url else None
+    )
+    app.state.mcp_delegation_token_issuer = (
+        McpDelegationTokenIssuer(configured)
+        if configured.mcp_delegation_key_id and configured.mcp_delegation_private_key
+        else None
+    )
+
+    @app.middleware("http")
+    async def observe_http(request: Request, call_next):
+        if request.url.path in {"/health/live", "/health/ready"}:
+            return await call_next(request)
+        correlation_id = uuid4()
+        collector = active_collector(app.state.observability_collector)
+        with bind_correlation(correlation_id):
+            if collector is None:
+                response = await call_next(request)
+            else:
+                recorder = OperationRecorder(
+                    collector,
+                    operation_kind=OperationKind.HTTP,
+                    operation_name="http.request",
+                    operation_phase=OperationPhase.EXECUTION,
+                    error_origin=ErrorOrigin.APPLICATION,
+                )
+                with observation_scope(recorder.observation_id):
+                    try:
+                        response = await call_next(request)
+                    except BaseException as exc:
+                        recorder.finish(error=exc)
+                        raise
+                route = request.scope.get("route")
+                route_template = getattr(route, "path", "unmatched")
+                status_code = response.status_code
+                recorder.finish(
+                    status=(
+                        ObservationStatus.FAILED
+                        if status_code >= 500
+                        else ObservationStatus.REJECTED
+                        if status_code >= 400
+                        else ObservationStatus.SUCCEEDED
+                    ),
+                    http=HttpMetadata(
+                        method=request.method[:12],
+                        route=route_template[:200],
+                        status_code=status_code,
+                    ),
+                )
+            response.headers["X-Argos-Correlation-ID"] = str(correlation_id)
+            return response
+
+    @app.get(
+        "/health/live",
+        tags=["health"],
+        summary="Verificar se o processo está ativo",
+        description="Retorna uma resposta simples quando o processo HTTP está em execução.",
+        responses={200: {"description": "O processo está ativo."}},
+    )
+    async def live() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get(
+        "/health/ready",
+        tags=["health"],
+        response_model=None,
+        summary="Verificar se o serviço está pronto",
+        description=(
+            "Verifica dependências essenciais, incluindo persistência, autenticação, "
+            "runtime dos agentes e integração documental quando configurada."
+        ),
+        responses={
+            200: {"description": "O serviço está pronto para receber requisições."},
+            503: {"description": "Uma ou mais dependências essenciais estão indisponíveis."},
+        },
+    )
+    async def ready(request: Request):
+        if getattr(app.state, "persistence", None) is None:
+            return _readiness_unavailable("session_store_not_configured")
+        if (
+            configured.firebase_project_id is None or app.state.access_token_codec is None
+        ) and not (configured.app_env == "local" and configured.auth_mode == "stub"):
+            return _readiness_unavailable("identity_not_configured")
+        if app.state.model_initialization_error is not None:
+            return _readiness_unavailable(app.state.model_initialization_error)
+        if app.state.models is None:
+            return _readiness_unavailable("model_runtime_not_configured")
+        if getattr(app.state, "checkpointer", None) is None:
+            return _readiness_unavailable("graph_runtime_not_configured")
+        if configured.auth_database_url and app.state.user_access_repository is None:
+            return _readiness_unavailable("auth_database_not_configured")
+        if app.state.agent_graph is None:
+            try:
+                from app.api.v1.dependencies.services import _graph_provider
+
+                _graph_provider(request)
+            except Exception:
+                return _readiness_unavailable("agent_runtime_not_configured")
+        try:
+            await app.state.mongo_database.command("ping")
+        except Exception:
+            return _readiness_unavailable("session_store_unavailable")
+        if configured.document_a2a_url:
+            client = getattr(app.state, "documental_a2a_client", None)
+            if client is None:
+                return _readiness_unavailable("document_a2a_not_configured")
+            try:
+                await client.check_ready()
+            except Exception:
+                return _readiness_unavailable("document_a2a_unavailable")
+        return {"status": "ok"}
+
+    app.include_router(v1_router)
+
+    def openapi_with_correlation_header() -> dict[str, Any]:
+        if app.openapi_schema is not None:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            routes=app.routes,
+            description=app.description,
+        )
+        correlation_header = {
+            "description": "Identificador de correlação desta requisição no serviço Argos.",
+            "schema": {"type": "string", "format": "uuid"},
+        }
+        for path, path_item in schema.get("paths", {}).items():
+            if not path.startswith("/v1/"):
+                continue
+            for operation in path_item.values():
+                if not isinstance(operation, dict):
+                    continue
+                for response in operation.get("responses", {}).values():
+                    if isinstance(response, dict):
+                        if response.get("description") == "Validation Error":
+                            response["description"] = "Erro de validação"
+                        response.setdefault("headers", {})["X-Argos-Correlation-ID"] = (
+                            correlation_header
+                        )
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi_with_correlation_header
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=32 * 1024)
+    return app
+
+
+app = create_app()

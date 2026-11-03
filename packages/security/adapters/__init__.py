@@ -1,0 +1,1 @@
+"""Adapters compartilhados de autorização."""

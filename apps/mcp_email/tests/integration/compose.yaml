@@ -1,0 +1,36 @@
+name: argos-mcp-email-integration
+
+services:
+    mongo:
+        image: mongo:7.0
+        ports:
+            - "127.0.0.1:27028:27017"
+        tmpfs:
+            - /data/db
+        healthcheck:
+            test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ping:1})"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: email_test
+            POSTGRES_PASSWORD: email_test_local_only
+            POSTGRES_DB: email_test
+        ports:
+            - "127.0.0.1:54328:5432"
+        tmpfs:
+            - /var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U email_test -d email_test"]
+            interval: 2s
+            timeout: 5s
+            retries: 30
+
+    mailpit:
+        image: axllent/mailpit:v1.27.0
+        ports:
+            - "127.0.0.1:10258:1025"
+            - "127.0.0.1:8028:8025"

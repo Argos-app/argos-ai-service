@@ -3,18 +3,24 @@
     "@commitlint/cli": "^21.1.0",
     "@commitlint/config-conventional": "^21.1.0",
     "husky": "^9.1.7",
-    "prettier": "^3.8.5",
-    "prettier-plugin-java": "^2.10.1"
+    "lint-staged": "^17.5.1",
+    "prettier": "^3.8.5"
   },
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "format:check": "prettier --check \"**/*.{json,jsonc,md,mdx,yml,yaml}\"",
+    "format:write": "prettier --write \"**/*.{json,jsonc,md,mdx,yml,yaml}\""
   },
   "lint-staged": {
+    "*.py": [
+      "python -m ruff check --fix",
+      "python -m ruff format"
+    ],
     "*.{ts,tsx,js,jsx}": [
-      "npx prettier --write"
+      "prettier --write"
     ],
     "*.{json,md,yml,yaml}": [
-      "npx prettier --write"
+      "prettier --write"
     ]
   }
 }

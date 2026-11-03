@@ -1,12 +1,14 @@
 ## O que foi feito?
 
-> Descreva de forma clara e objetiva o que essa PR entrega. Uma frase é suficiente.
+> Descreva de forma clara e objetiva o que essa PR entrega. Uma frase é
+> suficiente.
 
 ---
 
 ## Por que foi feito?
 
-> Contexto de negócio ou técnico. O que motivou essa mudança? Qual problema resolve?
+> Contexto de negócio ou técnico. O que motivou essa mudança? Qual problema
+> resolve?
 
 ---
 
@@ -30,4 +32,4 @@
 
 > Links úteis: ticket no Jira, design no Figma, documentação, diagramas, etc.
 
-- 🎟️ **Ticket**: 
+- 🎟️ **Ticket**:

@@ -1,0 +1,14 @@
+**
+!apps/
+!apps/mcp_data/
+!apps/mcp_data/pylock.toml
+!apps/mcp_data/src/
+!apps/mcp_data/src/**
+!packages/
+!packages/contracts/
+!packages/contracts/**
+!packages/security/
+!packages/security/**
+**/__pycache__/
+**/*.pyc
+**/*.pyo
