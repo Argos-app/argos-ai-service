@@ -21,6 +21,22 @@ Para o Compose integrado, gere o `.env` da raiz conforme
 acessível e, para o replica set de teste que anuncia DNS interno,
 `directConnection=true`.
 
+## MongoDB na conversa
+
+A Main API usa MongoDB para controlar conversas por usuário. A criação da sessão
+grava `ai_sessions`; ao iniciar uma interação, a API registra a operação em
+`ai_interactions` e a mensagem sanitizada em `ai_messages`. O resultado da IA e
+as respostas a perguntas estruturadas também são persistidos para consulta e
+retomada. Resumos de sessão e preferências entre sessões usam
+`ai_session_summaries` e `ai_user_memory`; o LangGraph usa as collections de
+checkpoints para o estado do grafo. O histórico e a consulta de interações leem
+esses registros.
+
+O banco de sessões precisa de replica set: a inicialização verifica a topologia
+e as operações de sessão usam transações. O contrato das rotas está em
+[sessões e memória](../../apps/main_api/docs/session-memory.md), e os campos de
+cada collection estão em [estruturas](collections.md).
+
 ## Collections e retenção
 
 As collections próprias dos serviços são criadas pelo MongoDB quando o código

@@ -185,13 +185,18 @@ def test_a2a_launcher_does_not_select_a_document_source():
         {"rootDir": "apps/main_api"},
         {"serviceDetails": {"runtime": "docker"}},
         {"serviceDetails": {"runtime": "image"}},
-        {"autoDeployTrigger": "commit"},
-        {"autoDeploy": "yes"},
     ],
 )
 def test_wrong_environment_or_build_configuration_is_rejected(overrides):
     with pytest.raises(ValueError):
         deploy.validate_service(SERVICE | overrides, "develop")
+
+
+@pytest.mark.parametrize("trigger", ["off", "commit", "checksPass"])
+def test_deployment_accepts_render_auto_deploy_configuration(trigger):
+    deploy.validate_service(
+        SERVICE | {"autoDeployTrigger": trigger, "autoDeploy": "yes"}, "develop"
+    )
 
 
 def test_deployment_sends_exact_commit_and_waits_for_live(monkeypatch):
