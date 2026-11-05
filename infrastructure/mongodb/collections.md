@@ -494,7 +494,7 @@ obrigatórios no documento persistido.
 	"attachments": [
 		{
 			"filename": "<file name>",
-			"content_type": "text/plain",
+			"content_type": "application/pdf",
 			"content_base64": "<base64 bytes>",
 			"sha256": "<hex digest>",
 		},

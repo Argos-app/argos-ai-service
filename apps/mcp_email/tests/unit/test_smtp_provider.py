@@ -55,7 +55,7 @@ async def test_smtp_provider_sends_from_configured_sender():
         sender="no-reply@argos.com",
         recipients=(RecipientRef(recipient_id=uuid4(), name="Luis", email="luis@example.com"),),
         subject="Relatório",
-        body="Conteúdo",
+        body="Conteúdo <teste>",
         attachments=(attachment,),
     )
 
@@ -64,6 +64,11 @@ async def test_smtp_provider_sends_from_configured_sender():
     assert FakeSmtp.messages[-1]["To"] == "luis@example.com"
     assert FakeSmtp.tls_contexts[-1].verify_mode == 2
     assert FakeSmtp.tls_contexts[-1].check_hostname is True
+    assert FakeSmtp.messages[-1].get_body(preferencelist=("plain",)).get_content().strip() == (
+        "Conteúdo <teste>"
+    )
+    html = FakeSmtp.messages[-1].get_body(preferencelist=("html",)).get_content()
+    assert "Conteúdo &lt;teste&gt;" in html
     sent_attachment = tuple(FakeSmtp.messages[-1].iter_attachments())[0]
     assert sent_attachment.get_filename() == attachment.filename
     assert sent_attachment.get_content_type() == attachment.content_type

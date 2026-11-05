@@ -1,5 +1,9 @@
-Relatório do lote ${lot_code}
+ARGOS | RELATÓRIO DE LOTE
+========================
+Lote: ${lot_code}
 
+IDENTIFICAÇÃO
+-------------
 Fazenda: ${property_name}
 Rebanho: ${herd_name} (${herd_breed})
 Categoria: ${lot_category}
@@ -8,10 +12,14 @@ Aberto em: ${open_date}
 Liberação para abate: ${slaughter_release_date}
 Apto para abate: ${fit_for_slaughter}
 
-Aplicações:
+APLICAÇÕES
+----------
 ${applications}
 
-Animais em exceção:
+ANIMAIS EM EXCEÇÃO
+------------------
 ${exception_animals}
 
+------------------------
 Consulta realizada em: ${queried_at}
+Argos · Informações da consulta realizada

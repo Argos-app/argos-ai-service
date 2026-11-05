@@ -108,6 +108,7 @@ def build_graph(
         "information": "information",
         "question_formatter": "question_formatter",
         "orchestrator": "orchestrator",
+        "judge": "judge",
         "safe": "safe",
     }
     graph.add_edge(START, "guardrail_input")

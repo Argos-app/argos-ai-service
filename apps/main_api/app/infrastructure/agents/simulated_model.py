@@ -13,6 +13,18 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+_SOCIAL_RESPONSES = {
+    "oi": ("greeting", "Olá! Como posso ajudar?"),
+    "olá": ("greeting", "Olá! Como posso ajudar?"),
+    "ola": ("greeting", "Olá! Como posso ajudar?"),
+    "bom dia": ("greeting", "Bom dia! Como posso ajudar?"),
+    "boa tarde": ("greeting", "Boa tarde! Como posso ajudar?"),
+    "boa noite": ("greeting", "Boa noite! Como posso ajudar?"),
+    "obrigado": ("gratitude", "Por nada!"),
+    "obrigada": ("gratitude", "Por nada!"),
+    "tchau": ("farewell", "Até logo!"),
+}
+
 
 class SimulatedChatModel(BaseChatModel):
     """Produz chamadas estruturadas fixas e aciona tools reais do serviço."""
@@ -103,6 +115,13 @@ class SimulatedChatModel(BaseChatModel):
         if name == "RoutePlan":
             request = _router_request_text(messages)
             normalized_request = request.casefold()
+            social = _SOCIAL_RESPONSES.get(normalized_request.strip(" \t\r\n.,!?;:"))
+            if social:
+                return name, {
+                    "intent": "interação social simulada",
+                    "social_intent": social[0],
+                    "social_reply": social[1],
+                }
             lot_code = _extract_lot_code(request)
             is_report_request = any(
                 term in normalized_request for term in ("relatório", "relatorio", "envie", "enviar")
@@ -457,10 +476,8 @@ def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -
             }
         }
     if name == "resolve_report_lot_report_source":
-        lot_code = _extract_lot_code(
-            str(specialist_input.get("goal") or specialist_input.get("brief_sanitized") or "")
-        )
-        return {"lot_code": lot_code or "HC-LOTE-076"}
+        lot_code = _extract_lot_code(_specialist_request(specialist_input))
+        return {"lot_code": lot_code} if lot_code else {}
     if name == "prepare_report":
         references = []
         for dependency in specialist_input.get("dependency_results", ()):
@@ -476,13 +493,35 @@ def _tool_arguments(name: str, specialist_input: dict[str, Any] | None = None) -
 
 def _select_tool(names: list[str], specialist_input: dict[str, Any]) -> str | None:
     if "resolve_report_lot_report_source" in names:
-        return "resolve_report_lot_report_source"
+        request = _specialist_request(specialist_input).casefold()
+        is_report = specialist_input.get(
+            "task_id"
+        ) == "simulated_farm_report" or "signed_report_source" in specialist_input.get(
+            "required_evidence", ()
+        )
+        if is_report:
+            return "resolve_report_lot_report_source" if _extract_lot_code(request) else None
+        for terms, tool in (
+            (("aplicaç", "aplicac"), "list_applications"),
+            (("lote",), "list_lots"),
+            (("animal", "animais", "bovin", "rebanho"), "get_farm_summary"),
+            (("fazenda", "propriedade", "propriedades", "imóvel", "imóveis"), "list_properties"),
+        ):
+            if tool in names and any(term in request for term in terms):
+                return tool
+        return None
     if "prepare_report" in names:
         return "prepare_report"
     if "list_medicines" in names:
         return "list_medicines"
     safe_tools = [name for name in names if name not in {"send_report"}]
     return safe_tools[0] if len(safe_tools) == 1 else None
+
+
+def _specialist_request(specialist_input: dict[str, Any]) -> str:
+    return " ".join(
+        str(specialist_input.get(field) or "") for field in ("goal", "brief_sanitized", "request")
+    )
 
 
 def _next_tool(

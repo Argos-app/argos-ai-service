@@ -6,6 +6,7 @@ import ssl
 from collections.abc import Callable
 from email.message import EmailMessage
 from email.utils import make_msgid
+from html import escape
 
 from argos_mcp_email.domain import ReportAttachmentRecord
 from argos_mcp_email.ports.mail_provider import ProviderSendResult
@@ -90,6 +91,26 @@ class SmtpMailProvider:
         message["Subject"] = subject
         message["Message-ID"] = message_id
         message.set_content(body)
+        message.add_alternative(
+            '<!doctype html><html lang="pt-BR"><body style="margin:0;background:#f3f5f2;'
+            'font-family:Arial,sans-serif;color:#24332b;">'
+            '<table role="presentation" style="width:100%;border-collapse:collapse;">'
+            '<tr><td style="padding:32px 16px;">'
+            '<table role="presentation" style="width:100%;max-width:640px;margin:auto;'
+            'border-collapse:collapse;background:#ffffff;">'
+            '<tr><td style="background:#234b39;padding:24px 32px;color:#ffffff;">'
+            '<span style="font-size:14px;font-weight:bold;letter-spacing:2px;">ARGOS</span>'
+            f'<h1 style="font-size:22px;line-height:1.3;margin:12px 0 0;">{escape(subject)}</h1>'
+            '</td></tr><tr><td style="padding:28px 32px;">'
+            '<p style="margin:0 0 20px;color:#5d7065;">Confira abaixo as informações '
+            "do relatório.</p>"
+            '<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;'
+            f'overflow-wrap:anywhere;">{escape(body)}</div>'
+            '</td></tr><tr><td style="border-top:1px solid #e4eae6;padding:20px 32px;'
+            'font-size:12px;color:#718078;">Argos · Relatório de lote</td></tr>'
+            "</table></td></tr></table></body></html>",
+            subtype="html",
+        )
         for attachment in attachments:
             maintype, subtype = attachment.content_type.split("/", maxsplit=1)
             message.add_attachment(

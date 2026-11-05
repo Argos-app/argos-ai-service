@@ -77,10 +77,10 @@ class PrepareReport:
             recipients=recipients,
             title=request.report_title,
         )
-        attachment_content = rendered.body.encode("utf-8")
+        attachment_content = rendered.pdf
         attachment = ReportAttachmentRecord(
-            filename=f"relatorio-{report_id}.txt",
-            content_type="text/plain",
+            filename=f"relatorio-{report_id}.pdf",
+            content_type="application/pdf",
             content=attachment_content,
             sha256=sha256(attachment_content).hexdigest(),
         )

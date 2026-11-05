@@ -68,7 +68,9 @@ class FakeRecipientDirectory:
 
 class FakeRenderer:
     def render(self, *, report, recipients, title):
-        return RenderedReport(subject=title, body=f"{report.requested_lot.lot_code}: pronto")
+        return RenderedReport(
+            subject=title, body=f"{report.requested_lot.lot_code}: pronto", pdf=b"%PDF-test"
+        )
 
 
 class FakeReportRepository:
@@ -121,15 +123,15 @@ async def test_prepares_and_persists_report_when_all_recipients_resolve():
     assert result.status == PreparedReportStatus.PREPARED
     assert result.body == "BOI-FELIZ: pronto"
     attachment = result.attachments[0]
-    assert attachment.filename.endswith(".txt")
-    assert attachment.size_bytes == len(result.body.encode("utf-8"))
-    assert attachment.sha256 == sha256(result.body.encode("utf-8")).hexdigest()
+    assert attachment.filename.endswith(".pdf")
+    assert attachment.size_bytes == len(b"%PDF-test")
+    assert attachment.sha256 == sha256(b"%PDF-test").hexdigest()
     assert len(repository.saved) == 1
     assert repository.saved[0].attachments == (
         ReportAttachmentRecord(
             filename=attachment.filename,
-            content_type="text/plain",
-            content=result.body.encode("utf-8"),
+            content_type="application/pdf",
+            content=b"%PDF-test",
             sha256=attachment.sha256,
         ),
     )

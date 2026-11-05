@@ -1,7 +1,15 @@
 """Renderização determinística de relatórios de lote."""
 
 from importlib import resources
+from io import BytesIO
 from string import Template
+from xml.sax.saxutils import escape
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from argos_mcp_email.ports.report_renderer import RenderedReport
 from packages.contracts import LotReportData, RecipientRef
@@ -72,7 +80,8 @@ class TemplateReportRenderer:
             queried_at=report.queried_at.isoformat(),
         )
         subject = f"{title.strip()} — lote {lot.lot_code}"
-        return RenderedReport(subject=subject, body=body.strip())
+        body = body.strip()
+        return RenderedReport(subject=subject, body=body, pdf=_render_pdf(subject, body))
 
     @staticmethod
     def _load_default_template() -> str:
@@ -81,3 +90,29 @@ class TemplateReportRenderer:
             .joinpath("lot_report.txt")
             .read_text(encoding="utf-8")
         )
+
+
+def _render_pdf(subject: str, body: str) -> bytes:
+    output = BytesIO()
+    document = SimpleDocTemplate(output, leftMargin=20 * mm, rightMargin=20 * mm)
+    title_style = ParagraphStyle(
+        "title",
+        fontName="Helvetica-Bold",
+        fontSize=19,
+        leading=24,
+        textColor=colors.HexColor("#234b39"),
+        spaceAfter=16,
+    )
+    text_style = ParagraphStyle(
+        "body",
+        fontName="Helvetica",
+        fontSize=10,
+        leading=15,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor("#24332b"),
+    )
+    content = [Paragraph(escape(subject), title_style)]
+    for line in body.splitlines():
+        content.append(Paragraph(escape(line), text_style) if line else Spacer(1, 7))
+    document.build(content)
+    return output.getvalue()

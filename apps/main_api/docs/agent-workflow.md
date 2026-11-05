@@ -15,6 +15,12 @@ resposta segura. Perguntas passam pelo formatador e guardrail de pergunta;
 respostas aprovadas passam pelo guardrail de saída. O limite atual de revisão é
 um; o Juiz não executa ferramentas por conta própria.
 
+O roteador classifica saudações, despedidas e agradecimentos isolados e propõe
+uma resposta que passa pelo Juiz e pelo guardrail de saída. Perguntas sobre a
+identidade e capacidades do Argos são encaminhadas a Informações, que consulta o
+A2A documental; a resposta segue para Orquestrador e Juiz. Pedidos com tarefas
+ou dados faltantes seguem o fluxo habitual, mesmo com uma categoria social.
+
 Uma tarefa dependente recebe o resultado das dependências indicadas no plano. No
 fluxo de relatório, o executor preserva uma referência ao envelope de origem
 assinado, validada antes de seu uso pelo Secretário. Respostas de pergunta são

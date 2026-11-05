@@ -2,13 +2,13 @@ name: Deploy Render
 
 on:
     push:
-        branches: [develop, main]
+        branches: [develop, main, docs/docs-d]
     workflow_dispatch:
 
 # Serialize toda a publicação. Recupere publicações incompletas implantando os cinco
 # serviços, inclusive alterações revertidas após uma implantação parcial.
 concurrency:
-    group: render-${{ github.ref }}
+    group: render-${{ github.ref_name == 'develop' && 'hm' || 'prod' }}
     cancel-in-progress: false
 
 permissions:
@@ -18,7 +18,7 @@ permissions:
 jobs:
     plan:
         name: Select services and environment
-        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/docs/docs-d'
         runs-on: ubuntu-24.04
         outputs:
             services: ${{ steps.services.outputs.services }}
@@ -54,7 +54,7 @@ jobs:
                   BASE_SHA: ${{ steps.baseline.outputs.sha }}
                   DEPLOY_SHA: ${{ github.sha }}
                   DEPLOY_BRANCH: ${{ github.ref_name }}
-                  FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' }}
+                  FORCE_ALL: ${{ github.event_name == 'workflow_dispatch' || github.ref_name == 'main' || github.ref_name == 'docs/docs-d' }}
               run: python scripts/render/plan.py
 
     ci:

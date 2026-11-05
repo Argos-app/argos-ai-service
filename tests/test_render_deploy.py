@@ -122,7 +122,9 @@ def test_git_range_includes_multiple_commits_deletions_and_cross_service_moves(
     assert plan.affected_services(paths) == ["main_api", "mcp_data", "mcp_email"]
 
 
-@pytest.mark.parametrize("branch,environment", [("develop", "hm"), ("main", "prod")])
+@pytest.mark.parametrize(
+    "branch,environment", [("develop", "hm"), ("main", "prod"), ("docs/docs-d", "prod")]
+)
 @pytest.mark.parametrize("force,base", [("false", ""), ("true", SHA)])
 def test_initial_and_manual_rollouts_deploy_every_service(
     branch, environment, force, base, tmp_path, monkeypatch
@@ -143,7 +145,7 @@ def test_initial_and_manual_rollouts_deploy_every_service(
 
 def test_unrelated_branch_cannot_select_an_environment(monkeypatch):
     monkeypatch.setenv("DEPLOY_BRANCH", "feature/cloud")
-    with pytest.raises(SystemExit, match="Somente as branches develop e main"):
+    with pytest.raises(SystemExit, match="Somente as branches develop, main e docs/docs-d"):
         plan.main()
 
 
@@ -220,6 +222,20 @@ def test_deployment_sends_exact_commit_and_waits_for_live(monkeypatch):
     assert deploy.deploy("srv-test", "token", SHA, "develop").endswith("/dep-test")
     assert calls[1] == ("POST", "services/srv-test/deploys", "token", {"commitId": SHA})
     assert len(calls) == 5
+
+
+def test_feature_branch_deploy_requires_matching_render_branch(monkeypatch):
+    responses = iter(
+        [
+            SERVICE | {"branch": "docs/docs-d"},
+            {"id": "dep-test"},
+            {"status": "live", "commit": {"id": SHA}},
+        ]
+    )
+    monkeypatch.setattr(deploy, "request", lambda *args: next(responses))
+    assert deploy.deploy("srv-test", "token", SHA, "docs/docs-d").endswith("/dep-test")
+    with pytest.raises(ValueError, match="não corresponde"):
+        deploy.validate_service(SERVICE | {"branch": "main"}, "docs/docs-d")
 
 
 @pytest.mark.parametrize(

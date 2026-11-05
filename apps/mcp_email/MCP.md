@@ -11,8 +11,8 @@ envelope assinado e a Main API controla a autorização da operação de envio.
 
 - `prepare_report`: valida o envelope de origem assinado, resolve os
   destinatários no diretório relacional, renderiza o e-mail, cria um anexo
-  `text/plain` UTF-8 chamado `relatorio-{report_id}.txt` com os mesmos bytes do
-  corpo e persiste a preparação. A resposta `PreparedReport` informa
+  `application/pdf` chamado `relatorio-{report_id}.pdf`, com os dados do
+  relatório, e persiste a preparação. A resposta `PreparedReport` informa
   `attachments[]` com nome, MIME, tamanho e SHA-256; preparar não envia.
 - `send_report`: envia a preparação aprovada com `report_id` e chave de
   idempotência. Repetir uma operação reclamada não reenvia automaticamente:

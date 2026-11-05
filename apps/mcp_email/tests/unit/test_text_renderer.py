@@ -1,7 +1,9 @@
 from datetime import UTC, date, datetime
+from io import BytesIO
 from uuid import uuid4
 
 from argos_mcp_email.adapters.rendering import TemplateReportRenderer
+from pypdf import PdfReader
 
 from packages.contracts import (
     ApplicationRecord,
@@ -56,3 +58,7 @@ def test_renderer_fills_controlled_lot_template() -> None:
     assert "Fazenda: Fazenda Argos" in result.body
     assert "Vacina Teste" in result.body
     assert "MED-001" in result.body
+    pdf_text = "\n".join(page.extract_text() for page in PdfReader(BytesIO(result.pdf)).pages)
+    assert "BOI-FELIZ" in pdf_text
+    assert "Vacina Teste" in pdf_text
+    assert "MED-001" in pdf_text

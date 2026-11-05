@@ -45,6 +45,23 @@ def test_simulated_model_returns_native_structured_route() -> None:
     assert result["structured_response"].tasks[0].agent.value == "farm"
 
 
+@pytest.mark.asyncio
+async def test_simulated_graph_handles_greeting_without_calling_farm_tools() -> None:
+    from app.application.execution_limits import execution_limits_scope
+    from app.graph.workflow import build_graph, execute_workflow
+
+    model = SimulatedChatModel()
+    factory = build_agent_factory({policy: model for policy in ModelPolicyId}, use_mock_tools=True)
+    limits = ExecutionLimits(6, 6)
+    with execution_limits_scope(limits):
+        result = await execute_workflow(
+            build_graph(factory), "Oi", user_id="user", farm_id="farm", session_id="session"
+        )
+    assert result["called_agents"] == ["router", "judge"]
+    assert result["final_answer"] == "Olá! Como posso ajudar?"
+    assert limits.tool_calls == 0
+
+
 def test_model_output_contracts_ignore_unknown_provider_fields() -> None:
     route = RoutePlan.model_validate({"intent": "lookup", "provider_metadata": {"x": 1}})
     synthesis = OrchestratorResult.model_validate(

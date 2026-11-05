@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from enum import StrEnum
+from typing import Literal
 
 from app.agent_schemas.inputs import QuestionFormattingRequest
 from app.ports.agent import AgentId
@@ -177,6 +178,8 @@ class RoutePlan(_AgentOutput):
     intent: str = Field(min_length=1)
     tasks: tuple[RouteTask, ...] = ()
     missing_slots: tuple[str, ...] = ()
+    social_intent: Literal["greeting", "farewell", "gratitude"] | None = None
+    social_reply: str | None = Field(default=None, min_length=1, max_length=600)
 
 
 class QuestionFormatterResult(_AgentOutput):

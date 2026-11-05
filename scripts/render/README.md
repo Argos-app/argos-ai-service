@@ -8,14 +8,22 @@ de imagens nem publicação em registry.
 
 ## Ambientes e atualização automática
 
-| Branch    | GitHub Environment | Serviços Render                          |
-| --------- | ------------------ | ---------------------------------------- |
-| `develop` | `hm`               | Cinco serviços exclusivos de homologação |
-| `main`    | `prod`             | Cinco serviços exclusivos de produção    |
+| Branch        | GitHub Environment | Serviços Render                                      |
+| ------------- | ------------------ | ---------------------------------------------------- |
+| `develop`     | `hm`               | Cinco serviços exclusivos de homologação             |
+| `main`        | `prod`             | Cinco serviços exclusivos de produção                |
+| `docs/docs-d` | `prod`             | Serviços de produção configurados para `docs/docs-d` |
 
 O evento `push` inclui merges normais, squash e rebase. Push direto nessas
 branches também dispara o fluxo; configure proteção de branch para exigir PR e
 CI aprovada se somente merges forem permitidos.
+
+Para publicar `docs/docs-d` em `prod`, os IDs configurados no GitHub Environment
+`prod` devem apontar para serviços Render cuja branch seja `docs/docs-d`, e as
+regras desse environment devem permitir a branch. O deploy de `main` exige que
+os mesmos serviços estejam configurados para `main`; uma branch diferente é
+rejeitada antes de iniciar o deploy. Não há troca automática da branch no
+Render.
 
 O workflow aguarda sucesso da execução `push` da CI (`ci.yml`) para o mesmo SHA,
 por até 30 minutos. No deploy manual, também aceita uma execução manual da CI
@@ -25,8 +33,10 @@ demais se um falhar. Cada job acompanha seu deploy por até 20 minutos e só
 conclui com `live` e o SHA esperado; isso confirma o deploy do processo, não uma
 homologação funcional de todas as integrações externas.
 
-A seleção compara o commit atual com o último workflow de deploy concluído com
-sucesso na mesma branch, incluindo todas as alterações do intervalo:
+Em homologação, a seleção compara o commit atual com o último workflow de deploy
+concluído com sucesso na mesma branch, incluindo todas as alterações do
+intervalo. Em produção, todas as execuções selecionam os cinco serviços para
+evitar versões misturadas ao alternar entre `main` e `docs/docs-d`:
 
 - Alterações em `apps/<serviço>/` atualizam somente aquela aplicação, incluindo
   dependências, arquivos adicionados, removidos e renomeados.
@@ -39,14 +49,15 @@ sucesso na mesma branch, incluindo todas as alterações do intervalo:
   selecionam os serviços conforme seus caminhos.
 - A primeira execução, a execução após falha/cancelamento e a execução manual
   por `workflow_dispatch` atualizam os cinco serviços. Na execução manual,
-  selecione `develop` ou `main`; outras branches são ignoradas e o commit
-  selecionado precisa ter CI aprovada para o mesmo SHA, por push ou execução
-  manual.
+  selecione `develop`, `main` ou `docs/docs-d`; outras branches são ignoradas e
+  o commit selecionado precisa ter CI aprovada para o mesmo SHA, por push ou
+  execução manual.
 
-Execuções são serializadas por branch. Se a última execução concluída falhar ou
-for cancelada (incluindo a substituição de uma execução pendente), o próximo
-deploy atualiza todos os serviços. Isso cobre também a reversão de mudanças que
-chegaram ao Render em um deploy parcialmente bem-sucedido.
+Execuções são serializadas por ambiente; `main` e `docs/docs-d` compartilham a
+fila de produção. Se a última execução concluída falhar ou for cancelada
+(incluindo a substituição de uma execução pendente), o próximo deploy atualiza
+todos os serviços. Isso cobre também a reversão de mudanças que chegaram ao
+Render em um deploy parcialmente bem-sucedido.
 
 ## Configuração inicial no Render
 

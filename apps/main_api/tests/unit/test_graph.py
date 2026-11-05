@@ -125,6 +125,130 @@ async def test_empty_route_is_not_retried_or_rewritten_by_keyword_rules():
 
 
 @pytest.mark.asyncio
+async def test_social_classification_does_not_bypass_planned_business_task():
+    router = FakeAgent(
+        RoutePlan(
+            intent="consultar lote", social_intent="greeting", social_reply="Olá!", tasks=(task(),)
+        )
+    )
+    update = await run_router_node(
+        request_state("Oi, quantos animais tenho?"), factory=FakeFactory(router=router)
+    )
+    assert "final_answer" not in update
+    assert "draft_result" not in update
+    assert update["ordered_tasks"][0].agent.value == "farm"
+
+
+@pytest.mark.asyncio
+async def test_social_classification_does_not_skip_missing_slots_or_resume_answer():
+    router = FakeAgent(
+        RoutePlan(intent="consulta", social_intent="greeting", missing_slots=("lote",))
+    )
+    update = await run_router_node(request_state("qual lote?"), factory=FakeFactory(router=router))
+    assert update["clarification_request"] is not None
+    assert "final_answer" not in update
+
+    state = request_state("obrigado")
+    state["input_kind"] = "answer"
+    router = FakeAgent(RoutePlan(intent="resposta", social_intent="gratitude"))
+    update = await run_router_node(state, factory=FakeFactory(router=router))
+    assert "Não consegui identificar" in update["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_social_graph_reviews_response_and_resets_on_next_message():
+    router = FakeAgent(
+        RoutePlan(intent="saudação", social_intent="greeting", social_reply="Oi! Tudo bem?"),
+        RoutePlan(intent="pergunta fora do escopo"),
+    )
+    graph = build_graph(
+        FakeFactory(
+            router=router,
+            judge=FakeAgent(JudgeResult(decision="approved", reason="Saudação adequada.")),
+        ),
+        checkpointer=MemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "social-test"}}
+
+    first = await graph.ainvoke(request_state("Oi, tudo bem?"), config=config)
+    second = await graph.ainvoke(request_state("o que é Minecraft?"), config=config)
+
+    assert first["called_agents"] == ["router", "judge"]
+    assert first["final_answer"] == "Oi! Tudo bem?"
+    assert first["messages"][-1].content == first["final_answer"]
+    assert second["called_agents"] == ["router"]
+    assert second["final_answer"].startswith("Não consegui identificar")
+    assert not second["errors"]
+
+
+@pytest.mark.asyncio
+async def test_social_graph_revises_through_orchestrator_before_approval():
+    orchestrator = FakeAgent(OrchestratorResult(draft_answer="Olá! Como posso ajudar?"))
+    graph = build_graph(
+        FakeFactory(
+            router=FakeAgent(
+                RoutePlan(intent="saudação", social_intent="greeting", social_reply="Olá.")
+            ),
+            judge=FakeAgent(
+                JudgeResult(decision="revise", reason="Responda de modo mais acolhedor."),
+                JudgeResult(decision="approved", reason="Saudação adequada."),
+            ),
+            orchestrator=orchestrator,
+        )
+    )
+
+    result = await graph.ainvoke(request_state("Oi!"))
+
+    assert result["called_agents"] == ["router", "judge", "orchestrator", "judge"]
+    assert orchestrator.calls[0][0].outcomes == ()
+    assert orchestrator.calls[0][0].revision_feedback == "Responda de modo mais acolhedor."
+    assert result["final_answer"] == "Olá! Como posso ajudar?"
+
+
+@pytest.mark.asyncio
+async def test_social_graph_does_not_publish_a_rejected_draft():
+    graph = build_graph(
+        FakeFactory(
+            router=FakeAgent(
+                RoutePlan(intent="saudação", social_intent="greeting", social_reply="Rascunho")
+            ),
+            judge=FakeAgent(JudgeResult(decision="rejected", reason="Não atende ao pedido.")),
+        )
+    )
+    result = await graph.ainvoke(request_state("Oi!"))
+    assert result["final_answer"] != "Rascunho"
+    assert "judge_rejected" in result["errors"]
+
+
+@pytest.mark.asyncio
+async def test_social_reply_missing_does_not_generate_a_fixed_greeting():
+    router = FakeAgent(RoutePlan(intent="saudação", social_intent="greeting"))
+    update = await run_router_node(request_state("Oi!"), factory=FakeFactory(router=router))
+    assert update["final_answer"] == SAFE_ANSWER
+    assert "router_social_response_missing" in update["errors"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_evidence", [True, False])
+async def test_identity_answer_requires_document_evidence(has_evidence):
+    state = request_state("Quem é você?")
+    state.update(ordered_tasks=(task(agent="information"),), current_task_index=0)
+    agent = FakeAgent(
+        SpecialistResult(agent="information", status="success", answer="Sou o assistente do Argos.")
+    )
+    limits = ExecutionLimits(4, 4)
+    if has_evidence:
+        limits.record_tool_success("information", "consultar_documental", '{"status":"success"}')
+    with execution_limits_scope(limits):
+        update = await run_specialist_node(
+            state, factory=FakeFactory(information=agent), agent_id=AgentId.INFORMATION
+        )
+    result = update["task_outcomes"][0].result
+    assert result.status == ("success" if has_evidence else "unavailable")
+    assert bool(result.sources) == has_evidence
+
+
+@pytest.mark.asyncio
 async def test_information_provider_failure_preserves_successful_a2a_evidence():
     state = request_state("O que dizem os termos?")
     state.update(ordered_tasks=(task(agent="information"),), current_task_index=0)

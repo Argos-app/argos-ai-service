@@ -10,6 +10,7 @@ from packages.contracts import LotReportData, RecipientRef
 class RenderedReport:
     subject: str
     body: str
+    pdf: bytes
 
 
 class ReportRenderer(Protocol):

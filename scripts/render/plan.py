@@ -43,8 +43,8 @@ def changed_paths(base: str, head: str) -> list[str]:
 
 def main() -> None:
     branch = os.environ["DEPLOY_BRANCH"]
-    if branch not in {"develop", "main"}:
-        raise SystemExit("Somente as branches develop e main podem ser implantadas.")
+    if branch not in {"develop", "main", "docs/docs-d"}:
+        raise SystemExit("Somente as branches develop, main e docs/docs-d podem ser implantadas.")
     base = os.environ.get("BASE_SHA", "")
     services = list(SERVICES)
     if base and os.environ.get("FORCE_ALL") != "true":

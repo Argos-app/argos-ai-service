@@ -217,6 +217,38 @@ def test_simulated_model_emits_a_valid_route_plan():
     assert route.tasks[0].agent is SpecialistAgentId.FARM
 
 
+@pytest.mark.parametrize("message", ["Oi", "Bom dia!", "Obrigada", "Tchau"])
+def test_simulated_social_message_does_not_plan_farm_query(message):
+    route = SimulatedChatModel().with_structured_output(RoutePlan).invoke(message)
+    assert route.social_intent is not None
+    assert route.social_reply
+    assert not route.tasks
+
+
+@pytest.mark.parametrize(
+    ("goal", "expected"),
+    [
+        ("Quais fazendas tenho disponíveis?", "list_properties"),
+        ("Quais lotes tenho?", "list_lots"),
+        ("Quantos animais tenho?", "get_farm_summary"),
+        ("Uma pergunta sem consulta identificável", None),
+    ],
+)
+def test_simulated_farm_selects_only_a_matching_tool(goal, expected):
+    from app.infrastructure.agents.simulated_model import _next_tool
+
+    tools = ["resolve_report_lot_report_source", "list_properties", "list_lots", "get_farm_summary"]
+    assert _next_tool(tools, {"goal": goal}, []) == expected
+
+
+def test_simulated_report_does_not_invent_a_lot():
+    from app.infrastructure.agents.simulated_model import _next_tool, _tool_arguments
+
+    request = {"task_id": "simulated_farm_report", "goal": "Consultar relatório do lote"}
+    assert _next_tool(["resolve_report_lot_report_source"], request, []) is None
+    assert _tool_arguments("resolve_report_lot_report_source", request) == {}
+
+
 def test_simulated_model_preserves_router_request_for_document_search():
     from app.infrastructure.agents.simulated_model import _tool_arguments
 
@@ -387,7 +419,7 @@ def test_simulated_secretary_sends_only_after_preparation_and_explicit_intent():
     assert (
         _next_tool(
             ["resolve_report_lot_report_source", "list_lots"],
-            {"task_id": "simulated_farm_report"},
+            {"task_id": "simulated_farm_report", "goal": "Relatório do lote HC-LOTE-076"},
             [],
         )
         == "resolve_report_lot_report_source"

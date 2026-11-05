@@ -215,6 +215,8 @@ simulados usam hashing lexical determinístico: termos compartilhados ajudam a
 recuperar trechos relacionados, mas não há compreensão semântica. A resposta
 mostra os trechos encontrados e suas citações, sem inventar uma síntese; o modo
 continua voltado a testar contratos e integração, não a qualidade de modelos.
+Saudações, agradecimentos e despedidas comuns usam respostas determinísticas
+nesse modo; o reconhecimento não representa a compreensão de um modelo real.
 
 No modo `provider`, preencha os endpoints, nomes e chaves correspondentes em
 `.env`, usando `.env.example` da raiz como referência. Configure

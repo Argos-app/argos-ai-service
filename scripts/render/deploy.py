@@ -57,8 +57,10 @@ def validate_service(service: dict, branch: str) -> None:
 
 
 def deploy(service_id: str, token: str, sha: str, branch: str, timeout: int = 1200) -> str:
-    if branch not in {"develop", "main"} or not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise ValueError("Informe uma branch develop/main e o SHA completo do commit Git.")
+    if branch not in {"develop", "main", "docs/docs-d"} or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError(
+            "Informe uma branch develop, main ou docs/docs-d e o SHA completo do commit Git."
+        )
     if not token or not re.fullmatch(r"srv-[a-zA-Z0-9]+", service_id):
         raise ValueError("Configure a secret de ambiente RENDER_API_KEY e RENDER_SERVICE_ID_*.")
     path = f"services/{service_id}"

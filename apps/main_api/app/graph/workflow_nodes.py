@@ -474,6 +474,12 @@ async def run_router_node(
             reason_code="MISSING_FIELDS",
             question_goal=f"Informe os dados necessários: {', '.join(fields)}.",
         )
+    elif not ordered and plan.social_intent and state.get("input_kind") == "message":
+        if plan.social_reply:
+            update["draft_result"] = OrchestratorResult(draft_answer=plan.social_reply)
+        else:
+            update["errors"] = [*state.get("errors", []), "router_social_response_missing"]
+            update["final_answer"] = SAFE_ANSWER
     elif not ordered:
         update["final_answer"] = (
             "Não consegui identificar uma solicitação que os agentes do Argos possam atender."
@@ -825,6 +831,8 @@ def route_after_router(state: AgentState) -> str:
         return "safe"
     if state.get("clarification_request"):
         return "question_formatter"
+    if state.get("draft_result"):
+        return "judge"
     return state["ordered_tasks"][0].agent.value
 
 
