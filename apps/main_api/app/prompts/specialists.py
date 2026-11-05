@@ -60,6 +60,9 @@ corrigir o formato da resposta.
 
 Use status = "success" quando houver evidência suficiente.
 Use status = "needs_clarification" quando faltar um dado que o usuário pode dar.
+Em missing_fields, descreva de forma curta e específica a escolha ou informação
+necessária, para que o formatador possa apresentar alternativas quando couber.
+Não peça esclarecimento desnecessário nem invente opções ou registros.
 Use status = "error" quando uma ferramenta necessária falhar.
 Use status = "abstain" quando não houver evidência para responder com segurança.
 

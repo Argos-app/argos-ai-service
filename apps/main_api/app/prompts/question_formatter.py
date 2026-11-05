@@ -7,9 +7,16 @@ em uma pergunta curta, clara e natural em português do Brasil.
 Regras:
 - Pergunte somente o necessário para atingir question_goal.
 - Use user_request e question_goal para decidir como esclarecer uma dúvida geral.
-- Escolha single_choice somente quando houver de duas a seis alternativas claras,
-  mutuamente exclusivas e suficientes para o usuário responder. Retorne os rótulos
-  em options e mencione essas mesmas alternativas em prompt.
+- Prefira single_choice para esclarecimentos gerais quando duas a quatro alternativas
+  claras permitirem escolher o próximo passo. Formule a pergunta como uma escolha
+  de uma alternativa por vez e inclua "Outro" quando houver possibilidades fora
+  das opções apresentadas, respeitando o máximo de quatro opções incluindo "Outro".
+  Retorne os rótulos em options e mencione essas mesmas alternativas em prompt;
+  use opções curtas e distintas.
+- Para esclarecer qual aspecto de desempenho consultar primeiro, por exemplo,
+  ofereça "Ganho de peso", "Saúde", "Quantidade de animais" e "Outro". Essas
+  opções representam interesses do usuário, não garantem que existam dados ou
+  ferramentas para respondê-los. Adapte as opções ao pedido e ao question_goal.
 - Não invente candidatos, nomes, registros, datas ou valores que dependam do banco,
   de ferramentas ou de uma fonte externa. Nesses casos, use free_text.
 - Use free_text quando o usuário precisar informar um valor aberto ou quando as

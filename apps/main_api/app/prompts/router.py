@@ -60,6 +60,17 @@ histórico e cobertura confirmada. Não planeje consulta de estoque, pois esse
 recurso não existe neste sistema. Só inclua Fazenda quando a pergunta também
 pedir um dado observado independente da previsão.
 
+Para perguntas sobre desempenho, situação ou evolução de um ou vários lotes,
+planeje primeiro uma tarefa de Fazenda para localizar os lotes e consultar os
+dados autorizados relevantes. Em consultas amplas, respeite a paginação e os
+limites; não suponha que uma página contém todos os registros. Se o indicador
+não estiver claro, oriente Fazenda
+a apresentar os dados disponíveis pertinentes e pedir o esclarecimento necessário;
+não presuma o indicador nem conclua que o desempenho é bom ou ruim. Inclua o
+Analista somente quando houver uma avaliação, comparação ou cálculo específico
+que dependa dos dados de Fazenda, e faça essa tarefa depender da consulta. Não
+suponha que existam medições, indicadores ou ferramentas para calculá-los.
+
 Para preparar ou enviar um novo relatório de lote, sempre planeje Fazenda antes
 do Secretário e faça o Secretário depender da tarefa de Fazenda. Fazenda deve
 resolver a origem assinada com resolve_report_lot_report_source; listar o lote
@@ -144,6 +155,13 @@ Pergunta: "Quais bovinos do lote 12 ainda estão em carência?"
 RoutePlan: intent="consultar carências"; tasks=[
   {task_id:"t1", agent:"farm", goal:"Consultar bovinos em carência no lote 12",
    brief_sanitized:"Consultar registros de carência do lote 12",
+   depends_on:[]}
+]; missing_slots=[].
+
+Pergunta: "Como está o desempenho do lote EXC-001?"
+RoutePlan: intent="consultar desempenho do lote EXC-001"; tasks=[
+  {task_id:"t1", agent:"farm", goal:"Consultar dados disponíveis do lote EXC-001",
+   brief_sanitized:"Consultar o lote EXC-001 e esclarecer o indicador desejado",
    depends_on:[]}
 ]; missing_slots=[].
 

@@ -1,8 +1,11 @@
 """Composição das dependências do MCP de e-mail."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+from anyio import ClosedResourceError
 
 from argos_mcp_email.adapters.provider import SmtpMailProvider
 from argos_mcp_email.adapters.recipients import RelationalRecipientDirectory
@@ -16,6 +19,23 @@ from argos_mcp_email.application import GetReportStatus, PrepareReport, SendRepo
 from argos_mcp_email.infrastructure import AsyncpgSqlExecutor
 from argos_mcp_email.server import McpEmailServer, create_mcp_server, register_email_tools
 from argos_mcp_email.settings import Settings
+
+
+class _ClosedSseStreamFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if (
+            record.getMessage() == "Error in standalone SSE writer"
+            and record.exc_info
+            and isinstance(record.exc_info[1], ClosedResourceError)
+        ):
+            # shortcut: MCP 1.x logs closed SSE streams as errors; remove after SDK fix.
+            record.levelno = logging.WARNING
+            record.levelname = "WARNING"
+            record.msg = "Canal SSE do MCP fechado; a sessão pode estar sendo encerrada"
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
+        return True
 
 
 @dataclass(slots=True)
@@ -169,6 +189,10 @@ async def run_server(
         import uvicorn
 
         from packages.security.mcp_bearer import McpBearerMiddleware
+
+        logger = logging.getLogger("mcp.server.streamable_http")
+        if not any(isinstance(item, _ClosedSseStreamFilter) for item in logger.filters):
+            logger.addFilter(_ClosedSseStreamFilter())
 
         configured = settings or Settings.from_env()
         app = McpBearerMiddleware(

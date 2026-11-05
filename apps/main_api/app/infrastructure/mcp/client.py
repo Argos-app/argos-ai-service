@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field, replace
@@ -13,6 +14,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
+from anyio import ClosedResourceError
 
 from app.application.operation_observation import active_collector, observe_operation
 from app.settings import Settings
@@ -49,6 +51,13 @@ MCP_TOOL_ALLOWLISTS: Mapping[str, frozenset[str]] = {
     "email": frozenset({"prepare_report", "send_report", "get_report_status"}),
 }
 _MAX_RESPONSE_BYTES = 1_000_000
+_LOGGER = logging.getLogger(__name__)
+
+
+def _only_closed_resources(error: BaseException) -> bool:
+    if isinstance(error, BaseExceptionGroup):
+        return all(_only_closed_resources(item) for item in error.exceptions)
+    return isinstance(error, ClosedResourceError)
 
 
 class McpClientConfigurationError(ValueError):
@@ -281,6 +290,7 @@ class McpToolServerClient:
             if not isinstance(arguments, Mapping):
                 raise TypeError("arguments deve ser um objeto")
 
+            result = None
             try:
                 propagated_headers = dict(request_headers or {})
                 correlation_id = current_correlation_id()
@@ -290,13 +300,20 @@ class McpToolServerClient:
                     propagated_headers["X-Argos-Correlation-ID"] = str(correlation_id)
                 async with self._session(propagated_headers) as session:
                     result = await session.call_tool(name, dict(arguments))
-            except McpConnectionError:
-                raise
-            self._check_response_size(result)
-            if result.isError:
-                raise McpToolExecutionError(
-                    f"a ferramenta {name!r} retornou erro no MCP {self.service_name}"
-                )
+                    self._check_response_size(result)
+                    if result.isError:
+                        raise McpToolExecutionError(
+                            f"a ferramenta {name!r} retornou erro no MCP {self.service_name}"
+                        )
+            except Exception as exc:
+                if not (
+                    self.service_name == "email"
+                    and result is not None
+                    and not result.isError
+                    and _only_closed_resources(exc)
+                ):
+                    raise
+                _LOGGER.warning("canal MCP de e-mail fechado após receber a resposta")
             return result
 
     @asynccontextmanager
