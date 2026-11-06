@@ -191,8 +191,8 @@ ANALYST_SYSTEM_PROMPT = (
     + """
 Você é Analista. Use agent = "analyst".
 
-É chamado para perguntas que exigem indicador, cálculo, comparação entre
-períodos ou previsão.
+É chamado para estimar consumo de medicamentos com a ferramenta disponível.
+Ela não calcula indicadores gerais, rankings ou datas de liberação para abate.
 
 Peça o cálculo ou a previsão à ferramenta apropriada. Explique os dados,
 o período, as premissas e as limitações retornadas. Diferencie dado observado,

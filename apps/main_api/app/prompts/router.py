@@ -30,7 +30,7 @@ preserve-os na tarefa. Não suponha diagnóstico, urgência ou dados da fazenda.
 Especialistas permitidos:
 - farm: aplicações registradas, lotes, bovinos em exceção e carências da fazenda.
 - doctor: informações documentadas sobre medicamentos para bovinos.
-- analyst: indicadores, cálculos, comparações e previsões.
+- analyst: estimativa de consumo de medicamentos com base no histórico disponível.
 - secretary: organização de dados, preparação/envio de relatórios e consulta do
   estado de e-mails.
 - information: dúvidas gerais sobre o Argos, termos, condições e FAQs.
@@ -70,6 +70,11 @@ Para previsão de consumo, encaminhe ao Analista; a ferramenta disponível consu
 histórico e cobertura confirmada. Não planeje consulta de estoque, pois esse
 recurso não existe neste sistema. Só inclua Fazenda quando a pergunta também
 pedir um dado observado independente da previsão.
+Não crie uma tarefa de Analista apenas para interpretar, comparar ou calcular
+dados de Fazenda: sua ferramenta de cálculo disponível estima consumo de
+medicamentos e não calcula indicadores gerais, rankings ou datas de abate.
+Encaminhe a consulta ao especialista que possui os dados ou a ferramenta
+adequada e peça que informe as limitações quando não houver cálculo verificável.
 
 Quando a solicitação for exclusivamente sobre saldo ou estoque de medicamentos,
 use intent="medicine_stock_unavailable", tasks=[], missing_slots=[],
@@ -85,10 +90,13 @@ dados autorizados relevantes. Em consultas amplas, respeite a paginação e os
 limites; não suponha que uma página contém todos os registros. Se o indicador
 não estiver claro, oriente Fazenda
 a apresentar os dados disponíveis pertinentes e pedir o esclarecimento necessário;
-não presuma o indicador nem conclua que o desempenho é bom ou ruim. Inclua o
-Analista somente quando houver uma avaliação, comparação ou cálculo específico
-que dependa dos dados de Fazenda, e faça essa tarefa depender da consulta. Não
-suponha que existam medições, indicadores ou ferramentas para calculá-los.
+não presuma o indicador nem conclua que o desempenho é bom ou ruim. Não suponha
+que existam medições, indicadores ou ferramentas para calculá-los.
+
+Para datas de liberação e carências de lotes, encaminhe a Fazenda para consultar
+os registros disponíveis. A data cadastrada não comprova, por si só, que todas
+as carências foram verificadas; peça que informe a cobertura e as limitações.
+Não crie tarefa do Analista para calcular liberação de abate.
 
 Para preparar ou enviar um novo relatório de lote, sempre planeje Fazenda antes
 do Secretário e faça o Secretário depender da tarefa de Fazenda. Fazenda deve
@@ -221,11 +229,15 @@ RoutePlan: intent="enviar relatório do lote"; tasks=[
 Pergunta: "Quais lotes tiveram mais aplicações neste mês?"
 RoutePlan: intent="comparar aplicações por lote"; tasks=[
   {task_id:"t1", agent:"farm", goal:"Obter aplicações por lote neste mês",
-   brief_sanitized:"Consultar aplicações por lote no mês solicitado",
-   depends_on:[]},
-  {task_id:"t2", agent:"analyst", goal:"Comparar contagens por lote",
-   brief_sanitized:"Comparar os resultados da tarefa t1",
-   depends_on:["t1"]}
+   brief_sanitized:"Consultar aplicações por lote e indicar limites da comparação",
+   depends_on:[]}
+]; missing_slots=[].
+
+Pergunta: "Liste os lotes e suas datas de liberação considerando as carências."
+RoutePlan: intent="consultar liberação e carências dos lotes"; tasks=[
+  {task_id:"t1", agent:"farm", goal:"Consultar lotes e registros de carência disponíveis",
+   brief_sanitized:"Consultar datas e carências registradas, informando limites e cobertura",
+   depends_on:[]}
 ]; missing_slots=[].
 
 Os exemplos só mostram como montar o plano. Não presuma que existam esses
