@@ -782,14 +782,11 @@ def _include_email_action_summary(answer: str, summary: str | None) -> str:
 
 
 def _confirmed_email_dispatch_fallback(state: AgentState) -> str | None:
-    """Informa o resultado persistido pelo MCP quando o modelo falha após o despacho."""
+    """Informa o estado do despacho confirmado pelo MCP."""
     evidence = state.get("email_dispatch_evidence")
     if evidence is None or not evidence.confirmed:
         return None
-    return minimize_pii(
-        "A resposta final da Secretária não foi concluída, mas o MCP confirmou: "
-        f"{evidence.message} Consulte o status do relatório antes de solicitar outro envio."
-    )
+    return minimize_pii(evidence.message)
 
 
 def _include_confirmed_email_preparation(answer: str | None, state: AgentState) -> str | None:

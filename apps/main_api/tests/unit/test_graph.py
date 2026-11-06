@@ -426,11 +426,23 @@ def test_safe_response_prefers_confirmed_email_dispatch_over_generic_failure() -
 
     result = run_safe_response_node(state)
 
-    assert "o MCP confirmou" in result["final_answer"]
-    assert "O provedor aceitou o despacho" in result["final_answer"]
-    assert "Consulte o status do relatório" in result["final_answer"]
-    assert "conteúdo solicitado permanece desconhecido" not in result["final_answer"]
-    assert result["final_answer"].count("O provedor aceitou o despacho") == 1
+    assert result["final_answer"] == ("O provedor aceitou o despacho; isso não confirma a entrega.")
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        ("pending", "O envio está em processamento."),
+        ("partial", "O MCP confirmou um despacho parcial; a entrega não está confirmada."),
+        ("failed", "O MCP confirmou que o envio falhou."),
+    ],
+)
+def test_safe_response_preserves_confirmed_dispatch_status(status, message) -> None:
+    state = request_state("Envie o relatório preparado.")
+    state["email_dispatch_evidence"] = EmailDispatchEvidence(
+        status=status, confirmed=True, message=message
+    )
+    assert run_safe_response_node(state)["final_answer"] == message
 
 
 def test_output_guardrail_reports_dispatch_when_secretary_answer_is_unavailable() -> None:
@@ -460,7 +472,7 @@ def test_output_guardrail_reports_dispatch_when_secretary_answer_is_unavailable(
 
     assert "O provedor aceitou o despacho" in result["final_answer"]
     assert "O envio não aconteceu" not in result["final_answer"]
-    assert "Consulte o status do relatório" in result["final_answer"]
+    assert "A resposta final da Secretária" not in result["final_answer"]
 
 
 def test_output_guardrail_replaces_unconfirmed_email_preparation_claim() -> None:

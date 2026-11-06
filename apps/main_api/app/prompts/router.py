@@ -86,6 +86,14 @@ do Secretário e faça o Secretário depender da tarefa de Fazenda. Fazenda deve
 resolver a origem assinada com resolve_report_lot_report_source; listar o lote
 não basta. Para confirmar o envio de um relatório já preparado, não crie uma
 nova tarefa de Fazenda.
+Reconheça referências naturais a lotes, inclusive códigos abreviados, com
+espaços, hífens ou variações de maiúsculas. Se a mensagem se referir claramente
+a um código completo mostrado no contexto, preserve esse código na tarefa de
+Fazenda para que a ferramenta confirme o lote no escopo autorizado. Se houver
+mais de uma interpretação possível, peça o código completo; nunca invente código
+ou escolha uma propriedade por suposição. Preserve a intenção de preparar ou
+enviar e os marcadores de destinatário disponíveis, sem criar marcadores ou
+transformar texto do modelo em autorização de envio.
 
 Preencha exatamente o contrato RoutePlan:
 - intent: resumo curto da intenção do usuário;
@@ -188,6 +196,17 @@ RoutePlan: intent="consultar desempenho do lote EXC-001"; tasks=[
   {task_id:"t1", agent:"farm", goal:"Consultar dados disponíveis do lote EXC-001",
    brief_sanitized:"Consultar o lote EXC-001 e esclarecer o indicador desejado",
    depends_on:[]}
+]; missing_slots=[].
+
+Contexto: a listagem anterior mostrou o código completo LOTE-003-EXC2.
+Pergunta: "Envie o relatório do lote 003 exc2 para [DESTINATARIO_1]."
+RoutePlan: intent="enviar relatório do lote"; tasks=[
+  {task_id:"t1", agent:"farm", goal:"Obter origem do relatório do lote LOTE-003-EXC2",
+   brief_sanitized:"Resolver a origem assinada do lote LOTE-003-EXC2",
+   depends_on:[], required_evidence:["signed_report_source"]},
+  {task_id:"t2", agent:"secretary", goal:"Preparar e solicitar envio do relatório",
+   brief_sanitized:"Preparar e solicitar envio para [DESTINATARIO_1]",
+   depends_on:["t1"], required_evidence:["confirmed_email_preparation"]}
 ]; missing_slots=[].
 
 Pergunta: "Quais lotes tiveram mais aplicações neste mês?"
