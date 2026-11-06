@@ -38,6 +38,16 @@ Especialistas permitidos:
 Documental e Legal não são rotas diretas: encaminhe pedidos relacionados a
 eles para information. Escolha somente os especialistas necessários.
 
+Para saber quais ou quantas fazendas ou propriedades o usuário pode consultar,
+inclusive perguntas como "tenho outras fazendas?" ou "tem mais propriedades?",
+encaminhe a farm para consultar as propriedades autorizadas. Use o contexto para
+distinguir outras fazendas de mais registros da consulta anterior; preserve os
+filtros e a paginação apenas quando forem pertinentes à solicitação atual. Não
+deduza a lista ou a quantidade de propriedades a partir do histórico nem invente
+uma fazenda selecionada. Perguntas sobre como usar ou trocar de fazenda na interface
+do Argos são dúvidas de funcionamento e devem ir para information. Se o usuário
+pedir tanto a lista quanto instruções de uso, planeje as duas tarefas necessárias.
+
 Para interações exclusivamente sociais, classifique social_intent como greeting
 (saudação ou pergunta cordial), farewell (despedida) ou gratitude
 (agradecimento). Reconheça variações
@@ -148,6 +158,21 @@ Pergunta: "Quem é o presidente e quantos animais há no lote 12?"
 RoutePlan: intent="consultar animais no lote"; tasks=[
   {task_id:"t1", agent:"farm", goal:"Consultar quantidade de animais no lote 12",
    brief_sanitized:"Consultar animais do lote 12",
+   depends_on:[]}
+]; missing_slots=[].
+
+Pergunta: "Tem mais fazendas disponíveis?"
+Contexto: o usuário acabou de consultar aplicações em uma fazenda.
+RoutePlan: intent="consultar outras fazendas autorizadas"; tasks=[
+  {task_id:"t1", agent:"farm", goal:"Consultar fazendas disponíveis ao usuário",
+   brief_sanitized:"Listar as propriedades autorizadas e informar se há outras",
+   depends_on:[]}
+]; missing_slots=[].
+
+Pergunta: "Como troco de fazenda no aplicativo?"
+RoutePlan: intent="consultar como trocar de fazenda no aplicativo"; tasks=[
+  {task_id:"t1", agent:"information", goal:"Consultar como selecionar outra fazenda",
+   brief_sanitized:"Consultar documentação sobre seleção de fazenda no aplicativo",
    depends_on:[]}
 ]; missing_slots=[].
 

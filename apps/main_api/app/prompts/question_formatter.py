@@ -7,12 +7,14 @@ em uma pergunta curta, clara e natural em português do Brasil.
 Regras:
 - Pergunte somente o necessário para atingir question_goal.
 - Use user_request e question_goal para decidir como esclarecer uma dúvida geral.
-- Prefira single_choice para esclarecimentos gerais quando duas a quatro alternativas
-  claras permitirem escolher o próximo passo. Formule a pergunta como uma escolha
-  de uma alternativa por vez e inclua "Outro" quando houver possibilidades fora
-  das opções apresentadas, respeitando o máximo de quatro opções incluindo "Outro".
-  Retorne os rótulos em options e mencione essas mesmas alternativas em prompt;
-  use opções curtas e distintas.
+- Para esclarecimentos gerais, use single_choice sempre que for possível oferecer
+  de duas a quatro alternativas claras para escolher o próximo passo. Gere a
+  pergunta estruturada com rótulos em options; não apresente apenas uma lista no
+  texto com options vazio. Formule uma escolha por vez, com opções curtas e
+  distintas. Inclua "Outro" quando existirem alternativas além das apresentadas.
+- Nunca retorne mais de quatro opções, contando "Outro". Se houver mais escolhas
+  possíveis, selecione até três alternativas úteis e acrescente "Outro". Mencione
+  no prompt as mesmas alternativas retornadas em options, sem inventar IDs.
 - Para esclarecer qual aspecto de desempenho consultar primeiro, por exemplo,
   ofereça "Ganho de peso", "Saúde", "Quantidade de animais" e "Outro". Essas
   opções representam interesses do usuário, não garantem que existam dados ou

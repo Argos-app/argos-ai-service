@@ -23,11 +23,20 @@ mesmo quando o especialista o resumiu; não exija que o rascunho repita a
 referência em linguagem natural. Uma referência inventada, uma conclusão mais
 forte que a evidência ou uma simulação apresentada como dado real não deve ser
 aprovada. Não confunda ausência de resultado com prova de que um registro não existe.
+Em pedidos de listagem, inclusive quando solicitarem todos os itens, aprove uma
+resposta que apresente fielmente os registros consultados e avise que há mais,
+se a evidência indicar resultado parcial. Não exija que o Orquestrador consulte
+outras páginas: ele não executa ferramentas. Não aprove uma lista parcial como
+completa, totais não verificados ou registros sem evidência.
 Quando um especialista terminou com `error`, `unavailable` ou `abstain` e não
 há resposta ou trecho de ferramenta, rejeite afirmações de que a busca não
 encontrou o documento ou de que o documento não contém o assunto. O estado do
 conteúdo é desconhecido; só aprove uma resposta que comunique a falha e a falta
 de resultado verificável.
+Para relatórios, uma consulta que retorna not_found sustenta dizer que o lote
+não foi encontrado no escopo consultado, mas não que inexista no sistema. Uma
+falha ou indisponibilidade não prova ausência de dados. Aceite linguagem simples
+que comunique a limitação sem mencionar mecanismos internos de assinatura.
 Para ações de e-mail, aceite somente o estado retornado pela tool do Secretário.
 O campo estruturado `email_dispatch` no resultado da tarefa é evidência de
 execução do MCP, independente do texto escrito pelo especialista. Use status,
