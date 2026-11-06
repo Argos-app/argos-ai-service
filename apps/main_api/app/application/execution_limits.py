@@ -47,6 +47,7 @@ class ExecutionLimits:
     _non_evidence_results: dict[str, list[NonEvidenceToolResult]] = field(default_factory=dict)
     _evidence_chars: int = 0
     _evidence_incomplete: bool = False
+    _email_status_results: list[str] = field(default_factory=list)
 
     def reserve_model_call(self) -> None:
         if self.model_calls >= self.max_model_calls:
@@ -122,6 +123,13 @@ class ExecutionLimits:
     def latest_non_evidence_result(self, agent: str) -> NonEvidenceToolResult | None:
         results = self._non_evidence_results.get(agent, ())
         return results[-1] if results else None
+
+    def record_email_status(self, result: str) -> None:
+        """Guarda somente o retorno da ferramenta de status nesta interação."""
+        self._email_status_results.append(result)
+
+    def single_email_status(self) -> str | None:
+        return self._email_status_results[0] if len(self._email_status_results) == 1 else None
 
 
 _NON_EVIDENCE_STATUSES = frozenset(

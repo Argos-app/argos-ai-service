@@ -1,8 +1,10 @@
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -20,6 +22,8 @@ from app.agent_schemas.results import (
     SpecialistResult,
 )
 from app.agent_schemas.synthesis import EmailDispatchEvidence, OrchestratorResult, TaskOutcome
+from app.agents.tools.email import build_email_status_tool
+from app.graph.secretary_workflow import process_secretary_flow
 from app.graph.specialist_helpers import (
     email_dispatch_recovery_context as _email_dispatch_recovery_context,
 )
@@ -76,6 +80,50 @@ class FakeFactory:
 
     def create(self, agent_id: AgentId) -> FakeAgent:
         return self.agents[agent_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["status", "send", "multiple", "unidentified"])
+async def test_status_tool_evidence_is_limited_to_unambiguous_status_queries(mode):
+    operation_id, report_id = str(uuid4()), str(uuid4())
+
+    class StatusWorkflow:
+        async def status(self, *, authorization_id, configurable):
+            return json.dumps(
+                {
+                    "status": "accepted",
+                    "confirmed": True,
+                    "operation_id": operation_id if mode != "unidentified" else None,
+                    "report_id": report_id,
+                    "message": "O provedor aceitou o despacho; isso não confirma a entrega.",
+                }
+            )
+
+    limits = ExecutionLimits(5, 5)
+    tool = build_email_status_tool(StatusWorkflow())
+    with execution_limits_scope(limits):
+        config = {"configurable": {"argos_execution_limits": limits}}
+        await tool.ainvoke({}, config=config)
+        if mode == "multiple":
+            await tool.ainvoke({}, config=config)
+        state = request_state()
+        state["send_intent_requested"] = mode == "send"
+        flow = await process_secretary_flow(
+            state,
+            agent_id=AgentId.SECRETARY,
+            result=SpecialistResult(agent="secretary", status="success"),
+            failure_reason=None,
+            errors=[],
+            email_preparations=None,
+            email_dispatch=None,
+            config=None,
+        )
+    if mode == "status":
+        assert flow.email_dispatch_evidence is not None
+        assert flow.email_dispatch_evidence.operation_id == operation_id
+        assert flow.email_dispatch_evidence.report_id == report_id
+    else:
+        assert flow.email_dispatch_evidence is None
 
 
 def test_synthesis_timeout_leaves_room_for_agent_output_persistence():

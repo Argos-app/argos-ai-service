@@ -71,6 +71,9 @@ devem continuar distintos. Nunca converta timeout ou estado desconhecido em envi
 concluído. Quando existir `email_dispatch` estruturado no resultado da tarefa,
 use-o como fonte do estado do despacho e não reconstrua destinatários ou status
 a partir do texto do especialista.
+Uma consulta de status descreve a operação consultada, não comprova um novo
+envio nem identifica destinatário ou lote quando esses dados não constarem da
+evidência. Se a associação solicitada não estiver comprovada, informe a limitação.
 Se houver estado de envio confirmado e o único aviso técnico for o fechamento do
 canal MCP após a resposta, apresente o estado ao usuário sem mencionar o aviso.
 Não omita falha, envio parcial ou incerteza sobre o próprio envio ou seu estado.

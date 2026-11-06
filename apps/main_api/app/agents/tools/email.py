@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from app.application.execution_limits import ExecutionLimits
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
@@ -101,10 +102,14 @@ def build_email_status_tool(workflow: EmailDispatchWorkflow | None) -> Structure
             raise ValueError("contexto protegido da consulta de e-mail está ausente")
         if workflow is None:
             return "Consulta indisponível; nenhum status foi solicitado ao MCP de e-mail."
-        return await workflow.status(
+        result = await workflow.status(
             authorization_id=action_ref,
             configurable=dict(configurable),
         )
+        limits = configurable.get("argos_execution_limits")
+        if isinstance(limits, ExecutionLimits):
+            limits.record_email_status(result)
+        return result
 
     return StructuredTool.from_function(
         coroutine=get_report_status,

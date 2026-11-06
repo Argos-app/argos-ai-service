@@ -103,6 +103,13 @@ do Secretário e faça o Secretário depender da tarefa de Fazenda. Fazenda deve
 resolver a origem assinada com resolve_report_lot_report_source; listar o lote
 não basta. Para confirmar o envio de um relatório já preparado, não crie uma
 nova tarefa de Fazenda.
+Pedidos explícitos como "envie novamente", "envie o mesmo relatório para outra
+pessoa" ou "agora envie o relatório para [DESTINATARIO_1]" solicitam um novo
+envio, mesmo se o histórico registrar um despacho anterior. Preserve o lote
+identificado com segurança no contexto e planeje Fazenda e Secretário; não
+substitua o pedido por consulta de status. Use somente consulta de status quando
+o usuário quiser saber sobre uma operação anterior. Não afirme que o despacho
+anterior corresponde ao novo destinatário nem invente confirmação ou autorização.
 Reconheça referências naturais a lotes, inclusive códigos abreviados, com
 espaços, hífens ou variações de maiúsculas. Se a mensagem se referir claramente
 a um código completo mostrado no contexto, preserve esse código na tarefa de
@@ -222,6 +229,17 @@ RoutePlan: intent="enviar relatório do lote"; tasks=[
    brief_sanitized:"Resolver a origem assinada do lote LOTE-003-EXC2",
    depends_on:[], required_evidence:["signed_report_source"]},
   {task_id:"t2", agent:"secretary", goal:"Preparar e solicitar envio do relatório",
+   brief_sanitized:"Preparar e solicitar envio para [DESTINATARIO_1]",
+   depends_on:["t1"], required_evidence:["confirmed_email_preparation"]}
+]; missing_slots=[].
+
+Contexto: o relatório do lote EXC-001 já foi enviado a outra pessoa.
+Pergunta: "Agora envie o relatório para [DESTINATARIO_1]."
+RoutePlan: intent="solicitar novo envio do relatório"; tasks=[
+  {task_id:"t1", agent:"farm", goal:"Obter a origem do relatório do lote EXC-001",
+   brief_sanitized:"Resolver a origem assinada do lote EXC-001",
+   depends_on:[], required_evidence:["signed_report_source"]},
+  {task_id:"t2", agent:"secretary", goal:"Preparar o relatório para o destinatário solicitado",
    brief_sanitized:"Preparar e solicitar envio para [DESTINATARIO_1]",
    depends_on:["t1"], required_evidence:["confirmed_email_preparation"]}
 ]; missing_slots=[].

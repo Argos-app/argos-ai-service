@@ -53,6 +53,8 @@ execução do MCP, independente do texto escrito pelo especialista. Use status,
 desconhecido. `accepted` indica aceite pelo provedor, não entrega ou leitura;
 não aprove a afirmação de envio concluído quando o estado for `pending` ou
 `unknown`.
+O estado consultado confirma apenas a operação identificada; não aprove sua
+atribuição a outro destinatário, lote ou novo envio sem evidência correspondente.
 
 Retorne somente um objeto JSON curto com decision (approved, revise ou rejected),
 reason e unsupported_claims. Se não conseguir emitir JSON, retorne uma linha

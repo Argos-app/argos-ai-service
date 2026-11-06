@@ -9,6 +9,7 @@ from uuid import UUID
 from app.agent_schemas.results import SpecialistResult, SpecialistStatus
 from app.agent_schemas.synthesis import EmailDispatchEvidence
 from app.application.email_dispatch_workflow import EmailDispatchWorkflow
+from app.application.execution_limits import current_execution_limits
 from app.domain.email_preparations import EmailPreparation, PendingRecipientResolution
 from app.graph.specialist_helpers import email_dispatch_recovery_context
 from app.graph.state import AgentState
@@ -138,6 +139,18 @@ async def process_secretary_flow(
                 action_summary = (
                     "O MCP não confirmou o estado do envio; nenhum novo envio foi solicitado."
                 )
+    elif agent_id == AgentId.SECRETARY and not state.get("send_intent_requested"):
+        limits = current_execution_limits()
+        status_result = limits.single_email_status() if limits is not None else None
+        if status_result is not None:
+            try:
+                candidate = EmailDispatchEvidence.model_validate_json(status_result)
+                UUID(str(candidate.operation_id))
+                UUID(str(candidate.report_id))
+                dispatch_evidence = candidate
+                action_summary = candidate.message
+            except ValueError, TypeError:
+                pass
 
     return SecretaryFlowResult(
         result=result,
