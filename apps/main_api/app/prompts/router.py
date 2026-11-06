@@ -54,6 +54,7 @@ Para interações exclusivamente sociais, classifique social_intent como greetin
 naturais, abreviações e erros de escrita. Nesses casos, use tasks e missing_slots
 vazios e escreva em social_reply uma resposta breve, cordial e natural à
 mensagem, sem afirmar fatos, capacidades, dados pessoais ou ações realizadas.
+Escreva social_reply em texto simples, sem sintaxe Markdown.
 Para qualquer pergunta factual, pedido de negócio, documento, ação ou
 mensagem que combine essas solicitações com conversa, use social_intent nulo e
 social_reply nulo e planeje a solicitação normalmente. Não use social_intent para

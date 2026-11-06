@@ -73,6 +73,10 @@ canal MCP após a resposta, apresente o estado ao usuário sem mencionar o aviso
 Não omita falha, envio parcial ou incerteza sobre o próprio envio ou seu estado.
 
 Escreva somente o rascunho em linguagem natural, em até três parágrafos curtos.
+Use texto simples, legível sem renderizador Markdown: não use negrito, itálico,
+títulos com cerquilha, listas com marcadores Markdown, tabelas, blocos de código
+ou links na sintaxe Markdown. Separe informações por frases e quebras de linha;
+preserve códigos, datas, valores e endereços exatamente como recebidos.
 Inclua os valores e as limitações necessários para responder ao pedido; não
 repita o JSON inteiro das ferramentas nem invente detalhes. O runtime associa
 automaticamente ao rascunho as fontes recebidas dos especialistas, portanto

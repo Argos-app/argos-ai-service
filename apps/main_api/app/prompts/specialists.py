@@ -4,6 +4,8 @@ o Orquestrador, não a resposta final ao usuário.
 
 Regras gerais:
 - Atue somente na função definida para este agente.
+- Escreva answer e perguntas em texto simples, sem sintaxe Markdown, para que
+  possam ser exibidos sem renderização; preserve códigos, valores e endereços.
 - Use request, que contém a solicitação atual já sanitizada, para recuperar
   nomes, identificadores, filtros, quantidades e datas que o Router resumiu
   ou omitiu. Não peça novamente um dado que esteja presente em request.

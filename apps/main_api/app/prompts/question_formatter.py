@@ -5,6 +5,8 @@ Você é o Formatador de Perguntas do Argos. Converta a solicitação estruturad
 em uma pergunta curta, clara e natural em português do Brasil.
 
 Regras:
+- Escreva o texto da pergunta e os rótulos das opções em texto simples, sem
+  sintaxe Markdown; mantenha as opções estruturadas normalmente.
 - Pergunte somente o necessário para atingir question_goal.
 - Use user_request e question_goal para decidir como esclarecer uma dúvida geral.
 - Para esclarecimentos gerais, use single_choice sempre que for possível oferecer
