@@ -7,9 +7,10 @@ from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
 
 from argos_mcp_email.ports.report_renderer import RenderedReport
 from packages.contracts import LotReportData, RecipientRef
@@ -94,25 +95,73 @@ class TemplateReportRenderer:
 
 def _render_pdf(subject: str, body: str) -> bytes:
     output = BytesIO()
-    document = SimpleDocTemplate(output, leftMargin=20 * mm, rightMargin=20 * mm)
+    document = SimpleDocTemplate(
+        output,
+        pagesize=A4,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=27 * mm,
+        bottomMargin=22 * mm,
+    )
     title_style = ParagraphStyle(
         "title",
         fontName="Helvetica-Bold",
-        fontSize=19,
-        leading=24,
-        textColor=colors.HexColor("#234b39"),
-        spaceAfter=16,
+        fontSize=20,
+        leading=26,
+        textColor=colors.HexColor("#183b2c"),
+        spaceAfter=12,
     )
     text_style = ParagraphStyle(
         "body",
         fontName="Helvetica",
-        fontSize=10,
+        fontSize=9.5,
         leading=15,
         alignment=TA_LEFT,
         textColor=colors.HexColor("#24332b"),
+        spaceAfter=3,
     )
-    content = [Paragraph(escape(subject), title_style)]
+    section_style = ParagraphStyle(
+        "section",
+        parent=text_style,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=15,
+        textColor=colors.HexColor("#234b39"),
+        spaceBefore=12,
+        spaceAfter=5,
+        keepWithNext=True,
+    )
+    content = [
+        Paragraph(escape(subject), title_style),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#dce7df")),
+        Spacer(1, 8),
+    ]
     for line in body.splitlines():
-        content.append(Paragraph(escape(line), text_style) if line else Spacer(1, 7))
-    document.build(content)
+        if line and set(line) <= {"-", "="}:
+            continue
+        if line == "ARGOS | RELATÓRIO DE LOTE":
+            continue
+        style = (
+            section_style
+            if line in {"IDENTIFICAÇÃO", "APLICAÇÕES", "ANIMAIS EM EXCEÇÃO"}
+            else text_style
+        )
+        content.append(Paragraph(escape(line), style) if line else Spacer(1, 3))
+
+    def draw_frame(canvas, doc):
+        canvas.saveState()
+        width, _ = A4
+        canvas.setFillColor(colors.HexColor("#234b39"))
+        canvas.setFont("Helvetica-Bold", 10)
+        canvas.drawString(doc.leftMargin, A4[1] - 17 * mm, "ARGOS")
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#718078"))
+        canvas.drawRightString(width - doc.rightMargin, A4[1] - 17 * mm, "RELATÓRIO DE LOTE")
+        canvas.setStrokeColor(colors.HexColor("#dce7df"))
+        canvas.line(doc.leftMargin, 16 * mm, width - doc.rightMargin, 16 * mm)
+        canvas.drawString(doc.leftMargin, 11 * mm, "Argos | Informações da consulta")
+        canvas.drawRightString(width - doc.rightMargin, 11 * mm, f"Página {doc.page}")
+        canvas.restoreState()
+
+    document.build(content, onFirstPage=draw_frame, onLaterPages=draw_frame)
     return output.getvalue()

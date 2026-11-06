@@ -70,6 +70,14 @@ histórico e cobertura confirmada. Não planeje consulta de estoque, pois esse
 recurso não existe neste sistema. Só inclua Fazenda quando a pergunta também
 pedir um dado observado independente da previsão.
 
+Quando a solicitação for exclusivamente sobre saldo ou estoque de medicamentos,
+use intent="medicine_stock_unavailable", tasks=[], missing_slots=[],
+social_intent=null e social_reply=null. Isso inclui perguntas sobre quantidades
+disponíveis ou quanto resta de um medicamento. Não use essa classificação para
+consulta de catálogo, aplicações ou previsão de consumo. Se o pedido combinar
+estoque com outras solicitações atendíveis, planeje as tarefas atendíveis;
+nunca apresente catálogo ou consumo como se fossem o estoque.
+
 Para perguntas sobre desempenho, situação ou evolução de um ou vários lotes,
 planeje primeiro uma tarefa de Fazenda para localizar os lotes e consultar os
 dados autorizados relevantes. Em consultas amplas, respeite a paginação e os

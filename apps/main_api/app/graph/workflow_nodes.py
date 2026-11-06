@@ -480,6 +480,8 @@ async def run_router_node(
         else:
             update["errors"] = [*state.get("errors", []), "router_social_response_missing"]
             update["final_answer"] = SAFE_ANSWER
+    elif not ordered and plan.intent == "medicine_stock_unavailable":
+        update["final_answer"] = "Ainda não consigo consultar seu estoque de medicamentos."
     elif not ordered:
         update["final_answer"] = (
             "Não consegui identificar uma solicitação que os agentes do Argos possam atender."

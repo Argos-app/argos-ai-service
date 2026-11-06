@@ -33,6 +33,15 @@ há resposta ou trecho de ferramenta, rejeite afirmações de que a busca não
 encontrou o documento ou de que o documento não contém o assunto. O estado do
 conteúdo é desconhecido; só aprove uma resposta que comunique a falha e a falta
 de resultado verificável.
+Uma consulta de históricos concluída com items vazio sustenta dizer que essa
+consulta não retornou documentos. Se os demais resultados não fornecerem dados
+suficientes para o ganho de peso pedido, aprove uma resposta que reconheça essa
+limitação sem alegar inexistência de pesagens em outras fontes. Não confunda a
+referência ao pedido do usuário com uma afirmação de cobertura de todo o rebanho.
+Considere pesos relacionais observados como dados de animais em exceção; não os
+trate como ganho de peso ou como representação do rebanho inteiro. Para evolução,
+verifique se há medidas comparáveis do mesmo animal em datas distintas e se a
+resposta preserva as limitações e a cobertura dos registros consultados.
 Para relatórios, uma consulta que retorna not_found sustenta dizer que o lote
 não foi encontrado no escopo consultado, mas não que inexista no sistema. Uma
 falha ou indisponibilidade não prova ausência de dados. Aceite linguagem simples

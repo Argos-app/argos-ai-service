@@ -125,6 +125,28 @@ async def test_empty_route_is_not_retried_or_rewritten_by_keyword_rules():
 
 
 @pytest.mark.asyncio
+async def test_stock_unavailable_message_does_not_skip_other_tasks():
+    router = FakeAgent(RoutePlan(intent="medicine_stock_unavailable"))
+    update = await run_router_node(
+        request_state("Qual meu estoque de medicamentos?"), factory=FakeFactory(router=router)
+    )
+    assert update["final_answer"] == "Ainda não consigo consultar seu estoque de medicamentos."
+
+    graph = build_graph(
+        FakeFactory(router=FakeAgent(RoutePlan(intent="medicine_stock_unavailable")))
+    )
+    result = await graph.ainvoke(request_state("Qual meu estoque de medicamentos?"))
+    assert result["final_answer"] == update["final_answer"]
+
+    router = FakeAgent(RoutePlan(intent="medicine_stock_unavailable", tasks=(task(),)))
+    update = await run_router_node(
+        request_state("E as aplicações?"), factory=FakeFactory(router=router)
+    )
+    assert "final_answer" not in update
+    assert update["ordered_tasks"][0].agent.value == "farm"
+
+
+@pytest.mark.asyncio
 async def test_social_classification_does_not_bypass_planned_business_task():
     router = FakeAgent(
         RoutePlan(
