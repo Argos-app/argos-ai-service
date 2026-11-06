@@ -437,14 +437,23 @@ async def run_router_node(
 ) -> dict:
     called = [*state.get("called_agents", []), AgentId.ROUTER.value]
     try:
-        response = await factory.create(AgentId.ROUTER).run(
-            RouterInput(
-                message=state["sanitized_message"],
-                session_context=_history_context(state),
-            ),
-            context=build_agent_context(state, config=config),
+        router = factory.create(AgentId.ROUTER)
+        router_input = RouterInput(
+            message=state["sanitized_message"],
+            session_context=_history_context(state),
         )
-        plan = RoutePlan.model_validate(response)
+        context = build_agent_context(state, config=config)
+        for attempt in range(2):
+            try:
+                response = await router.run(router_input, context=context)
+                plan = RoutePlan.model_validate(response)
+                break
+            except ExecutionEventWriteError:
+                raise
+            except Exception as exc:
+                if attempt or _agent_failure_reason("router", exc) != "router_invalid_output":
+                    raise
+                _LOGGER.warning("saída inválida do roteador; tentando novamente")
         ordered = order_tasks(plan)
     except ExecutionEventWriteError:
         raise

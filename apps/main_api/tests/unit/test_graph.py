@@ -47,7 +47,8 @@ from app.graph.workflow_nodes import (
 from app.infrastructure.agents.execution_limits import ExecutionLimits, execution_limits_scope
 from app.ports.agent import AgentId
 from app.ports.execution_event_repository import ExecutionEventWriteError
-from langchain_core.messages import HumanMessage
+from langchain.agents.structured_output import StructuredOutputValidationError
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 
@@ -122,6 +123,92 @@ async def test_empty_route_is_not_retried_or_rewritten_by_keyword_rules():
     assert len(router.calls) == 1
     assert "missing_fields" not in update
     assert "Não consegui identificar" in update["final_answer"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_output",
+    [
+        {"intent": ""},
+        StructuredOutputValidationError("RoutePlan", ValueError("invalid"), AIMessage(content="")),
+    ],
+)
+async def test_router_retries_invalid_structured_output_once(invalid_output):
+    router = FakeAgent(invalid_output, RoutePlan(intent="consultar lote", tasks=(task(),)))
+    update = await run_router_node(request_state(), factory=FakeFactory(router=router))
+    assert len(router.calls) == 2
+    assert update["route"] == ["farm"]
+    assert "errors" not in update
+
+
+@pytest.mark.asyncio
+async def test_router_retry_is_bounded_and_does_not_retry_other_failures():
+    router = FakeAgent({"intent": ""}, {"intent": ""})
+    update = await run_router_node(request_state(), factory=FakeFactory(router=router))
+    assert len(router.calls) == 2
+    assert update["errors"] == ["router_invalid_output"]
+    assert update["final_answer"] == ROUTER_UNAVAILABLE_ANSWER
+
+    router = FakeAgent(TimeoutError())
+    update = await run_router_node(request_state(), factory=FakeFactory(router=router))
+    assert len(router.calls) == 1
+    assert update["errors"] == ["router_provider_timeout"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_started", [False, True])
+async def test_farm_retries_invalid_output_only_before_any_tool(tool_started):
+    limits = ExecutionLimits(4, 4)
+
+    class FarmAgent(FakeAgent):
+        async def run(self, input, *, context=None):
+            if not self.calls and tool_started:
+                limits.reserve_tool_call()
+            return await super().run(input, context=context)
+
+    error = StructuredOutputValidationError(
+        "SpecialistResult", ValueError("invalid"), AIMessage(content="")
+    )
+    agent = FarmAgent(
+        error,
+        SpecialistResult(agent="farm", status="needs_clarification", missing_fields=("lote",)),
+    )
+    state = request_state()
+    state.update(ordered_tasks=(task(agent="farm"),), current_task_index=0)
+    with execution_limits_scope(limits):
+        update = await run_specialist_node(
+            state, factory=FakeFactory(farm=agent), agent_id=AgentId.FARM
+        )
+    assert len(agent.calls) == (1 if tool_started else 2)
+    if tool_started:
+        assert "farm_invalid_output" in update["errors"]
+    else:
+        assert update["task_outcomes"][0].result.status == "needs_clarification"
+
+
+@pytest.mark.asyncio
+async def test_farm_does_not_retry_without_execution_limits():
+    agent = FakeAgent(ValueError("invalid"))
+    state = request_state()
+    state.update(ordered_tasks=(task(agent="farm"),), current_task_index=0)
+    update = await run_specialist_node(
+        state, factory=FakeFactory(farm=agent), agent_id=AgentId.FARM
+    )
+    assert len(agent.calls) == 1
+    assert "farm_invalid_output" in update["errors"]
+
+
+@pytest.mark.asyncio
+async def test_farm_retries_at_most_once():
+    agent = FakeAgent(ValueError("invalid"), ValueError("invalid"))
+    state = request_state()
+    state.update(ordered_tasks=(task(agent="farm"),), current_task_index=0)
+    with execution_limits_scope(ExecutionLimits(4, 4)):
+        update = await run_specialist_node(
+            state, factory=FakeFactory(farm=agent), agent_id=AgentId.FARM
+        )
+    assert len(agent.calls) == 2
+    assert "farm_invalid_output" in update["errors"]
 
 
 @pytest.mark.asyncio

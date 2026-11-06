@@ -124,8 +124,30 @@ async def execute_specialist(
                 agent_input = agent_input.model_copy(
                     update={"email_preparation_count": len(active_preparations)}
                 )
-            response = await factory.create(agent_id).run(agent_input, context=context)
-            result = SpecialistResult.model_validate(response)
+            specialist = factory.create(agent_id)
+            limits = context.get("argos_execution_limits")
+            initial_tool_calls = limits.tool_calls if isinstance(limits, ExecutionLimits) else None
+            for attempt in range(2):
+                try:
+                    response = await specialist.run(agent_input, context=context)
+                    result = SpecialistResult.model_validate(response)
+                    break
+                except ExecutionEventWriteError:
+                    raise
+                except Exception as exc:
+                    if (
+                        attempt
+                        or agent_id != AgentId.FARM
+                        or not isinstance(limits, ExecutionLimits)
+                        or limits.tool_calls != initial_tool_calls
+                        or limits.evidence_for(agent_id.value)
+                        or limits.latest_non_evidence_result(agent_id.value) is not None
+                        or agent_failure_reason(agent_id.value, exc) != "farm_invalid_output"
+                    ):
+                        raise
+                    _LOGGER.warning(
+                        "saída inválida do Fazenda antes de ferramentas; tentando novamente"
+                    )
             if result.agent.value != agent_id.value:
                 raise ValueError("specialist_agent_mismatch")
             if agent_id in {
